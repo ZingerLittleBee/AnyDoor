@@ -1,7 +1,9 @@
 # Development and verification
 
 The package requires Swift 6 language mode and macOS 14 or later. The exact CI
-toolchain is the `XCODE_APP` value in [ci.yml](../.github/workflows/ci.yml);
+and release toolchain is the Xcode build pinned in
+[macos-toolchain.env](../.github/macos-toolchain.env), selected on runners by the
+[setup action](../.github/actions/setup-macos-toolchain/action.yml);
 [Package.swift](../Package.swift) defines the package tools version and targets.
 Use those files rather than a copied toolchain-version list.
 
@@ -18,7 +20,9 @@ Use those files rather than a copied toolchain-version list.
 | Search current source and reference text | `python3 scripts/search.py PATTERN` |
 
 `make check` and CI call [the same Swift runner](../scripts/check-swift.sh).
-It selects the pinned Xcode per process when installed, invokes that Xcode's
+It selects the pinned Xcode per process when installed at the pinned path,
+accepts any active Xcode whose `version.plist` reports the pinned build (so a
+plain `/Applications/Xcode.app` of the same build matches), invokes that Xcode's
 default Swift compiler directly, reports the compiler, fails on first-party
 warnings, and runs `swift test --skip-build`. Unset `TOOLCHAINS`, `SWIFT_EXEC`,
 and `SWIFT_DRIVER_SWIFT_FRONTEND_EXEC` for this lane so an inherited compiler

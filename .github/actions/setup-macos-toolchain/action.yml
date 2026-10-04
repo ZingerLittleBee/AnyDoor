@@ -1,0 +1,25 @@
+name: Set up the pinned macOS toolchain
+description: Select the Xcode pinned in .github/macos-toolchain.env and verify its exact build.
+
+runs:
+  using: composite
+  steps:
+    - name: Select and verify Xcode
+      shell: bash
+      run: |
+        set -euo pipefail
+        pin_file=.github/macos-toolchain.env
+        xcode_app="$(sed -n 's/^XCODE_APP=//p' "$pin_file")"
+        xcode_build="$(sed -n 's/^XCODE_BUILD=//p' "$pin_file")"
+        if [[ -z "$xcode_app" || -z "$xcode_build" ]]; then
+          echo "::error file=$pin_file::XCODE_APP and XCODE_BUILD are required"
+          exit 1
+        fi
+        sudo xcode-select -s "$xcode_app"
+        actual_build="$(xcodebuild -version | sed -n 's/^Build version //p')"
+        if [[ "$actual_build" != "$xcode_build" ]]; then
+          echo "::error file=$pin_file::$xcode_app is build $actual_build, expected $xcode_build"
+          exit 1
+        fi
+        xcodebuild -version
+        swift --version

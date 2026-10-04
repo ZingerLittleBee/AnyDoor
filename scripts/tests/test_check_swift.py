@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +12,12 @@ import unittest
 RUNNER = Path(__file__).resolve().parents[1] / "check-swift.sh"
 
 
+def write_build(developer: Path, build: str) -> None:
+    """Record an Xcode build the way Xcode.app/Contents/version.plist does."""
+    with (developer.parent / "version.plist").open("wb") as handle:
+        plistlib.dump({"ProductBuildVersion": build}, handle)
+
+
 class SwiftCheckTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -18,11 +25,13 @@ class SwiftCheckTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         (self.root / "scripts").mkdir()
         shutil.copy(RUNNER, self.root / "scripts/check-swift.sh")
-        (self.root / ".github/workflows").mkdir(parents=True)
+        (self.root / ".github").mkdir()
         self.pinned_xcode = self.root / "Pinned Xcode.app"
         self.developer = self.pinned_xcode / "Contents/Developer"
-        (self.root / ".github/workflows/ci.yml").write_text(
-            f"env:\n  XCODE_APP: {self.pinned_xcode}\n"
+        (self.root / ".github/macos-toolchain.env").write_text(
+            "# comment\n"
+            f"XCODE_APP={self.pinned_xcode}\n"
+            "XCODE_BUILD=27A100\n"
         )
         binaries = self.root / "bin"
         binaries.mkdir()
@@ -52,6 +61,13 @@ class SwiftCheckTests(unittest.TestCase):
         alternate = self.other_developer / "Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
         alternate.parent.mkdir(parents=True)
         shutil.copy(compiler, alternate)
+        self.same_build_developer = self.root / "Xcode.app/Contents/Developer"
+        same_build = self.same_build_developer / "Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
+        same_build.parent.mkdir(parents=True)
+        shutil.copy(compiler, same_build)
+        write_build(self.developer, "27A100")
+        write_build(self.other_developer, "26F999")
+        write_build(self.same_build_developer, "27A100")
         self.environment = os.environ.copy()
         self.environment.update({
             "PATH": str(binaries) + os.pathsep + self.environment["PATH"],
@@ -92,6 +108,22 @@ class SwiftCheckTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("does not establish CI compiler compatibility", result.stderr)
+
+    def test_pinned_build_at_another_path_is_not_a_mismatch(self):
+        result = self.run_lane(
+            "--build-only", DEVELOPER_DIR=str(self.same_build_developer)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("does not establish", result.stderr)
+
+    def test_missing_build_pin_fails(self):
+        (self.root / ".github/macos-toolchain.env").write_text(
+            f"XCODE_APP={self.pinned_xcode}\n"
+        )
+        result = self.run_lane("--build-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("XCODE_BUILD", result.stderr)
+        self.assertEqual(self.calls(), [])
 
     def test_first_party_warning_stops_before_tests(self):
         result = self.run_lane(FAKE_WARNING="first")

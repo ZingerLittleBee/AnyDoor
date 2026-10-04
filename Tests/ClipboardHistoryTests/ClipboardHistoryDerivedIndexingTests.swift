@@ -11,6 +11,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testProductionVisionRecognizesRepresentativeTextAndNoTextFixtures()
         async throws
     {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let recognizer = ClipboardHistoryVisionRecognizer()
 
         let text = try await recognizer.recognize(
