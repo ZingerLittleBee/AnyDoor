@@ -16,7 +16,7 @@ that the task reaches.
 | How do I add or modify a Native Plugin? | [Native Plugin playbook](agents/native-plugins.md) |
 | How do users install plugins or authors build Script Plugins? | [Plugins](plugins.md), [author toolchain](../tooling/README.md) |
 | How do automatic sync and manual backup differ? | [Config Sync](config-sync.md), [backup and sync internals](agents/architecture.md#backup-and-sync) |
-| How are Stable/Beta releases and the independent feed deployed? | [Deployment](deployment.md), [Beta Updates](beta-updates.md) |
+| How are Stable/Beta releases and the independent feed deployed? | [Deployment](deployment.md), [Beta Updates](beta-updates.md), [Releasing on GitHub Actions](releasing.md) |
 | What vocabulary does the codebase use? | [CONTEXT.md](../CONTEXT.md) |
 
 ## Documentation authority
