@@ -44,6 +44,8 @@ UNWRAP_SCRIPT = TOOLS_ROOT / "scripts" / "unwrap-release-notes.py"
 
 CI_WORKFLOW = "ci.yml"
 RELEASE_WORKFLOW = "release.yml"
+PIPELINE_SWITCH = "RELEASE_PIPELINE"
+PIPELINE_SWITCH_ON = "actions"
 CI_WORKFLOW_PATH = Path(".github") / "workflows" / CI_WORKFLOW
 
 # release.yml's run appears a few seconds after the tag push.
@@ -126,6 +128,15 @@ class Gh:
         if not isinstance(value, list):
             raise CutError(f"`gh {' '.join(args)}` did not return a JSON list")
         return value
+
+    def variable(self, name: str) -> str | None:
+        """A repository variable's value, or None when it is not set."""
+        result = run(["gh", "variable", "get", name, "--repo", self.repository], self.repo_dir, check=False)
+        if result.returncode != 0:
+            if "not found" in result.stderr:
+                return None
+            raise CutError(f"`gh variable get {name}` failed: {result.stderr.strip()}")
+        return result.stdout.strip()
 
 
 # --- release identity --------------------------------------------------------
@@ -640,6 +651,19 @@ def preflight(args: argparse.Namespace, repo: Path) -> Plan:
 
     if run(["gh", "auth", "status"], repo, check=False).returncode != 0:
         raise CutError("gh is not authenticated; run `gh auth login`")
+    warnings: list[str] = []
+    # release.yml skips every job unless this switch is on, so a tag pushed
+    # while it is off would never be published.
+    switch = gh.variable(PIPELINE_SWITCH)
+    if switch != PIPELINE_SWITCH_ON:
+        message = (
+            f"the release pipeline is off: repository variable {PIPELINE_SWITCH} is "
+            f"{'unset' if switch is None else repr(switch)}, not '{PIPELINE_SWITCH_ON}', "
+            f"so {RELEASE_WORKFLOW} would publish nothing"
+        )
+        if not args.dry_run:
+            raise CutError(message)
+        warnings.append(message)
     ci = check_ci(git, gh, head, identity.branch)
 
     published = PublishedReleases.from_json(
@@ -647,7 +671,6 @@ def preflight(args: argparse.Namespace, repo: Path) -> Plan:
     )
     published.check_monotonic(identity)
     latest_stable = published.latest_stable()
-    warnings: list[str] = []
 
     if identity.channel == "beta":
         if latest_stable is not None:

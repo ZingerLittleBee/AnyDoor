@@ -44,27 +44,6 @@ final class ReleaseVersionTests: XCTestCase {
         }
     }
 
-    func testStableEntryPointRejectsBetaIdentity() throws {
-        let result = try runReleaseEntryPoint("release.sh", arguments: ["4.2.0-beta.1"])
-
-        XCTAssertNotEqual(result.status, 0)
-        XCTAssertTrue(result.stderr.contains("use 'make beta-release 4.2.0-beta.1'"))
-    }
-
-    func testBetaEntryPointRejectsStableIdentity() throws {
-        let result = try runReleaseEntryPoint("beta-release.sh", arguments: ["4.2.0"])
-
-        XCTAssertNotEqual(result.status, 0)
-        XCTAssertTrue(result.stderr.contains("use 'make release 4.2.0'"))
-    }
-
-    func testBetaEntryPointRequiresExplicitVersion() throws {
-        let result = try runReleaseEntryPoint("beta-release.sh", arguments: [])
-
-        XCTAssertNotEqual(result.status, 0)
-        XCTAssertTrue(result.stderr.contains("Usage: scripts/beta-release.sh X.Y.Z-beta.N"))
-    }
-
     func testBumpScriptWritesAppleCompliantBetaBundleVersions() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -98,63 +77,6 @@ final class ReleaseVersionTests: XCTestCase {
         XCTAssertEqual(updated["CFBundleVersion"] as? String, "4.2.1")
     }
 
-    func testDryRunStateRestoresReleaseFilesAndIsolatesArtifacts() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-
-        let originals = [
-            "Info.plist": "original plist\n",
-            "CHANGELOG.md": "original changelog\n",
-            "appcast.xml": "original appcast\n",
-        ]
-        for (name, contents) in originals {
-            try Data(contents.utf8).write(to: directory.appendingPathComponent(name))
-        }
-        let existingDist = directory.appendingPathComponent("dist", isDirectory: true)
-        try FileManager.default.createDirectory(at: existingDist, withIntermediateDirectories: true)
-        try Data("keep\n".utf8).write(to: existingDist.appendingPathComponent("existing.txt"))
-
-        let process = Process()
-        let stderr = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [
-            "-c",
-            """
-            source "$1"
-            release_dryrun_prepare "$2"
-            state="$RELEASE_DRYRUN_STATE"
-            test "$RELEASE_DRYRUN_DIST" != "$2/dist"
-            printf 'changed plist\n' > "$2/Info.plist"
-            printf 'changed changelog\n' > "$2/CHANGELOG.md"
-            printf 'changed appcast\n' > "$2/appcast.xml"
-            mkdir -p "$RELEASE_DRYRUN_DIST"
-            printf 'candidate\n' > "$RELEASE_DRYRUN_DIST/candidate.zip"
-            release_dryrun_restore "$2"
-            test ! -e "$state"
-            """,
-            "--",
-            repositoryRoot.appendingPathComponent("scripts/release-dryrun-state.sh").path,
-            directory.path,
-        ]
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-        let error = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        XCTAssertEqual(process.terminationStatus, 0, error)
-
-        for (name, contents) in originals {
-            let restored = try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
-            XCTAssertEqual(restored, contents)
-        }
-        let existing = try String(
-            contentsOf: existingDist.appendingPathComponent("existing.txt"),
-            encoding: .utf8
-        )
-        XCTAssertEqual(existing, "keep\n")
-    }
-
     private func resolve(_ version: String) throws -> [String] {
         let result = try runResolver(version)
         XCTAssertEqual(result.status, 0, result.stderr)
@@ -175,23 +97,6 @@ final class ReleaseVersionTests: XCTestCase {
             process.terminationStatus,
             String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
                 .trimmingCharacters(in: .newlines),
-            String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        )
-    }
-
-    private func runReleaseEntryPoint(
-        _ name: String,
-        arguments: [String]
-    ) throws -> (status: Int32, stderr: String) {
-        let process = Process()
-        let stderr = Pipe()
-        process.executableURL = repositoryRoot.appendingPathComponent("scripts/\(name)")
-        process.arguments = arguments
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-        return (
-            process.terminationStatus,
             String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
     }

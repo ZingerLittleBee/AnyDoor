@@ -1,12 +1,12 @@
 .DEFAULT_GOAL := dev
-.PHONY: dev build check docs-check release-tools-check swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun beta-release beta-release-dryrun
+.PHONY: dev build check docs-check release-tools-check swift-release install uninstall sparkle-tools release release-dryrun
 
 # The `swiftbuild` backend (the default since Swift 6.4) stamps the deployment
 # target into LC_BUILD_VERSION's `sdk` field instead of the real SDK version,
 # and macOS 26+ gates the modern window appearance on that field: an unpatched
 # local build renders the legacy chrome (compact toolbar, opaque sidebar, dark
 # split divider) and no longer looks like a release. Record the real SDK
-# version, mirroring the override in scripts/release-driver.sh.
+# version, mirroring the override in scripts/release/lib.sh.
 MIN_MACOS := $(shell /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist)
 MACOS_SDK_VERSION := $(shell xcrun --show-sdk-version --sdk macosx)
 SDK_STAMP_FLAGS := -Xlinker -platform_version -Xlinker macos -Xlinker $(MIN_MACOS) -Xlinker $(MACOS_SDK_VERSION)
@@ -36,6 +36,8 @@ APP_BUNDLE := $(APP_NAME).app
 APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
 RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
+
+LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
 
 # Signs with SIGNING_IDENTITY (.env) when the certificate is present. An ad-hoc
 # signature has no team, so the app's designated requirement collapses to its
@@ -103,13 +105,29 @@ uninstall:
 	@rm -rf $(APP_DIR)
 	@echo "Removed $(APP_DIR)"
 
-# ----- Release pipeline --------------------------------------------------
+# ----- Release ---------------------------------------------------------------
 
-# Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
+# Sparkle CLI tools (generate_keys, sign_update) for key maintenance; the
+# release pipeline fetches its own pinned copy (scripts/release/release.conf).
 SPARKLE_VERSION := 2.9.2
-LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
-RELEASE_GOAL := $(filter release release-dryrun beta-release beta-release-dryrun,$(firstword $(MAKECMDGOALS)))
+
+sparkle-tools:
+	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
+
+# Cut a release: preflight, bump Info.plist, cut CHANGELOG (Stable), commit,
+# tag, and push; GitHub Actions builds, signs, and publishes it
+# (docs/releasing.md).
+#
+#   make release                     next Stable, inferred from Info.plist
+#   make release 4.3.0               explicit Stable
+#   make release 4.3.0-beta.1        Beta, from release/4.3-beta
+#   make release-dryrun [VERSION]    print the plan, change nothing
+#   make release ... YES=1           skip the confirmation prompt
+#
+# VERSION=... works as well as the positional form.
+RELEASE_GOAL := $(filter release release-dryrun,$(firstword $(MAKECMDGOALS)))
 RELEASE_VERSION := $(or $(VERSION),$(if $(RELEASE_GOAL),$(word 2,$(MAKECMDGOALS))))
+CUT_FLAGS := $(if $(RELEASE_VERSION),--version $(RELEASE_VERSION)) $(if $(YES),--yes)
 
 ifneq ($(RELEASE_GOAL),)
 ifneq ($(word 2,$(MAKECMDGOALS)),)
@@ -118,23 +136,8 @@ $(eval $(word 2,$(MAKECMDGOALS)):; @:)
 endif
 endif
 
-sparkle-tools:
-	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
+release:
+	@python3 scripts/release/cut.py $(CUT_FLAGS)
 
-notary-profile:
-	@bash -lc '$(LOAD_ENV); xcrun notarytool store-credentials "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}" --apple-id "$${APPLE_ID:?APPLE_ID is required}" --team-id "$${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"'
-
-notary-check:
-	@bash -lc '$(LOAD_ENV); xcrun notarytool history --keychain-profile "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}"'
-
-release: sparkle-tools
-	@bash -lc '$(LOAD_ENV); ./scripts/release.sh "$(RELEASE_VERSION)"'
-
-release-dryrun: sparkle-tools
-	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/release.sh "$(RELEASE_VERSION)"'
-
-beta-release: sparkle-tools
-	@bash -lc '$(LOAD_ENV); ./scripts/beta-release.sh "$(RELEASE_VERSION)"'
-
-beta-release-dryrun: sparkle-tools
-	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/beta-release.sh "$(RELEASE_VERSION)"'
+release-dryrun:
+	@python3 scripts/release/cut.py --dry-run $(CUT_FLAGS)
