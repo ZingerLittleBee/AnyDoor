@@ -60,8 +60,8 @@ flowchart LR
 | `package-signed` | macOS (`xcode-27`) | `contents: read`, `id-token: write`, `attestations: write` | all release secrets | Developer ID signing, notarization and stapling of the app and DMG, Sparkle zip, appcast, `SHA256SUMS`, build provenance attestation. |
 | `publish` | ubuntu | `contents: write`, `attestations: read` | none | Verifies `SHA256SUMS` and attestations, then `publish_release.py`: binds one draft by release id (the tag must peel to the built commit), uploads with retry and reconciliation, compares remote assets by sha256 digest, and publishes that id with `make_latest=false` once it is the tag's only release. |
 | `feed` | ubuntu | `contents: read` | Cloudflare (`feed-production`) | [`deploy-feed.yml`](../.github/workflows/deploy-feed.yml): requires an immutable Release, verifies the `appcast.xml` asset against the release attestation, its feed signature against `SPARKLE_PUBLIC_ED_KEY`, and its content against the tag; rejects a rollback of either channel head; deploys it byte for byte and compares the live bytes. |
-| `latest` | ubuntu | `contents: write` | none | Stable only: marks the Release as latest once the feed is live, so the GitHub `latest/download/appcast.xml` path (clients up to 4.1.0) moves together with the canonical feed. |
-| `landing` | ubuntu | `contents: read` | Cloudflare (`landing-production`) | Stable only: [`deploy-landing.yml`](../.github/workflows/deploy-landing.yml) builds the site from the tag with the Release's `appcast.xml` as its version source and deploys it. |
+| `latest` | ubuntu | `contents: write` | none | Stable only: marks the Release as latest once the feed is live, so the GitHub `latest/download/appcast.xml` path (clients up to 4.1.0) moves together with the canonical feed. Fails without changing anything if a newer Stable is already published. |
+| `landing` | ubuntu | `contents: read` | Cloudflare (`landing-production`, deploy job only) | Stable only: [`deploy-landing.yml`](../.github/workflows/deploy-landing.yml) builds the site from the tag, with the Release's `appcast.xml` as its version source, in a job without secrets; a second job deploys that output with a pinned `wrangler`. |
 | `verify` | ubuntu | `contents: read`, `attestations: read` | none | `gh release verify`; the live feed equals the asset; for Stable, the `latest/download/appcast.xml` path equals it too and anydoor.dev links the new DMG. |
 
 Release runs share the `anydoor-release` concurrency group without cancellation:
@@ -121,10 +121,15 @@ crafted tag.
   id, never by tag name, and refuses to publish while any other release exists for the
   tag.
 
-- **Deploy zone.** `feed` and `landing` hold the Cloudflare credentials, as
-  secrets of the `feed-production`, `feed-manual`, and `landing-production`
-  environments, never at repository level. They run no Swift code and deploy
-  only content that the earlier zones produced and attested.
+- **Deploy zone.** The Cloudflare credentials are secrets of the
+  `feed-production`, `feed-manual`, and `landing-production` environments, never
+  repository-level, and only steps that run a pinned `wrangler` see them. The
+  feed job deploys the attested, signature-verified `appcast.xml` asset. The
+  landing workflow runs the Astro build and its npm dependencies in a job without
+  secrets and passes the built site to a deploy job, so a compromised landing
+  dependency can alter the site's content but cannot read the token. All three
+  environments currently share one token that can deploy both Workers;
+  per-environment tokens scoped to a single Worker would narrow that further.
 
 **Single maintainer.** The maintainer both pushes the tag and approves the
 environment, so approval is a deliberate confirmation step, not separation of duties.
@@ -238,7 +243,7 @@ explicit go-ahead; nothing in this repository performs them.
    | Environment | Deployment rule | Reviewer | Used by |
    | --- | --- | --- | --- |
    | `feed-production` | tag `v*` | none | `release.yml` → `deploy-feed.yml` |
-   | `feed-manual` | branch `main` | maintainer | `Update Feed` dispatch: redeploy a Release's feed |
+   | `feed-manual` | branch `main` | maintainer | `Update Feed` dispatch: redeploy a Release's feed, or recover a broken feed endpoint |
    | `landing-production` | tag `v*`, branch `main` | none | `release.yml` → `deploy-landing.yml`, and its dispatch |
 
 6. **Cloudflare Workers Builds.** Disconnect the Git integration of the landing
@@ -320,7 +325,8 @@ after that, cut the next version.
 | `publish` reports several releases for the tag | Someone else created a draft for the tag. Inspect and delete the extra drafts, then re-run failed jobs. |
 | Seed has no valid feed signature | The previous Release's `appcast.xml` or the live feed was not produced by the pipeline. Investigate before releasing; never relax the check to get past it. |
 | Published, but the feed deployment failed | Re-run failed jobs: `feed`, then `latest`, `landing`, and `verify`. Never republish or delete the Release. If the run can no longer be re-run, dispatch `Update Feed` with the tag (approval in `feed-manual`), then mark the Release latest and dispatch `Landing` for a Stable. The feed never rolls back; fix a bad release with the next version. |
-| `latest` or `landing` failed | Re-run failed jobs. The feed is already live, so clients update meanwhile; only the GitHub latest path and the website lag. |
+| `latest` or `landing` failed | Re-run failed jobs while this is still the newest Stable. The feed is already live, so clients update meanwhile; only the GitHub latest path and the website lag. Once a newer Stable is published, `latest` refuses to run, so the old version cannot reclaim latest or the site. |
+| The feed endpoint returns an HTTP error | Fix the cause (for example a broken `feed/` Worker) on `main`, then dispatch `Update Feed` with the newest Release's tag and `live-feed-down` (approval in `feed-manual`). It skips the rollback comparison only when the live feed cannot be fetched. |
 | A published release is broken | Ship the next version promptly, with a `Sparkle-Critical-Update-Version` trailer if needed. |
 | A bug in the workflow itself | A tag runs the workflow from its own commit. Merge the fix and cut the next version. |
 | `release/X.Y-beta` was deleted before a re-run | Re-run only the failed jobs, which skips `meta`'s ancestry check. |
