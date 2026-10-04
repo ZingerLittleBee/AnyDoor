@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import ClipboardHistoryTestSupport
 @testable import AnyDoor
 
 /// `@MainActor` because the helper draws with AppKit (`NSImage.lockFocus`), which
@@ -48,6 +49,7 @@ final class RegionCaptureTests: XCTestCase {
     /// the file (as `RegionCapture.captureRegion` does via `defer`) before recognition.
     /// The decoded CGImage must not lazily depend on the now-deleted file.
     func testDecodedImageSurvivesSourceFileDeletion() async throws {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("anydoor-ocr-test-\(UUID().uuidString).png")
         try writeTextPNG("Persisted", to: url)

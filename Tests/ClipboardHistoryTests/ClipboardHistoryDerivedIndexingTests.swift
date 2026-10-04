@@ -11,20 +11,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testProductionVisionRecognizesRepresentativeTextAndNoTextFixtures()
         async throws
     {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let recognizer = ClipboardHistoryVisionRecognizer()
 
-        let text: [String]
-        do {
-            text = try await recognizer.recognize(
-                .ocr,
-                in: [try visionFixture(named: "representative-text")]
-            )
-        } catch let error where isVirtualMachine() {
-            // The macOS 27 CI runner VM lacks the paravirtual scaler driver that
-            // accurate text recognition loads; perform() then fails without an
-            // NSError ("nilError"). Physical Macs still run this test strictly.
-            throw XCTSkip("Vision text recognition is unavailable in this VM: \(error)")
-        }
+        let text = try await recognizer.recognize(
+            .ocr,
+            in: [try visionFixture(named: "representative-text")]
+        )
         let noText = try await recognizer.recognize(
             .ocr,
             in: [try visionFixture(named: "no-text")]
@@ -852,14 +845,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         let setting = try await module.isAutomaticImageTextIndexingEnabled()
         XCTAssertFalse(setting)
     }
-}
-
-/// Whether this process runs under a hypervisor, such as a GitHub macOS runner.
-private func isVirtualMachine() -> Bool {
-    var present: Int32 = 0
-    var size = MemoryLayout<Int32>.size
-    return sysctlbyname("kern.hv_vmm_present", &present, &size, nil, 0) == 0
-        && present == 1
 }
 
 private func visionFixture(named name: String) throws -> Data {

@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import ClipboardHistoryTestSupport
 @testable import AnyDoor
 
 /// `@MainActor` because the helper draws with AppKit (`NSImage.lockFocus`), which
@@ -44,6 +45,7 @@ final class TextRecognizerTests: XCTestCase {
     }
 
     func testRecognizesEnglishText() async throws {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let image = try renderImage(lines: ["Hello World"])
         let result = try await TextRecognizer.recognize(image)
         let joined = result.joined(separator: "\n")
@@ -52,6 +54,7 @@ final class TextRecognizerTests: XCTestCase {
     }
 
     func testRecognizesChineseText() async throws {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let image = try renderImage(lines: ["你好世界"])
         let result = try await TextRecognizer.recognize(image)
         let joined = result.joined()
@@ -59,6 +62,7 @@ final class TextRecognizerTests: XCTestCase {
     }
 
     func testReturnsLinesTopToBottom() async throws {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let image = try renderImage(lines: ["Sunrise", "Mountain"])
         let result = try await TextRecognizer.recognize(image)
         let joined = result.joined(separator: "\n")
@@ -72,6 +76,7 @@ final class TextRecognizerTests: XCTestCase {
     }
 
     func testBlankImageReturnsEmpty() async throws {
+        try skipIfVisionTextRecognitionIsUnavailableInVirtualMachine()
         let image = try renderImage(lines: [])
         let result = try await TextRecognizer.recognize(image)
         XCTAssertEqual(result, [])
