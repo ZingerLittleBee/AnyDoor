@@ -552,6 +552,7 @@ enum L10n {
         case toastClearNotificationsFailed = "toast.clearNotifications.failed"
         case toastClearNotificationsNeedsAccessibility = "toast.clearNotifications.needsAccessibility"
         case toastClearNotificationsNone = "toast.clearNotifications.none"
+        case toastClearNotificationsPanelUnavailable = "toast.clearNotifications.panelUnavailable"
         case toastClearNotificationsPartial = "toast.clearNotifications.partial"
         case toastClearNotificationsSuccess = "toast.clearNotifications.success"
         case toastClipboardCleared = "toast.clipboardCleared"

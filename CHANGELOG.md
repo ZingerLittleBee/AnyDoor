@@ -8,6 +8,12 @@ versioning.
 
 ### Fixed
 
+- Clear Notifications (清除通知) now also clears notifications that have left
+  the screen. It briefly opens Notification Center (as Globe+N does), clears
+  every notification and group listed there, and closes it again; a panel you
+  already had open stays open. Before, it only saw banners still on screen and
+  reported that there was nothing to clear once they had moved into
+  Notification Center.
 - GitHub release notes no longer break lines in the middle of a sentence. The
   notes are taken from CHANGELOG.md, whose wrapped lines GitHub showed as line
   breaks; they are now joined into whole paragraphs before publishing.
