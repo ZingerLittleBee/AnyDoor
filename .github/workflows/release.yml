@@ -1,11 +1,12 @@
 name: Release
 
 # Tag-triggered release: meta gate -> tests -> unsigned build + plugins -> one
-# approved signing job (release-build.yml) -> publish. See docs/releasing.md.
+# approved signing job (release-build.yml) -> publish -> feed -> latest and
+# landing (Stable only) -> verify. See docs/releasing.md.
 #
-# Every job hangs off `meta`, whose job-level `if` is the phase-1 gate below,
-# so while RELEASE_PIPELINE is unset a tag pushed by the local `make release`
-# flow starts this workflow and every job skips.
+# Every job hangs off `meta`, whose job-level `if` is the switch below: while
+# the RELEASE_PIPELINE repository variable is not `actions`, a pushed tag
+# starts this workflow and every job skips.
 on:
   push:
     tags: ['v*']
@@ -28,8 +29,7 @@ permissions: {}
 jobs:
   meta:
     name: Release gate
-    # Phase-1 gate: the local `make release` flow stays authoritative until the
-    # cutover sets the RELEASE_PIPELINE repository variable to `actions`.
+    # Pipeline switch: deleting the variable pauses releases without a commit.
     if: vars.RELEASE_PIPELINE == 'actions'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -162,6 +162,8 @@ jobs:
     permissions:
       contents: write # create, upload to and publish the draft release
       attestations: read # gh attestation verify
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
     env:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.meta.outputs.tag }}
@@ -265,7 +267,7 @@ jobs:
           python3 scripts/release/publish_release.py verify --release-id "$RELEASE_ID" \
             --tag "$TAG" --assets "$RUNNER_TEMP/assets"
 
-      # `latest` stays where it is; phase 2 moves it after the feed deploys.
+      # `latest` stays where it is until the feed is live (the `latest` job).
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -274,11 +276,100 @@ jobs:
           python3 scripts/release/publish_release.py publish --release-id "$RELEASE_ID" \
             --tag "$TAG" --assets "$RUNNER_TEMP/assets"
 
-  # ---------------------------------------------------------------------------
-  # PHASE 2 (cutover PR) adds jobs here, after `publish`:
-  #   - deploy-feed: deploy this release's appcast.xml asset (workflow_call)
-  #   - latest: `gh release edit --latest` for stable once the feed is live
-  #   - deploy-landing: stable only (workflow_call)
-  #   - verify: post-release smoke checks (live feed bytes, landing version,
-  #     `gh release verify`, attestation)
-  # ---------------------------------------------------------------------------
+  # Deploys this release's appcast.xml asset, byte for byte, as the live feed.
+  # The Release is published by now, so a failure here is recovered by
+  # re-running the failed jobs, never by republishing.
+  feed:
+    name: Deploy the feed
+    needs: [meta, publish]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-feed.yml
+    with:
+      tag: ${{ needs.meta.outputs.tag }}
+
+  # Clients up to 4.1.0 read releases/latest/download/appcast.xml, so `latest`
+  # moves only once the live feed carries the same release.
+  latest:
+    name: Mark the latest release
+    needs: [meta, publish, feed]
+    if: needs.meta.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # mark the release as latest
+    steps:
+      - name: Mark the release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          RELEASE_ID: ${{ needs.publish.outputs.release_id }}
+        run: |
+          gh api -X PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -f make_latest=true --silent
+          latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)"
+          if [[ "$latest" != "$TAG" ]]; then
+            echo "::error::The latest release is $latest, expected $TAG"
+            exit 1
+          fi
+
+  landing:
+    name: Deploy the landing site
+    needs: [meta, latest]
+    if: needs.meta.outputs.channel == 'stable'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/deploy-landing.yml
+    with:
+      tag: ${{ needs.meta.outputs.tag }}
+
+  # Smoke checks against what users actually reach.
+  verify:
+    name: Verify the release
+    needs: [meta, feed, latest, landing]
+    if: ${{ !cancelled() && needs.feed.result == 'success' && (needs.meta.outputs.channel != 'stable' || needs.landing.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read # gh release verify
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      VERSION: ${{ needs.meta.outputs.version }}
+      CHANNEL: ${{ needs.meta.outputs.channel }}
+    steps:
+      - name: Verify the release attestation
+        run: gh release verify "$TAG"
+
+      - name: Verify the live feed
+        run: |
+          gh release download "$TAG" --pattern appcast.xml --dir "$RUNNER_TEMP/asset"
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+            -H 'Cache-Control: no-cache' "https://anydoor.dev/appcast.xml?verify=${GITHUB_RUN_ID}" \
+            -o "$RUNNER_TEMP/live-appcast.xml"
+          cmp "$RUNNER_TEMP/asset/appcast.xml" "$RUNNER_TEMP/live-appcast.xml"
+
+      - name: Verify the legacy feed URL
+        if: env.CHANNEL == 'stable'
+        run: |
+          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 \
+            "https://github.com/$GH_REPO/releases/latest/download/appcast.xml" \
+            -o "$RUNNER_TEMP/latest-appcast.xml"
+          cmp "$RUNNER_TEMP/asset/appcast.xml" "$RUNNER_TEMP/latest-appcast.xml"
+
+      - name: Verify the landing site
+        if: env.CHANNEL == 'stable'
+        run: |
+          expected="/releases/download/v$VERSION/AnyDoor-$VERSION.dmg"
+          for _ in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+                 -H 'Cache-Control: no-cache' "https://anydoor.dev/?verify=${GITHUB_RUN_ID}" \
+                 | grep -qF "$expected"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::https://anydoor.dev/ does not link $expected"
+          exit 1

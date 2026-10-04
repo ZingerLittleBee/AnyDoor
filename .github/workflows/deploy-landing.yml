@@ -1,35 +1,39 @@
 name: Landing
 
-# This Actions path deploys for published Stable releases or manual dispatch.
-# Cloudflare Workers Builds can independently deploy production-branch pushes;
-# inspect its live configuration before merging landing changes (docs/deployment.md).
-# Beta prereleases update the independent appcast route instead.
+# Builds and deploys anydoor.dev (landing/). See docs/releasing.md.
 #
-# A pull request that touches landing/ runs the same build without deploying, so
-# a broken site surfaces on the PR instead of during a release.
+# - release.yml calls this workflow for each Stable release once its feed is
+#   live, with that Release's appcast.xml asset as the version source.
+# - workflow_dispatch deploys the chosen ref against the live feed, for
+#   landing-only changes.
+# - A pull request that touches landing/ runs the same build without
+#   deploying, so a broken site surfaces on the PR instead of during a release.
+#
+# Both deploying paths use the `landing-production` environment, which holds
+# the Cloudflare credentials.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Stable release tag whose appcast.xml asset supplies the advertised version.
+        type: string
+        required: true
   pull_request:
     paths:
       - 'landing/**'
       - '.github/workflows/deploy-landing.yml'
   workflow_dispatch:
 
-# Serialize Stable deploys so the newest Stable tag wins. Prerelease workflow
-# runs use their own ref group and therefore cannot cancel a Stable deploy
-# before the prerelease-only job guard skips them.
-concurrency:
-  group: landing-${{ github.event_name == 'release' && github.event.release.prerelease == false && 'deploy' || github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  landing:
-    if: github.event_name != 'release' || github.event.release.prerelease == false
-    runs-on: ubuntu-latest
+  build:
+    name: Build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: landing
@@ -37,7 +41,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -48,14 +52,56 @@ jobs:
       - name: Test Stable release metadata
         run: bun test
 
+      # prepare-appcast.mjs fetches the live feed.
       - name: Build
-        if: github.event_name == 'pull_request'
         run: bun run build
 
-      # `bun run deploy` builds and then deploys, so the two paths are mutually
-      # exclusive rather than building twice.
+  deploy:
+    name: Build and deploy
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    environment:
+      name: landing-production
+      url: https://anydoor.dev/
+    # Deploys replace the whole site; none is cut short.
+    concurrency:
+      group: anydoor-landing-deploy
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test Stable release metadata
+        run: bun test
+
+      # Without ANYDOOR_APPCAST (a manual dispatch), prepare-appcast.mjs
+      # fetches the live feed.
+      - name: Use the release feed
+        if: inputs.tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern appcast.xml --dir "$RUNNER_TEMP/release-feed"
+          echo "ANYDOOR_APPCAST=$RUNNER_TEMP/release-feed/appcast.xml" >> "$GITHUB_ENV"
+
+      # `bun run deploy` builds and then deploys.
       - name: Build and deploy to Cloudflare
-        if: github.event_name != 'pull_request'
         run: bun run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

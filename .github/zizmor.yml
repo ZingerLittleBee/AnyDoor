@@ -10,13 +10,6 @@ rules:
   self-repository:
     disable: true
 
-  # Release phase 1 freezes deploy-feed.yml and deploy-landing.yml except for
-  # SHA-pinning (the local release flow still depends on them). The cutover PR
-  # rewrites both workflows; remove these entries there.
-  artipacked:
-    ignore:
-      - deploy-feed.yml
-      - deploy-landing.yml
   # ci.yml: zizmor treats the `release/*-beta` push trigger as a publishing
   # workflow, but ci.yml uploads no artifacts and only caches SwiftPM clones and
   # the pnpm store for its own test jobs. Release binaries come from
@@ -25,5 +18,3 @@ rules:
   cache-poisoning:
     ignore:
       - ci.yml
-      - deploy-feed.yml
-      - deploy-landing.yml
