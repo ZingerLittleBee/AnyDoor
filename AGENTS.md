@@ -24,6 +24,19 @@ the [navigation map](docs/agents/navigation.md) replaces the old conceptual dire
 | Release, package, or deploy the app, landing site, or feed | [Releasing](docs/releasing.md), [Deployment](docs/deployment.md), [Beta Updates](docs/beta-updates.md) |
 | Review a change | [Coding standards](CODING_STANDARDS.md), then the relevant current contract from [docs](docs/README.md) |
 
+## Common commands
+
+```sh
+make build                 # compile the app
+make check                 # build and test with the first-party warning gate
+scripts/check-swift.sh --allow-toolchain-mismatch -- --filter <TestName>   # one test
+make docs-check            # documentation and navigation checks
+make release-tools-check   # release pipeline unit tests
+make release-dryrun        # release preflight and plan; changes nothing
+```
+
+[Development](docs/development.md) explains toolchain mismatches and the full command set.
+
 ## Cross-cutting invariants
 
 - Share the `ModelContainer` created by `AppDelegate`. Keep the pinned
@@ -44,6 +57,10 @@ the [navigation map](docs/agents/navigation.md) replaces the old conceptual dire
 - The menu-bar item is an AppKit `NSStatusItem`; the real Settings window is manually managed.
   Preserve scene-level launch/restoration suppression and the installed-app validation required by
   the window reference.
+- Releases never build, sign, or publish locally: `make release` only cuts the version and pushes
+  the tag, and `release.yml` runs from the tagged commit. Land workflow and release-tool fixes on
+  `main` and on any active `release/X.Y-beta` branch. Never move or delete a pushed tag; void a
+  failed one and cut the next version.
 
 ## Working conventions
 

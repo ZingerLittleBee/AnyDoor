@@ -253,7 +253,7 @@ explicit go-ahead; nothing in this repository performs them.
    | `landing-production` | tag `v*`, branch `main` | none | `release.yml` → `deploy-landing.yml`, and its dispatch |
 
 6. **Cloudflare Workers Builds.** Disconnect the Git integration of the landing
-   Worker, so that only `deploy-landing.yml` deploys the site.
+   Worker, so that only `deploy-landing.yml` deploys the site (done on 2026-10-04).
 7. **Tag ruleset** on `refs/tags/v*`: restrict creations, updates, and deletions, and
    block force pushes, with bypass for the repository admin role only. Actions never
    creates tags, so it needs no bypass.
@@ -293,17 +293,23 @@ The old local driver, which built, signed, and published on the maintainer's Mac
 was removed with the commit that wired `make release` to `cut.py`. Its last
 Release, v4.2.7, published an unsigned feed; `LEGACY_UNSIGNED_FEED_TAG` in
 [`release.conf`](../scripts/release/release.conf) names it so the first pipeline
-release can seed from it. Steps to the first Actions release:
+release could seed from it.
 
-1. Complete the [repository setup](#repository-setup).
-2. Set the repository variable `RELEASE_PIPELINE` to `actions`.
-3. Cut a Beta as the first Actions release: `make release X.Y.Z-beta.1` from
-   `release/X.Y-beta`. Approve `package-signed` when asked. Confirm on real hardware
-   that the annotated tag survived checkout, the keychain signed without prompts,
-   the API key's role was sufficient, and the previous Stable updates to the Beta.
-4. After the first pipeline Stable, consider enforcing signed feeds in the app
-   (`SURequireSignedFeed` with `SUVerifyUpdateBeforeExtraction`): every feed from
-   then on carries a signature.
+The cutover completed on 2026-10-04:
+
+- The [repository setup](#repository-setup) was applied and `RELEASE_PIPELINE`
+  set to `actions`.
+- `v4.2.8-beta.1` failed before publishing and is void: the called workflows'
+  environment secrets resolved empty until `release.yml` passed
+  `secrets: inherit` ([PR #153](https://github.com/ZingerLittleBee/AnyDoor/pull/153)).
+- `v4.2.8-beta.2` was the first Actions release. Its feed check then raced edge
+  propagation, so `deploy-feed.yml` now polls until the deployed bytes match
+  ([PR #154](https://github.com/ZingerLittleBee/AnyDoor/pull/154)).
+- `v4.2.8` was the first pipeline Stable and became the latest Release.
+
+Remaining: consider enforcing signed feeds in the app (`SURequireSignedFeed` with
+`SUVerifyUpdateBeforeExtraction`). Every feed since `v4.2.8-beta.2` carries a
+signature.
 
 ## Failure and recovery
 
