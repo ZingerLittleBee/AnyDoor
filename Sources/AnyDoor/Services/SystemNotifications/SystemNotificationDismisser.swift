@@ -47,13 +47,22 @@ enum SystemNotificationDismissOutcome: Sendable, Equatable {
 /// not identities, because an element whose identity changes between passes
 /// would otherwise look like a dismissal.
 ///
+/// A dismissed notification stays in the tree while it animates out (about
+/// half a second in Notification Center's panel on macOS 27). For
+/// `dismissalWait` after an action, its element is neither acted on again nor
+/// taken as still present: the run moves on to the next notification and
+/// rereads before concluding.
+///
 /// Generic over its clock so tests can drive time without sleeping.
 struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
     let surface: any SystemNotificationSurface
     let labels: SystemNotificationDismissLabels
     let clock: C
-    /// Pause after each action for Notification Center to animate it away.
+    /// Pause after each action before the next read.
     let settleInterval: Duration
+    /// How long a notification acted on may stay in the tree before the
+    /// action counts as not having worked.
+    let dismissalWait: Duration
     /// Actions one run may perform.
     let maxActions: Int
 
@@ -79,12 +88,14 @@ struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
         labels: SystemNotificationDismissLabels,
         clock: C,
         settleInterval: Duration = .milliseconds(150),
+        dismissalWait: Duration = .seconds(1),
         maxActions: Int = 60
     ) {
         self.surface = surface
         self.labels = labels
         self.clock = clock
         self.settleInterval = settleInterval
+        self.dismissalWait = dismissalWait
         self.maxActions = maxActions
     }
 
@@ -92,6 +103,7 @@ struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
         let deadline = clock.now.advanced(by: timeLimit)
         var attempts: [UInt: Int] = [:]
         var skipping: Set<UInt> = []
+        var actedAt: [UInt: C.Instant] = [:]
         var actions = 0
         var mostSeen = 0
         var fewestSeen = Int.max
@@ -111,7 +123,11 @@ struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
             let passTime = mayAct ? actingTime : remaining
             let isStalled = stalledPasses >= maxStalledPasses
             let labels = labels
-            let skip = skipping
+            let now = clock.now
+            let leaving = Set(actedAt.compactMap { id, instant in
+                instant.duration(to: now) < dismissalWait ? id : nil
+            })
+            let skip = skipping.union(leaving)
             let fewest = fewestSeen
             let pass = await surface.pass(timeLimit: passTime) { elements in
                 // The stall count lags one pass behind, so a read that itself
@@ -124,6 +140,7 @@ struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
             mostSeen = max(mostSeen, count)
 
             if let target = pass.actedOn {
+                actedAt[target] = clock.now
                 actions += 1
                 attempts[target, default: 0] += 1
                 if attempts[target, default: 0] >= maxAttemptsPerElement {
@@ -135,6 +152,11 @@ struct SystemNotificationDismisser<C: Clock<Duration>>: Sendable {
                 } else {
                     stalledPasses += 1
                 }
+                await pause(before: deadline)
+                continue
+            }
+            if pass.isComplete, pass.present.contains(where: { leaving.contains($0.id) }) {
+                // Still animating out: read again before concluding.
                 await pause(before: deadline)
                 continue
             }

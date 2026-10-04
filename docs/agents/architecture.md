@@ -736,9 +736,18 @@ up/down are hidden hotkeys (`HotkeyAction.brightnessUp/Down`).
 `ClearNotificationsProvider` runs `SystemNotificationDismisser`, whose
 `AccessibilitySystemNotificationSurface` performs the AX custom actions Notification Center itself
 offers on its banners, alerts, and stacks, matched by the labels in its localized string table for
-the language it runs in (`AXPreferredLanguage`, else the global `AppleLanguages`). Nothing in it
-picks an action by position, goes through System Events, opens the panel, or reads notification
-text, and a run reports success only from a complete read of the tree.
+the language it runs in (`AXPreferredLanguage`, else the global `AppleLanguages`). No API reaches
+another app's notifications, and once a banner leaves the screen it exists only in Notification
+Center's panel, which closes whenever focus moves (so it is never open when the run starts from
+AnyDoor's panel or palette). `NotificationCenterPanelPresenter` therefore opens the panel with a
+synthesized Globe+N (a full keystroke ending in the Globe release, so Globe is not latched), waits
+for the application element's `AXExpanded` to turn true (it does so only after the list is in the
+tree), and closes it after the run only when it opened it; when the panel cannot be opened and
+nothing on screen was dismissed, the run reports that instead of "nothing to clear". A dismissed
+panel item stays in the AX tree for about half a second while it animates out, so the dismisser
+neither retries nor counts an element within `dismissalWait` of acting on it. Nothing in it
+picks an action by position, goes through System Events, or reads notification text, and a run
+reports success only from a complete read of the tree.
 
 ### Scheduled Shutdown
 

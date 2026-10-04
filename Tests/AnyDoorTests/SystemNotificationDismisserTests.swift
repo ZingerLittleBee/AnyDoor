@@ -25,6 +25,9 @@ private actor FakeNotificationCenter: SystemNotificationSurface {
         /// The action succeeds, but the same notification comes back under a
         /// new identity.
         case respawns
+        /// The action removes the notification once this much time has passed
+        /// on the clock, as Notification Center's panel animates it out.
+        case leavesAfter(Duration)
     }
 
     struct Item: Sendable {
@@ -47,6 +50,7 @@ private actor FakeNotificationCenter: SystemNotificationSurface {
     private let walkTime: Duration
     private let actionTime: Duration
     private var nextID: UInt = 1_000
+    private var leaving: [UInt: ImmediateClock<Duration>.Instant] = [:]
 
     private(set) var passes = 0
     private(set) var performedIDs: [UInt] = []
@@ -87,6 +91,12 @@ private actor FakeNotificationCenter: SystemNotificationSurface {
             return SystemNotificationPass(present: [], isComplete: false, actedOn: nil)
         }
         await spend(walkTime)
+        if let now = clock?.now {
+            for (id, gone) in leaving where gone <= now {
+                items.removeAll { $0.id == id }
+                leaving[id] = nil
+            }
+        }
         let read = script.isEmpty ? laterReads : script.removeFirst()
         let found: [Item]
         let isComplete: Bool
@@ -121,6 +131,10 @@ private actor FakeNotificationCenter: SystemNotificationSurface {
             items.removeAll { $0.id == id }
         case .ignores:
             break
+        case .leavesAfter(let delay):
+            if let clock, leaving[id] == nil {
+                leaving[id] = clock.now.advanced(by: delay)
+            }
         case .respawns:
             if let index = items.firstIndex(where: { $0.id == id }) {
                 items[index].id = nextID
@@ -153,6 +167,7 @@ private func dismisser(
     labels: SystemNotificationDismissLabels = english,
     clock: ImmediateClock<Duration> = ImmediateClock(),
     settleInterval: Duration = .milliseconds(150),
+    dismissalWait: Duration = .zero,
     maxActions: Int = 60
 ) -> SystemNotificationDismisser<ImmediateClock<Duration>> {
     SystemNotificationDismisser(
@@ -160,6 +175,7 @@ private func dismisser(
         labels: labels,
         clock: clock,
         settleInterval: settleInterval,
+        dismissalWait: dismissalWait,
         maxActions: maxActions
     )
 }
@@ -205,6 +221,30 @@ struct SystemNotificationDismisserTests {
         let center = FakeNotificationCenter([unrecognized(1), banner(2)])
         #expect(await dismisser(center).run() == .partial)
         #expect(await center.performedIDs == [2])
+        #expect(await center.remainingIDs == [1])
+    }
+
+    // MARK: Dismissal animation
+
+    @Test func notificationsStillAnimatingOutAreNotRetried() async {
+        // The panel keeps a dismissed notification in the tree for half a
+        // second, longer than the settle pause.
+        let clock = ImmediateClock()
+        let center = FakeNotificationCenter(
+            (1...3).map { banner($0, .leavesAfter(.milliseconds(550))) }, clock: clock
+        )
+        let outcome = await dismisser(center, clock: clock, dismissalWait: .seconds(1)).run()
+        #expect(outcome == .dismissed)
+        #expect(await center.performedIDs == [1, 2, 3], "each acted on once, the next while the last animates out")
+        #expect(await center.remainingIDs.isEmpty)
+    }
+
+    @Test func aNotificationStillThereAfterTheWaitIsRetried() async {
+        let clock = ImmediateClock()
+        let center = FakeNotificationCenter([banner(1, .ignores), banner(2)], clock: clock)
+        let outcome = await dismisser(center, clock: clock, dismissalWait: .seconds(1)).run()
+        #expect(outcome == .partial)
+        #expect(await center.performedIDs == [1, 2, 1, 1])
         #expect(await center.remainingIDs == [1])
     }
 

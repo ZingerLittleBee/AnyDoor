@@ -5,10 +5,12 @@ import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "clearNotifications")
 
-/// Dismisses the banners, alerts, and stacks Notification Center is showing
-/// (and the items in its panel when it is already open) by invoking
-/// Notification Center's own localized dismiss actions through Accessibility.
-/// It never opens the panel and never reads notification text.
+/// Dismisses the banners, alerts, and stacks Notification Center holds by
+/// invoking its own localized dismiss actions through Accessibility. No API
+/// reaches another app's notifications, and the ones that have left the
+/// screen are only in Notification Center's panel, so the run opens the panel
+/// for itself (closing it again afterwards) unless the user already has it
+/// open. It never reads notification text.
 ///
 /// Every outcome is reported through a toast; `run()` never propagates.
 actor ClearNotificationsProvider: ActionProvider {
@@ -43,12 +45,21 @@ actor ClearNotificationsProvider: ActionProvider {
         let bundleURL = runningBundleURL ?? SystemNotificationDismissLabels.defaultBundleURL
         let language = await AccessibilitySystemNotificationSurface.preferredLanguage(pid: pid)
         let labels = resolvedLabels(bundleURL: bundleURL, languages: language.map { [$0] } ?? Self.globalLanguages())
+        let presenter = NotificationCenterPanelPresenter(panel: AccessibilityNotificationCenterPanel(pid: pid))
+        let opening = await presenter.open()
+        if !opening.isOpen {
+            logger.error("Notification Center's panel did not open: \(String(describing: opening), privacy: .public)")
+        }
         let outcome = await SystemNotificationDismisser(
             surface: AccessibilitySystemNotificationSurface(pid: pid, labels: labels),
             labels: labels
         ).run()
+        await presenter.close(after: opening)
         logger.info("Clear notifications finished: \(String(describing: outcome), privacy: .public)")
         switch outcome {
+        case .nothingToDismiss where !opening.isOpen:
+            // Only the screen was read; the panel may still list notifications.
+            await show(ToastStyle.failure, .toastClearNotificationsPanelUnavailable)
         case .nothingToDismiss: await show(ToastStyle.info, .toastClearNotificationsNone)
         case .dismissed: await show(ToastStyle.success, .toastClearNotificationsSuccess)
         case .partial: await show(ToastStyle.failure, .toastClearNotificationsPartial)

@@ -12945,13 +12945,30 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No notifications on screen to clear"
+            "value": "No notifications to clear"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "屏幕上没有可清除的通知"
+            "value": "没有可清除的通知"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.panelUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't open Notification Center to clear notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开通知中心以清除通知"
           }
         }
       }
