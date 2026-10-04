@@ -63,7 +63,7 @@ their separate procedures.
 
 A bare `swift build` / `swift run` can record the deployment target as its SDK
 version in `LC_BUILD_VERSION`, changing macOS 26+ window chrome. The
-[Makefile](../Makefile) and release driver supply the SDK linker stamp. Judge UI
+[Makefile](../Makefile) and the release scripts supply the SDK linker stamp. Judge UI
 against those builds and check the binary before calling an appearance change a
 regression:
 

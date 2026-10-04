@@ -49,7 +49,7 @@ Coverage matrix — the PRD requires the feature to stay interactive on the
 | --- | --- | --- |
 | Apple Silicon, current | P0 | Primary |
 | Intel Mac on macOS 14 | P1 | Oldest supported; SQLCipher and FTS5 perf differ. Every budget in section 8 must be re-measured here, not assumed. |
-| Universal build from `scripts/release.sh` | P1 | The shipped artifact, not the debug one |
+| Universal build from `scripts/release/build.sh` | P1 | The shipped artifact, not the debug one |
 
 ### 0.2 Store locations
 

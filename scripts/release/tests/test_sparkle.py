@@ -35,6 +35,7 @@ SEED_FEED = RELEASE_DIR / "seed-feed.sh"
 FETCH_TOOLS = RELEASE_DIR / "fetch-sparkle-tools.sh"
 APPCAST_SH = RELEASE_DIR / "appcast.sh"
 VALIDATE_APPCAST = REPO_ROOT / "scripts/validate-appcast.py"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 GIT_ENV = {
@@ -330,6 +331,8 @@ class SeedFeedTests(TempDirTestCase):
         for name in ("lib.sh", "release.conf", "seed-feed.sh", "verify_sparkle_signatures.py",
                      "pyproject.toml", "uv.lock"):
             shutil.copy2(RELEASE_DIR / name, self.release / name)
+        # Each test names the legacy tag it needs, independent of release.conf.
+        self.set_legacy_tag("")
         # The first migration seeds from git: the old flow's unsigned feed.
         (self.repo / "appcast.xml").write_bytes(self.unsigned)
         (self.repo / "Info.plist").write_bytes(plistlib.dumps({"SUPublicEDKey": self.public}))
@@ -638,7 +641,9 @@ class AppcastRoundTripTests(unittest.TestCase):
         self.secret, self.public = new_key()
         self.notes = self.tmp / "notes.md"
         self.notes.write_text("### Fixed\n\n- Round-trip test.\n")
-        self.seed = REPO_ROOT / "appcast.xml"
+        # The old local flow's last feed, byte-identical to the live feed it
+        # published: the real seed of the first pipeline release.
+        self.seed = FIXTURES / "appcast-v4.2.7.xml"
         self.out = self.tmp / "out/appcast.xml"
 
     def make_zip(self, version: str, short: str, build: str, *, public: str | None = None) -> Path:

@@ -1,125 +1,198 @@
 name: Update Feed
 
+# Deploys a published Release's appcast.xml asset, byte for byte, as the live
+# feed at https://anydoor.dev/appcast.xml (the feed/ worker). See
+# docs/releasing.md.
+#
+# - release.yml calls this workflow after `publish` for every release, Stable
+#   and Beta, in the `feed-production` environment.
+# - workflow_dispatch redeploys an already published Release's feed from the
+#   default branch, in the reviewer-gated `feed-manual` environment: a repair
+#   after a failed deployment, or with `live-feed-down` after the endpoint
+#   itself broke. There is no rollback: the next release seeds from
+#   the newest Release's feed and requires it to be live, so a broken release is
+#   fixed by shipping the next version.
+# - A pull request that touches the worker or the feed checks validates the
+#   worker bundle against the live feed without deploying.
+#
+# Only immutable Releases deploy: their appcast.xml must match the release
+# attestation, carry a Sparkle feed signature by the pinned public key, and
+# describe the Release it came from.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Published release tag whose appcast.xml asset becomes the live feed.
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Published release tag whose appcast.xml asset becomes the live feed (vX.Y.Z or vX.Y.Z-beta.N)'
+        type: string
+        required: true
+      live-feed-down:
+        description: 'The live feed returns an HTTP error: skip the rollback comparison (deploy the newest Release)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'feed/**'
-      - 'scripts/beta-release.sh'
-      - 'scripts/release.sh'
-      - 'scripts/release-driver.sh'
-      - 'scripts/resolve-release-version.sh'
       - 'scripts/validate-appcast.py'
-      - 'scripts/verify-feed-bootstrap.sh'
       - 'scripts/verify-feed-publication.py'
+      - 'scripts/release/verify_sparkle_signatures.py'
       - '.github/workflows/deploy-feed.yml'
-  workflow_dispatch:
-    inputs:
-      bootstrap:
-        description: 'Deploy the checked-in Stable-only feed when the endpoint does not exist yet'
-        type: boolean
-        default: false
-      repair:
-        description: 'Redeploy routing only when the live feed exactly matches the checked-in feed'
-        type: boolean
-        default: false
 
-concurrency:
-  group: anydoor-update-feed
-  cancel-in-progress: false
-
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  feed:
-    runs-on: ubuntu-latest
+  validate:
+    name: Validate the worker bundle
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - name: Checkout release snapshot
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Prepare worker asset
-        run: cp appcast.xml feed/src/appcast.xml
+      - name: Use the live feed as the worker asset
+        run: |
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+            -H 'Cache-Control: no-cache' 'https://anydoor.dev/appcast.xml' \
+            -o feed/src/appcast.xml
 
       - name: Validate worker bundle
         run: bunx wrangler@4.94.0 deploy --dry-run --config feed/wrangler.jsonc
 
-      - name: Validate release snapshot
-        if: github.event_name == 'release'
+  deploy:
+    name: Deploy the feed
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'feed-manual' || 'feed-production' }}
+      url: https://anydoor.dev/appcast.xml
+    # Deployments replace the whole feed, so they never overlap or cancel.
+    concurrency:
+      group: anydoor-feed-deploy
+      cancel-in-progress: false
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # A call from release.yml checks out the release tag; a dispatch checks
+      # out the default branch's scripts.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve identity
+        id: identity
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag }}
         run: |
-          release_id="${RELEASE_TAG#v}"
-          IFS=$'\t' read -r resolved channel short_version build_version display_version \
-            < <(scripts/resolve-release-version.sh "$release_id")
-          test "$resolved" = "$release_id"
-          scripts/validate-appcast.py \
-            --appcast appcast.xml \
-            --release-id "$release_id" \
-            --channel "$channel" \
-            --short-version "$short_version" \
-            --build-version "$build_version" \
-            --display-version "$display_version"
-          curl --fail --silent --show-error --head \
-            --connect-timeout 10 --max-time 60 \
-            "https://github.com/ZingerLittleBee/AnyDoor/releases/download/v${release_id}/AnyDoor-${release_id}.zip"
+          python3 scripts/release/meta.py identity --tag "$TAG" --github-output "$GITHUB_OUTPUT"
+          echo "FEED=$RUNNER_TEMP/feed/appcast.xml" >> "$GITHUB_ENV"
 
-      - name: Guard canonical feed against rollback
-        if: github.event_name == 'release'
+      - name: Download the release feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.identity.outputs.tag }}
         run: |
-          curl --fail --silent --show-error \
-            --connect-timeout 10 --max-time 60 \
-            -H 'Cache-Control: no-cache' \
-            'https://anydoor.dev/appcast.xml' \
-            -o /tmp/live-appcast.xml
-          scripts/verify-feed-publication.py \
-            --live /tmp/live-appcast.xml \
-            --candidate appcast.xml
-
-      - name: Validate bootstrap feed
-        if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
-        run: |
-          if [[ "${{ inputs.repair }}" == 'true' ]]; then
-            echo 'Bootstrap and repair cannot run together' >&2
+          read -r is_draft is_immutable < <(
+            gh release view "$TAG" --json isDraft,isImmutable --jq '"\(.isDraft) \(.isImmutable)"')
+          if [[ "$is_draft" != false ]]; then
+            echo "::error::Release $TAG is not published"
             exit 1
           fi
-          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("appcast.xml")'
-          if grep -q '<sparkle:channel>' appcast.xml; then
-            echo 'Bootstrap feed must contain Stable items only' >&2
+          if [[ "$is_immutable" != true ]]; then
+            echo "::error::Release $TAG is not immutable; only pipeline Releases can deploy the feed"
             exit 1
           fi
-          scripts/verify-feed-bootstrap.sh 'https://anydoor.dev/appcast.xml'
+          mkdir -p "$(dirname "$FEED")"
+          gh release download "$TAG" --pattern appcast.xml --dir "$(dirname "$FEED")"
+          gh release verify-asset "$TAG" "$FEED"
 
-      - name: Validate repair feed
-        if: github.event_name == 'workflow_dispatch' && inputs.repair
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+
+      - name: Verify the feed signature
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
         run: |
-          curl --fail --silent --show-error \
-            --connect-timeout 10 --max-time 60 \
-            -H 'Cache-Control: no-cache' \
-            'https://anydoor.dev/appcast.xml' \
-            -o /tmp/live-appcast.xml
-          cmp appcast.xml /tmp/live-appcast.xml
+          if [[ -z "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+            echo "::error::The SPARKLE_PUBLIC_ED_KEY variable is not set"
+            exit 1
+          fi
+          uv run --locked --project scripts/release python scripts/release/verify_sparkle_signatures.py \
+            --appcast "$FEED" --public-key "$SPARKLE_PUBLIC_ED_KEY" --require-feed-signature
 
-      - name: Deploy canonical feed
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.repair))
+      - name: Validate the feed against its release
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          CHANNEL: ${{ steps.identity.outputs.channel }}
+          SHORT_VERSION: ${{ steps.identity.outputs.short_version }}
+          BUILD_VERSION: ${{ steps.identity.outputs.build_version }}
+          DISPLAY_VERSION: ${{ steps.identity.outputs.display_version }}
+        run: |
+          scripts/validate-appcast.py --appcast "$FEED" --release-id "$VERSION" \
+            --channel "$CHANNEL" --short-version "$SHORT_VERSION" \
+            --build-version "$BUILD_VERSION" --display-version "$DISPLAY_VERSION" \
+            --repository "$GITHUB_REPOSITORY"
+          curl --fail --silent --show-error --head --location \
+            --connect-timeout 10 --max-time 60 \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/AnyDoor-$VERSION.zip" \
+            > /dev/null
+
+      # `live-feed-down` (manual dispatch only) is the escape hatch for a feed
+      # endpoint that returns an HTTP error: it skips the comparison only when
+      # the live feed cannot be fetched, never when its content differs.
+      - name: Guard the live feed against rollback
+        env:
+          LIVE_FEED_DOWN: ${{ github.event_name == 'workflow_dispatch' && inputs.live-feed-down }}
+        run: |
+          if ! curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+              -H 'Cache-Control: no-cache' 'https://anydoor.dev/appcast.xml' \
+              -o "$RUNNER_TEMP/live-appcast.xml"; then
+            if [[ "$LIVE_FEED_DOWN" == true ]]; then
+              echo "::warning::The live feed is unreachable; deploying without the rollback comparison"
+              exit 0
+            fi
+            echo "::error::Cannot fetch the live feed; if its endpoint is down, dispatch Update Feed with live-feed-down"
+            exit 1
+          fi
+          scripts/verify-feed-publication.py --live "$RUNNER_TEMP/live-appcast.xml" --candidate "$FEED"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Prepare the worker asset
+        run: cp "$FEED" feed/src/appcast.xml
+
+      - name: Deploy the feed worker
         run: bunx wrangler@4.94.0 deploy --config feed/wrangler.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify deployed bytes
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.repair))
         run: |
           curl --fail --silent --show-error \
             --connect-timeout 10 --max-time 60 \
             --retry 12 --retry-delay 2 --retry-max-time 60 --retry-all-errors \
             -H 'Cache-Control: no-cache' \
             "https://anydoor.dev/appcast.xml?deployment=${GITHUB_RUN_ID}" \
-            -o /tmp/deployed-appcast.xml
-          cmp appcast.xml /tmp/deployed-appcast.xml
+            -o "$RUNNER_TEMP/deployed-appcast.xml"
+          cmp "$FEED" "$RUNNER_TEMP/deployed-appcast.xml"

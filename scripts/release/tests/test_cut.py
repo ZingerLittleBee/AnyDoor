@@ -90,6 +90,13 @@ if args[:2] == ["run", "list"]:
     emit("release_runs")
 if args[:2] == ["run", "watch"]:
     sys.exit(state.get("watch_exit", 0))
+if args[:2] == ["variable", "get"]:
+    value = state.get("variables", {}).get(args[2])
+    if value is None:
+        sys.stderr.write("variable " + args[2] + " was not found\\n")
+        sys.exit(1)
+    print(value)
+    sys.exit(0)
 sys.stderr.write("fake gh: unexpected arguments: " + " ".join(args) + "\\n")
 sys.exit(2)
 """
@@ -163,6 +170,7 @@ class Fixture:
         self.set_state(
             releases=[release("v4.2.7")],
             ci_head_runs=[ci_run(self.head())],
+            variables={"RELEASE_PIPELINE": "actions"},
         )
 
     def run(self, *args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -390,6 +398,17 @@ class PreflightTests(FixtureTestCase):
     def test_gh_must_be_authenticated(self) -> None:
         self.repo.set_state(auth_ok=False)
         self.assertFails(self.repo.cut("--dry-run"), "gh is not authenticated")
+
+    def test_pipeline_switch_off_blocks_a_cut_and_warns_a_dry_run(self) -> None:
+        for variables, shown in (({}, "unset"), ({"RELEASE_PIPELINE": "local"}, "'local'")):
+            with self.subTest(shown=shown):
+                self.repo.set_state(variables=variables)
+                before = self.repo.snapshot()
+                self.assertFails(self.repo.cut("--yes"), f"RELEASE_PIPELINE is {shown}")
+                self.assertEqual(self.repo.snapshot(), before)
+                dry = self.repo.cut("--dry-run")
+                self.assertEqual(dry.returncode, 0, dry.stderr)
+                self.assertIn(f"RELEASE_PIPELINE is {shown}", dry.stdout)
 
     def test_failed_or_running_ci_blocks_the_cut(self) -> None:
         head = self.repo.head()

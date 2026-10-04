@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "description": "Marketing landing page for AnyDoor — a macOS menu bar control center driven by global hotkeys.",
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro build",
+    "dev": "bun scripts/prepare-appcast.mjs && astro dev",
+    "start": "bun run dev",
+    "build": "bun scripts/prepare-appcast.mjs && astro build",
     "preview": "bun run build && wrangler dev",
     "astro": "astro",
     "deploy": "bun run build && wrangler deploy",

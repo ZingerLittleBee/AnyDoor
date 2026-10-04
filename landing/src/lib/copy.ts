@@ -239,7 +239,7 @@ export const copy = {
       },
       {
         q: { zh: '我可以自己从源码构建吗？', en: 'Can I build it from source myself?' },
-        a: { zh: '可以。仓库里包含完整的 Make 流水线：make swift-release 构建二进制，make release <version> 做签名、公证、上传 GitHub Release 并更新 Sparkle appcast。', en: 'Yes. The repo ships a complete Make pipeline: `make swift-release` builds the binary, and `make release <version>` signs, notarizes, ships to GitHub Releases, and refreshes the Sparkle appcast.' },
+        a: { zh: '可以。make swift-release 构建二进制，make install 把它装进 /Applications。正式版由 GitHub Actions 从发布 tag 构建、签名、公证，发布到 GitHub Releases 并更新 Sparkle appcast。', en: 'Yes. `make swift-release` builds the binary and `make install` installs it in /Applications. Official releases are built, signed, and notarized by GitHub Actions from a release tag, then published to GitHub Releases along with the Sparkle appcast.' },
       },
     ] as { q: Bi; a: Bi }[],
   },

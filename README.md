@@ -394,16 +394,25 @@ make swift-release
 
 ## Release Packaging
 
-Releases are signed with Developer ID, notarized with Apple, packaged as a DMG
-and Sparkle zip, then published to GitHub Releases with an updated appcast.
-The release Make targets automatically load `.env` through `bash`, so the same
-commands work from fish, zsh, bash, or sh.
+Releases are built, signed with Developer ID, notarized, packaged as a DMG and
+Sparkle zip, and published to GitHub Releases with a signed appcast by GitHub
+Actions. A maintainer only cuts the release locally:
 
-Stable release setup is documented below. For the release-branch policy,
-first and subsequent Beta commands, feed verification, and recovery guidance,
-see the [Beta release runbook](docs/beta-updates.md#beta-release-runbook).
+```bash
+# Print the plan (preflight, version, CHANGELOG and Info.plist changes, notes).
+make release-dryrun
 
-### Packaging commands
+# Bump Info.plist, cut CHANGELOG, commit, tag, and push; Actions does the rest.
+make release            # next Stable, inferred from Info.plist
+make release 4.3.0      # explicit Stable, from main
+make release 4.3.0-beta.1   # Beta, from release/4.3-beta
+```
+
+The pipeline, its required settings and credentials, rehearsals, and recovery
+are documented in [Releasing on GitHub Actions](docs/releasing.md). Channel and
+branch policy is in the [Beta release runbook](docs/beta-updates.md#beta-release-runbook).
+
+### Local builds
 
 ```bash
 # Build the release binary only.
@@ -414,121 +423,11 @@ make install
 
 # Remove /Applications/AnyDoor.app.
 make uninstall
-
-# Download the pinned Sparkle command line tools.
-make sparkle-tools
-
-# Create or update the notarytool keychain profile from .env.
-make notary-profile
-
-# Verify the Developer ID signing identity in the login keychain.
-security find-identity -v -p codesigning
-
-# Verify the notarytool keychain profile from .env.
-make notary-check
-
-# Validate the full release pipeline without committing, tagging, pushing,
-# or creating a GitHub release.
-make release-dryrun 1.0.1
-
-# Omit the version to auto-increment the patch version from Info.plist.
-make release-dryrun
-
-# Publish a real signed and notarized release.
-make release 1.1.0
 ```
 
-### One-time machine setup
-
-1. Copy `.env.example` to `.env` and fill the local release values.
-
-   Keep `.env` local only. It is ignored by git.
-   Fill `APPLE_ID`, `APPLE_TEAM_ID`, `NOTARY_PROFILE`,
-   `SIGNING_IDENTITY`, and `REPO_URL`. Leave
-   `APPLE_APP_SPECIFIC_PASSWORD` empty after the notary profile has been
-   saved to Keychain.
-
-2. Confirm the Developer ID signing identity exists in the login keychain:
-
-   ```bash
-   security find-identity -v -p codesigning
-   ```
-
-   The expected identity is:
-
-   ```bash
-   Developer ID Application: Bee Zinger (9VM4RM39R3)
-   ```
-
-3. Create the notarytool keychain profile if it does not already exist:
-
-   ```bash
-   make notary-profile
-   ```
-
-   Enter the Apple app-specific password at the secure prompt. After this
-   succeeds, the password is stored in Keychain under `NOTARY_PROFILE`; it is
-   not needed for future release builds and should not remain in `.env`.
-
-4. Verify the notary profile:
-
-   ```bash
-   make notary-check
-   ```
-
-5. Install the local release tools:
-
-   ```bash
-   brew install create-dmg
-   make sparkle-tools
-   ```
-
-6. Confirm GitHub CLI authentication:
-
-   ```bash
-   gh auth status -h github.com
-   ```
-
-### Dry run
-
-Run this before every real release. It signs, notarizes, packages, signs the
-Sparkle update, and generates `appcast.xml`, but stops before committing,
-tagging, pushing, or creating a GitHub release. Candidate artifacts are built
-in an isolated temporary directory; tracked release files and temporary
-artifacts are restored when the command succeeds, fails, or is interrupted.
-
-This uses the same preflight checks as a real release: run it from a clean
-`main` branch that is in sync with `origin/main`.
-
-```bash
-make release-dryrun 1.0.1
-```
-
-If no version is passed, the script increments the patch version from the
-current `CFBundleShortVersionString`. The current value must already be strict
-`MAJOR.MINOR.PATCH`.
-
-The successful command leaves the working tree clean and does not overwrite an
-existing `dist/` directory.
-
-### Real release
-
-Real releases must run from a clean `main` branch that is in sync with
-`origin/main`. The `CHANGELOG.md` `## [Unreleased]` section must be non-empty.
-
-```bash
-git checkout main
-git pull --ff-only origin main
-
-make release 1.1.0
-```
-
-Pass the version explicitly for real releases.
-
-The release script bumps `Info.plist`, moves the changelog entry, builds,
-codesigns, notarizes, packages the DMG and zip, regenerates the Sparkle appcast,
-commits, tags, pushes, creates a draft GitHub release, uploads assets, and then
-publishes it.
+`make install` signs with `SIGNING_IDENTITY` from a local `.env` (see
+`.env.example`) when that certificate is in the keychain, so macOS keeps the
+app's permissions across rebuilds; otherwise it signs ad hoc.
 
 ## How It Works
 

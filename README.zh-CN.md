@@ -335,138 +335,38 @@ make swift-release
 
 ## 发布打包
 
-发布流程会使用 Developer ID 签名，提交 Apple 公证，打包 DMG 和 Sparkle
-更新 zip，然后创建 GitHub Release 并更新 appcast。
-发布相关的 Make target 会通过 `bash` 自动加载 `.env`，所以同一组命令可以在
-fish、zsh、bash 或 sh 里直接使用。
+正式版由 GitHub Actions 构建、使用 Developer ID 签名、公证，打包为 DMG 和
+Sparkle zip，连同签名后的 appcast 发布到 GitHub Releases。维护者只需在本地切出版本：
 
-下面记录 Stable 发布的本机配置。Beta 的 release 分支规则、首次与后续版本
-命令、Feed 验证和失败恢复见 [Beta 发布操作手册](docs/beta-updates.md#beta-release-runbook)。
+```bash
+# 打印发布计划（预检、版本号、CHANGELOG 与 Info.plist 改动、发布说明）。
+make release-dryrun
 
-### 打包相关命令
+# 更新 Info.plist、切分 CHANGELOG、提交、打 tag 并推送，其余由 Actions 完成。
+make release            # 下一个 Stable，从 Info.plist 推断
+make release 4.3.0      # 指定 Stable，从 main 发布
+make release 4.3.0-beta.1   # Beta，从 release/4.3-beta 发布
+```
+
+流水线、所需的仓库设置与凭据、演练和故障恢复见
+[Releasing on GitHub Actions](docs/releasing.md)。渠道与分支策略见
+[Beta 发布操作手册](docs/beta-updates.md#beta-release-runbook)。
+
+### 本地构建
 
 ```bash
 # 只构建 release 二进制。
 make swift-release
 
-# 构建并安装 /Applications/AnyDoor.app，供本机使用。
+# 构建并安装 /Applications/AnyDoor.app 供本地使用。
 make install
 
-# 移除 /Applications/AnyDoor.app。
+# 删除 /Applications/AnyDoor.app。
 make uninstall
-
-# 下载固定版本的 Sparkle 命令行工具。
-make sparkle-tools
-
-# 从 .env 创建或更新 notarytool keychain profile。
-make notary-profile
-
-# 检查登录钥匙串里的 Developer ID 签名身份。
-security find-identity -v -p codesigning
-
-# 从 .env 检查 notarytool keychain profile 是否可用。
-make notary-check
-
-# 验证完整发布流水线，但不提交、不打 tag、不 push、不创建 GitHub Release。
-make release-dryrun 1.0.1
-
-# 不传版本时，会基于 Info.plist 当前版本自动递增 patch。
-make release-dryrun
-
-# 发布经过签名和公证的正式版本。
-make release 1.1.0
 ```
 
-### 一次性机器配置
-
-1. 复制 `.env.example` 为 `.env`，并填写本机发布变量。
-
-   `.env` 只保留在本地，已经被 git 忽略，不要提交。
-   需要填写 `APPLE_ID`、`APPLE_TEAM_ID`、`NOTARY_PROFILE`、
-   `SIGNING_IDENTITY` 和 `REPO_URL`。notary profile 存入 Keychain 后，
-   `APPLE_APP_SPECIFIC_PASSWORD` 应该保持为空。
-
-2. 确认登录钥匙串里有 Developer ID 签名身份：
-
-   ```bash
-   security find-identity -v -p codesigning
-   ```
-
-   当前期望的身份是：
-
-   ```bash
-   Developer ID Application: Bee Zinger (9VM4RM39R3)
-   ```
-
-3. 如果还没有 notarytool keychain profile，先创建它：
-
-   ```bash
-   make notary-profile
-   ```
-
-   在安全提示里输入 Apple app-specific password。成功后，凭据会存入
-   Keychain，并通过 `NOTARY_PROFILE` 引用。之后打包发布不再需要这个密码，
-   也不应该继续把 `APPLE_APP_SPECIFIC_PASSWORD` 明文留在 `.env` 里。
-
-4. 验证 notary profile：
-
-   ```bash
-   make notary-check
-   ```
-
-5. 安装本地发布工具：
-
-   ```bash
-   brew install create-dmg
-   make sparkle-tools
-   ```
-
-6. 确认 GitHub CLI 已登录：
-
-   ```bash
-   gh auth status -h github.com
-   ```
-
-### Dry run
-
-每次正式发布前都先跑一次 dry run。它会完成签名、公证、DMG 打包、Sparkle
-zip 签名和 `appcast.xml` 生成，但会在提交 commit、打 tag、push、创建
-GitHub Release 之前停止。
-
-dry run 使用和正式发布相同的 preflight：需要在干净的 `main` 分支上执行，
-并且本地 `main` 要与 `origin/main` 保持同步。
-
-```bash
-make release-dryrun 1.0.1
-```
-
-如果不传版本，脚本会基于当前 `CFBundleShortVersionString` 自动递增 patch。
-当前版本必须已经是严格的 `MAJOR.MINOR.PATCH`。
-
-预期输出包括：
-
-- `dist/AnyDoor.app`
-- `dist/AnyDoor-1.0.1.zip`
-- `dist/AnyDoor-1.0.1.dmg`
-- `appcast.xml`
-
-### 正式发布
-
-正式发布必须在干净的 `main` 分支上执行，并且本地 `main` 要与 `origin/main`
-保持同步。`CHANGELOG.md` 的 `## [Unreleased]` 小节必须有内容。
-
-```bash
-git checkout main
-git pull --ff-only origin main
-
-make release 1.1.0
-```
-
-正式发布建议显式传入版本号。
-
-发布脚本会更新 `Info.plist` 版本，移动 changelog 条目，执行构建和
-codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appcast，
-提交 commit，打 tag，push，创建 GitHub draft release，上传产物，最后发布。
+如果钥匙串中有本地 `.env`（参见 `.env.example`）里 `SIGNING_IDENTITY` 指定的证书，
+`make install` 会用它签名，macOS 在重新构建后会保留应用的权限；否则使用 ad hoc 签名。
 
 ## 工作原理
 
