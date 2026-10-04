@@ -237,8 +237,14 @@ explicit go-ahead; nothing in this repository performs them.
 
 5. **Deployment environments.** Each holds the `CLOUDFLARE_API_TOKEN` and
    `CLOUDFLARE_ACCOUNT_ID` secrets. Delete the repository-level copies once all
-   three have them: a reusable workflow does not receive repository secrets, and
-   environment secrets keep the token away from pull request and branch runs.
+   three have them: environment secrets keep the token away from pull request and
+   branch runs.
+
+   `release.yml` calls `release-build.yml`, `deploy-feed.yml`, and
+   `deploy-landing.yml` with `secrets: inherit`. Without it, the called jobs'
+   environment secrets resolve to empty strings although their environment
+   variables resolve (actions/runner#4453). Because `inherit` also passes every
+   repository secret to those workflows, keep the repository free of secrets.
 
    | Environment | Deployment rule | Reviewer | Used by |
    | --- | --- | --- | --- |
