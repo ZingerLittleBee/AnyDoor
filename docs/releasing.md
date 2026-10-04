@@ -1,32 +1,22 @@
 # Releasing on GitHub Actions
 
-This runbook describes the tag-triggered release pipeline that replaces the local
-`make release` / `make beta-release` driver. Channel semantics, the version encoding,
-and the branch model are unchanged; [Beta Updates](beta-updates.md) remains their
-reference.
+Releases are cut locally with `make release` and built, signed, notarized, and
+published by GitHub Actions. Channel semantics, the version encoding, and the
+branch model are described in [Beta Updates](beta-updates.md).
 
-## Phase status
+```bash
+make release-dryrun [VERSION]   # preflight and plan; changes nothing
+make release [VERSION]          # X.Y.Z (default: next Stable) or X.Y.Z-beta.N
+```
 
-**Phase 1 (current): the pipeline exists but is gated off.** The local commands in
-[Beta Updates](beta-updates.md#beta-release-runbook) are still the only way to publish.
+`make release` runs [`scripts/release/cut.py`](../scripts/release/cut.py). Add
+`YES=1` to skip its confirmation prompt.
 
-- [`release.yml`](../.github/workflows/release.yml) triggers on every pushed `v*` tag, but its `meta` job
-  runs only when the repository variable `RELEASE_PIPELINE` equals `actions`. The
-  variable is unset, so tags pushed by the old local flow start a run in which every
-  job is skipped.
-- [`release-rehearsal.yml`](../.github/workflows/release-rehearsal.yml) runs the unsigned half of the pipeline on
-  pull requests that touch release tooling.
-- [`scripts/release/cut.py`](../scripts/release/cut.py) is the future `make release`.
-  It is not wired into the Makefile. In phase 1, use it only with `--dry-run`: a real cut
-  pushes a tag that nothing publishes.
-- [`deploy-feed.yml`](../.github/workflows/deploy-feed.yml) and
-  [`deploy-landing.yml`](../.github/workflows/deploy-landing.yml) still deploy on
-  `release: published`, which serves the local flow.
-
-**Phase 2 (cutover)** adds the feed, latest-marker, landing, and post-publish
-verification jobs to `release.yml`, moves feed and landing deployment off the
-`release: published` trigger, wires `make release` to `cut.py`, and sets
-`RELEASE_PIPELINE=actions`. See [cutover](#cutover).
+**Pipeline switch.** [`release.yml`](../.github/workflows/release.yml) triggers on
+every pushed `v*` tag, but its `meta` job runs only when the repository variable
+`RELEASE_PIPELINE` equals `actions`; otherwise every job skips. `cut.py` refuses
+to push a tag while the switch is off. Delete the variable to pause releases
+without a commit.
 
 ## Pipeline
 
@@ -53,7 +43,11 @@ flowchart LR
     build --> signed
     plugins --> signed
     signed --> publish["publish<br/>draft, upload, verify, publish"]
-    publish -.-> phase2["phase 2: feed, latest,<br/>landing, verify"]
+    publish --> feed["feed<br/>deploy-feed.yml"]
+    feed --> latest["latest<br/>Stable only"]
+    latest --> landing["landing<br/>deploy-landing.yml, Stable only"]
+    feed --> verify["verify<br/>smoke checks"]
+    landing --> verify
   end
 ```
 
@@ -65,6 +59,10 @@ flowchart LR
 | `plugins` | ubuntu | `contents: read` | none | `pnpm verify`, then deterministic `plugin-<id>.zip` archives. |
 | `package-signed` | macOS (`xcode-27`) | `contents: read`, `id-token: write`, `attestations: write` | all release secrets | Developer ID signing, notarization and stapling of the app and DMG, Sparkle zip, appcast, `SHA256SUMS`, build provenance attestation. |
 | `publish` | ubuntu | `contents: write`, `attestations: read` | none | Verifies `SHA256SUMS` and attestations, then `publish_release.py`: binds one draft by release id (the tag must peel to the built commit), uploads with retry and reconciliation, compares remote assets by sha256 digest, and publishes that id with `make_latest=false` once it is the tag's only release. |
+| `feed` | ubuntu | `contents: read` | Cloudflare (`feed-production`) | [`deploy-feed.yml`](../.github/workflows/deploy-feed.yml): requires an immutable Release, verifies the `appcast.xml` asset against the release attestation, its feed signature against `SPARKLE_PUBLIC_ED_KEY`, and its content against the tag; rejects a rollback of either channel head; deploys it byte for byte and compares the live bytes. |
+| `latest` | ubuntu | `contents: write` | none | Stable only: marks the Release as latest once the feed is live, so the GitHub `latest/download/appcast.xml` path (clients up to 4.1.0) moves together with the canonical feed. |
+| `landing` | ubuntu | `contents: read` | Cloudflare (`landing-production`) | Stable only: [`deploy-landing.yml`](../.github/workflows/deploy-landing.yml) builds the site from the tag with the Release's `appcast.xml` as its version source and deploys it. |
+| `verify` | ubuntu | `contents: read`, `attestations: read` | none | `gh release verify`; the live feed equals the asset; for Stable, the `latest/download/appcast.xml` path equals it too and anydoor.dev links the new DMG. |
 
 Release runs share the `anydoor-release` concurrency group without cancellation:
 each appcast is a read-modify-write of the previous feed, so releases must run one
@@ -116,11 +114,17 @@ crafted tag.
   the `.p12` is deleted immediately after import. `notarize.sh` writes the App Store
   Connect key to a private file it deletes when the step ends. The Sparkle private key
   reaches `generate_appcast` and `sign_update` only on stdin, in a fresh empty directory.
-- **Publish zone.** `publish` is the only job with `contents: write`. It runs no Swift
+- **Publish zone.** `publish` and `latest` are the only jobs with `contents: write`;
+  `latest` only flips the latest marker. It runs no Swift
   or pnpm code, and verifies checksums and attestations before creating anything.
   GitHub allows several drafts for one tag, so it addresses its own draft by release
   id, never by tag name, and refuses to publish while any other release exists for the
   tag.
+
+- **Deploy zone.** `feed` and `landing` hold the Cloudflare credentials, as
+  secrets of the `feed-production`, `feed-manual`, and `landing-production`
+  environments, never at repository level. They run no Swift code and deploy
+  only content that the earlier zones produced and attested.
 
 **Single maintainer.** The maintainer both pushes the tag and approves the
 environment, so approval is a deliberate confirmation step, not separation of duties.
@@ -154,7 +158,7 @@ Every Release carries the complete `appcast.xml` that becomes the live feed.
    either channel head against the seed), and `verify_sparkle_signatures.py` check the
    enclosure signature and length and the feed signature against the pinned public key.
 5. **Publish.** The asset is uploaded with the DMG, zip, plugin zips, and `SHA256SUMS`.
-   In phase 2 the feed job deploys this asset byte for byte.
+   The `feed` job then deploys this asset byte for byte.
 
 Clients up to 4.1.0 still read `releases/latest/download/appcast.xml`, so every Release
 keeps the asset, and the feed bytes deployed live must equal it.
@@ -190,17 +194,16 @@ pin, `Package.swift`, `Package.resolved`, `Info.plist`, `Resources/`, and `tooli
 Dispatch it manually with `workflow_dispatch` to rehearse `main`.
 
 Neither rehearsal exercises Developer ID signing, notarization, the real Sparkle key,
-or `publish`. The first real run is the cutover Beta.
+`publish`, or the deployments. The first real run is the cutover Beta.
 
-## Phase 2 setup checklist
+## Repository setup
 
 These are repository-setting and credential changes. Each one needs the owner's
 explicit go-ahead; nothing in this repository performs them.
 
-1. **Immutable releases first.** Enable Settings → General → Releases → "Enable
-   release immutability" before the first Actions release. Immutability applies only to
-   Releases published afterwards, and the pipeline's draft, upload, publish order is
-   already compatible.
+1. **Immutable releases.** Settings → General → Releases → "Enable release
+   immutability". Immutability applies only to Releases published afterwards; the
+   feed deployment accepts immutable Releases only.
 2. **Environment `release`.** Settings → Environments → New environment:
    - Required reviewer: the maintainer. Clear "Allow administrators to bypass
      configured protection rules".
@@ -216,21 +219,36 @@ explicit go-ahead; nothing in this repository performs them.
    | `SPARKLE_ED_PRIVATE_KEY` | The existing Sparkle EdDSA private key, exported as below |
 
 4. **Variables.** Environment variables reach only jobs that reference the
-   environment, so the variable that `meta` also reads is a repository variable.
-   Both kinds are editable by admins only.
+   environment, so the variables that `meta` and `feed` also read are repository
+   variables. Both kinds are editable by admins only.
 
    | Variable | Level | Content |
    | --- | --- | --- |
    | `ASC_API_KEY_ID` | environment `release` | The API key ID |
    | `ASC_API_ISSUER_ID` | environment `release` | The App Store Connect issuer ID |
    | `DEVELOPER_ID_SHA1` | environment `release` | SHA-1 of the signing identity, from `security find-identity -v -p codesigning` |
-   | `SPARKLE_PUBLIC_ED_KEY` | repository | The public key; must equal `SUPublicEDKey` in `Info.plist`. Read by `meta` and `package-signed`; do not also define it in the environment, where it would shadow the repository value for `package-signed` only. |
+   | `SPARKLE_PUBLIC_ED_KEY` | repository | The public key; must equal `SUPublicEDKey` in `Info.plist`. Read by `meta`, `package-signed`, and `feed`; do not also define it in an environment, where it would shadow the repository value. |
+   | `RELEASE_PIPELINE` | repository | `actions` turns the pipeline on (see the pipeline switch above) |
 
-5. **Tag ruleset** on `refs/tags/v*`: restrict creations, updates, and deletions, and
+5. **Deployment environments.** Each holds the `CLOUDFLARE_API_TOKEN` and
+   `CLOUDFLARE_ACCOUNT_ID` secrets. Delete the repository-level copies once all
+   three have them: a reusable workflow does not receive repository secrets, and
+   environment secrets keep the token away from pull request and branch runs.
+
+   | Environment | Deployment rule | Reviewer | Used by |
+   | --- | --- | --- | --- |
+   | `feed-production` | tag `v*` | none | `release.yml` → `deploy-feed.yml` |
+   | `feed-manual` | branch `main` | maintainer | `Update Feed` dispatch: redeploy a Release's feed |
+   | `landing-production` | tag `v*`, branch `main` | none | `release.yml` → `deploy-landing.yml`, and its dispatch |
+
+6. **Cloudflare Workers Builds.** Disconnect the Git integration of the landing
+   Worker, so that only `deploy-landing.yml` deploys the site.
+7. **Tag ruleset** on `refs/tags/v*`: restrict creations, updates, and deletions, and
    block force pushes, with bypass for the repository admin role only. Actions never
    creates tags, so it needs no bypass.
-6. **Fork pull requests.** Require approval for workflows from outside collaborators,
-   so the macOS rehearsal cannot be triggered freely.
+8. **Fork pull requests.** Require approval for workflows from all outside
+   collaborators, so the macOS rehearsal cannot be triggered freely.
+9. **Actions SHA pinning.** Require actions to be pinned to a full commit SHA.
 
 ### Exporting the Sparkle key through a RAM disk
 
@@ -260,23 +278,21 @@ is in `scripts/sparkle-bin/` after `make sparkle-tools`.
 
 ## Cutover
 
-1. Complete the [setup checklist](#phase-2-setup-checklist).
-2. Merge the phase-1 tooling with a green PR rehearsal.
-3. Merge the cutover PR: phase-2 jobs in `release.yml`, feed and landing deployment
-   driven by the pipeline instead of `release: published`, `make release` wired to
-   `cut.py`, the old local driver retired, and `LEGACY_UNSIGNED_FEED_TAG` in
-   `scripts/release/release.conf` set to the last Release the local flow published
-   (its feed is unsigned; every later seed is signed by the pipeline).
-4. Set the repository variable `RELEASE_PIPELINE` to `actions`.
-5. Cut a Beta as the first Actions release:
-   `python3 scripts/release/cut.py --version X.Y.Z-beta.1`. Approve `package-signed`
-   when asked. Confirm on real hardware that the annotated tag survived checkout, the
-   keychain signed without prompts, the API key's role was sufficient, and the
-   previous Stable updates to the Beta.
-6. Remove the committed `appcast.xml` once the landing site no longer reads it.
+The old local driver, which built, signed, and published on the maintainer's Mac,
+was removed with the commit that wired `make release` to `cut.py`. Its last
+Release, v4.2.7, published an unsigned feed; `LEGACY_UNSIGNED_FEED_TAG` in
+[`release.conf`](../scripts/release/release.conf) names it so the first pipeline
+release can seed from it. Steps to the first Actions release:
 
-To return to the local flow, delete the `RELEASE_PIPELINE` variable; tag pushes become
-no-ops again.
+1. Complete the [repository setup](#repository-setup).
+2. Set the repository variable `RELEASE_PIPELINE` to `actions`.
+3. Cut a Beta as the first Actions release: `make release X.Y.Z-beta.1` from
+   `release/X.Y-beta`. Approve `package-signed` when asked. Confirm on real hardware
+   that the annotated tag survived checkout, the keychain signed without prompts,
+   the API key's role was sufficient, and the previous Stable updates to the Beta.
+4. After the first pipeline Stable, consider enforcing signed feeds in the app
+   (`SURequireSignedFeed` with `SUVerifyUpdateBeforeExtraction`): every feed from
+   then on carries a signature.
 
 ## Failure and recovery
 
@@ -303,7 +319,8 @@ after that, cut the next version.
 | `publish` fails while the Release is a draft | Re-run failed jobs; `publish_release.py` adopts the tag's single draft, keeps assets whose digest matches, and replaces the rest. Deleting a leftover draft is harmless. |
 | `publish` reports several releases for the tag | Someone else created a draft for the tag. Inspect and delete the extra drafts, then re-run failed jobs. |
 | Seed has no valid feed signature | The previous Release's `appcast.xml` or the live feed was not produced by the pipeline. Investigate before releasing; never relax the check to get past it. |
-| Published, but the feed deployment failed (phase 2) | Redeploy the feed from that Release's `appcast.xml` asset only, by re-running the failed feed job. Never republish or delete the Release. |
+| Published, but the feed deployment failed | Re-run failed jobs: `feed`, then `latest`, `landing`, and `verify`. Never republish or delete the Release. If the run can no longer be re-run, dispatch `Update Feed` with the tag (approval in `feed-manual`), then mark the Release latest and dispatch `Landing` for a Stable. The feed never rolls back; fix a bad release with the next version. |
+| `latest` or `landing` failed | Re-run failed jobs. The feed is already live, so clients update meanwhile; only the GitHub latest path and the website lag. |
 | A published release is broken | Ship the next version promptly, with a `Sparkle-Critical-Update-Version` trailer if needed. |
 | A bug in the workflow itself | A tag runs the workflow from its own commit. Merge the fix and cut the next version. |
 | `release/X.Y-beta` was deleted before a re-run | Re-run only the failed jobs, which skips `meta`'s ancestry check. |

@@ -21,7 +21,7 @@ the [navigation map](docs/agents/navigation.md) replaces the old conceptual dire
 | Change Script Plugins or command-palette navigation | [Script plugins](docs/agents/architecture.md#script-plugins), [command palette](docs/agents/architecture.md#command-palette), [plugin author guide](tooling/README.md) |
 | Change windows, capture, recording, or localization | [Windows and localization](docs/agents/architecture.md#windows-and-localization), [capture and recording](docs/agents/architecture.md#capture-and-recording) |
 | Change backup, Config Sync, or privileged system actions | [Backup and sync](docs/agents/architecture.md#backup-and-sync), [system services](docs/agents/architecture.md#system-services) |
-| Release, package, or deploy the app, landing site, or feed | [Deployment](docs/deployment.md), [Beta Updates](docs/beta-updates.md) |
+| Release, package, or deploy the app, landing site, or feed | [Releasing](docs/releasing.md), [Deployment](docs/deployment.md), [Beta Updates](docs/beta-updates.md) |
 | Review a change | [Coding standards](CODING_STANDARDS.md), then the relevant current contract from [docs](docs/README.md) |
 
 ## Cross-cutting invariants

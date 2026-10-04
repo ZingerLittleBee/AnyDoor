@@ -44,24 +44,24 @@ version.
 
 Stable releases require a clean `main` exactly equal to `origin/main`. A Beta
 for `X.Y` requires a clean, remote-synchronized `release/X.Y-beta` branch. The
-release script also requires the latest non-prerelease Stable tag to be an
+release preflight also requires the latest published Stable tag to be an
 ancestor of the Beta branch, so a Stable hotfix must be merged into the Beta
-line before another Beta can ship.
+line before another Beta can ship. The pipeline's `meta` job repeats these
+checks against the pushed tag.
 
-Stable and Beta use separate commands. The Stable command rejects prerelease
-identities, while the Beta command requires an explicit `X.Y.Z-beta.N`
-identity. Both delegate packaging to one internal driver so signing and
-notarization cannot drift between channels.
+One command cuts both channels; the version decides the channel and the branch.
+Without a version it infers the next Stable. A Beta always needs an explicit
+`X.Y.Z-beta.N`.
 
 ```bash
 make release 4.1.1
-make beta-release 4.2.0-beta.1
+make release 4.2.0-beta.1
 ```
 
-The matching validation-only commands are `make release-dryrun` and
-`make beta-release-dryrun`. A Beta release never falls back to an inferred
-version. Both dry runs restore tracked release files and discard their isolated
-candidate artifacts on success, failure, or interruption.
+`make release-dryrun [VERSION]` runs the same preflight and prints the plan
+without changing anything. The cut itself only bumps `Info.plist`, cuts the
+changelog (Stable), commits, tags, and pushes; GitHub Actions builds, signs,
+notarizes, and publishes ([Releasing on GitHub Actions](releasing.md)).
 
 Beta releases snapshot `[Unreleased]` into their release notes without cutting
 the changelog. Stable releases perform the normal changelog cut. Both pass the
@@ -71,9 +71,9 @@ Release body as a line break.
 
 ## Beta release runbook
 
-CI is the test gate: the release commands build, sign, notarize, package, and
-publish, but they do not run the test suite. Do not publish until every required
-check on the change PR has passed. Run the dry run before every real release.
+The cut requires a successful `ci.yml` push run for `HEAD`, and the release
+workflow runs the test suite again on the tag before anything is signed. Run
+the dry run before every real release.
 
 ### First Beta on a version line
 
@@ -100,14 +100,14 @@ The working tree must be clean, and local `HEAD` must equal
 notes intended for Beta users, then validate and publish:
 
 ```bash
-make beta-release-dryrun 4.2.0-beta.1
-git status --short
-make beta-release 4.2.0-beta.1
+make release-dryrun 4.2.0-beta.1
+make release 4.2.0-beta.1
 ```
 
-The successful dry run leaves the working tree clean. The real command creates
-and pushes `chore: release v4.2.0-beta.1`, tags that commit, uploads the signed
-and notarized artifacts, and publishes a GitHub prerelease.
+The dry run changes nothing. The real command creates `chore: release
+v4.2.0-beta.1`, tags it, pushes both atomically, and follows the release
+workflow, which waits for approval of its signing job and then publishes a
+GitHub prerelease.
 
 ### Later Betas on the same version line
 
@@ -122,9 +122,8 @@ git switch release/4.2-beta
 git pull --ff-only origin release/4.2-beta
 git status --short
 
-make beta-release-dryrun 4.2.0-beta.2
-git status --short
-make beta-release 4.2.0-beta.2
+make release-dryrun 4.2.0-beta.2
+make release 4.2.0-beta.2
 ```
 
 Each Beta snapshots the current `[Unreleased]` section without cutting it, so
@@ -132,26 +131,15 @@ keep that section accurate for the release notes you intend to publish.
 
 ### Post-release verification
 
-Publishing the GitHub prerelease automatically triggers `Update Feed`; do not
-manually dispatch the workflow during a normal release. Verify the Release,
-assets, workflow, canonical feed, and a real update from the previous Stable:
+The release workflow deploys the feed and verifies the published Release, its
+attestation, and the live feed bytes itself; do not dispatch `Update Feed`
+during a normal release. Check the run and the Release:
 
 ```bash
 VERSION=4.2.0-beta.2
 
-gh release view "v$VERSION" \
-  --json isDraft,isPrerelease,assets,url
-
-gh run list \
-  --workflow deploy-feed.yml \
-  --event release \
-  --branch "v$VERSION" \
-  --limit 1
-
-curl --fail --silent --show-error \
-  -H 'Cache-Control: no-cache' \
-  "https://anydoor.dev/appcast.xml?verify=$VERSION" \
-  | grep -A 8 "${VERSION%-beta.*} Beta ${VERSION##*.}"
+gh run list --workflow release.yml --branch "v$VERSION" --limit 1
+gh release view "v$VERSION" --json isDraft,isPrerelease,isImmutable,assets,url
 ```
 
 On a Mac running the previous Stable, enable **Receive Beta updates**, manually
@@ -159,66 +147,38 @@ check for updates, and verify discovery, download, installation, relaunch, and
 the displayed version. A successful GitHub Release alone is not client
 acceptance.
 
-Stable and Beta publication retry GitHub draft creation, each asset upload, and
-publishing up to four times, waiting 2, 4, and 8 seconds between attempts. A
-failed request is reconciled against remote state: an already-created draft is
-reused, an uploaded asset with the expected size is retained, and an already
-published release is not published again. Incomplete uploads are replaced only
-while the release is a draft.
-
-If publication still fails after a commit or tag was created, inspect the remote
-state before retrying:
-
-```bash
-gh release view "v$VERSION" --json isDraft,publishedAt,assets
-```
-
-Keep the existing tag, Release, and local `dist/` artifacts. If any assets are
-missing or incomplete, upload them to the draft before publishing; never replace
-assets on a published release. Once all assets are uploaded, resume only the
-publication step:
-
-```bash
-gh release edit "v$VERSION" --draft=false
-```
-
-Do not delete a Release just because the publish command timed out, or blindly
-rerun the entire release against an identity that already exists. If `Update
-Feed` fails only at deployed-byte verification, compare the live appcast with
-the Release asset after propagation and rerun the failed job only when the
-deployed bytes are correct.
+Failures and their recovery, including a published Release whose feed did not
+deploy, are listed in [failure and recovery](releasing.md#failure-and-recovery).
+Never delete or republish a Release, and never move a tag.
 
 ## Appcast publication
 
-`https://anydoor.dev/appcast.xml` is the mutable canonical feed. GitHub Release
-assets are immutable snapshots. The release script downloads the canonical
-feed into an isolated temporary archive, adds only the current release, and
-uses `generate_appcast --versions` so channel parameters apply only to the new
-item. It then validates the internal version, display version, channel,
-signature, and version-pinned enclosure URL.
+`https://anydoor.dev/appcast.xml` is the mutable canonical feed. Every GitHub
+Release carries the complete, signed `appcast.xml` that became the live feed
+when it was published. The release pipeline seeds the next feed from the
+previous Release's asset, which must byte-equal the live feed, adds only the
+current release with `generate_appcast`, and signs the whole feed
+([appcast as a Release asset](releasing.md#appcast-as-a-release-asset)).
 
-The `Update Feed` workflow runs after a GitHub Release is published, when the
-enclosure already exists. It serializes deployments and rejects a candidate
-that would roll back either the Stable or Beta head. The independent
-`anydoor-feed` Worker owns only `/appcast.xml`, with a five-minute client cache.
-A Stable release also deploys the landing site; a Beta prerelease does not.
-Landing metadata is always selected from the latest default-channel item.
+The `Update Feed` workflow deploys a Release's asset byte for byte. It
+serializes deployments and rejects a candidate that would roll back either the
+Stable or Beta head. The independent `anydoor-feed` Worker owns only
+`/appcast.xml`, with a five-minute client cache. A Stable release also marks
+the Release as latest and deploys the landing site; a Beta prerelease does
+neither. Landing metadata is always selected from the latest default-channel
+item.
 
-Before the bridge release, bootstrap the currently checked-in Stable-only feed
-with the manual `Update Feed` workflow and its `bootstrap` input. Verify the URL
-returns valid XML before publishing the bridge. The bridge remains attached to
-the old GitHub `latest/download/appcast.xml` path so existing 4.1.0 clients can
-discover it, while its bundled `SUFeedURL` moves subsequent checks to the
-canonical feed.
-
-The canonical endpoint is the only automatic feed for bridge-and-later clients.
-There is no client-side fallback in this release. A feed outage delays update
-discovery but does not affect the installed application.
+Clients up to 4.1.0 still read the GitHub `latest/download/appcast.xml` path;
+the bridge release moved bundled `SUFeedURL` to the canonical feed. The
+canonical endpoint is the only automatic feed for bridge-and-later clients.
+There is no client-side fallback. A feed outage delays update discovery but
+does not affect the installed application.
 
 ## Initial Beta infrastructure rollout
 
 The following sequence records the one-time rollout that introduced the Beta
-channel. It is historical context, not the runbook for every Beta release.
+channel, with the local release commands of the time. It is historical context,
+not the runbook for every Beta release.
 
 1. Merge `feat/beta-updates` into `main`.
 2. Bootstrap and verify the Stable-only canonical feed.
