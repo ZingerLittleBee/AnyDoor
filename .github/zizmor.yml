@@ -18,3 +18,13 @@ rules:
   cache-poisoning:
     ignore:
       - ci.yml
+
+  # release.yml: a called job's environment secrets resolve to empty strings
+  # unless the caller passes `secrets: inherit` (actions/runner#4453), so the
+  # signing, feed, and landing calls must inherit. All credentials live in
+  # environments behind deployment rules, and the repository has no secrets of
+  # its own to leak through `inherit` (docs/releasing.md keeps it that way).
+  # Remove this entry once environment secrets resolve without `inherit`.
+  secrets-inherit:
+    ignore:
+      - release.yml
