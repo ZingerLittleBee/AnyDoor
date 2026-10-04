@@ -187,12 +187,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # The new worker version takes a few seconds to reach every edge, which
+      # serve the previous feed meanwhile, so poll until the bytes match.
       - name: Verify deployed bytes
         run: |
-          curl --fail --silent --show-error \
-            --connect-timeout 10 --max-time 60 \
-            --retry 12 --retry-delay 2 --retry-max-time 60 --retry-all-errors \
-            -H 'Cache-Control: no-cache' \
-            "https://anydoor.dev/appcast.xml?deployment=${GITHUB_RUN_ID}" \
-            -o "$RUNNER_TEMP/deployed-appcast.xml"
-          cmp "$FEED" "$RUNNER_TEMP/deployed-appcast.xml"
+          deployed="$RUNNER_TEMP/deployed-appcast.xml"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+                 -H 'Cache-Control: no-cache' \
+                 "https://anydoor.dev/appcast.xml?deployment=${GITHUB_RUN_ID}" \
+                 -o "$deployed" \
+               && cmp --silent "$FEED" "$deployed"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::https://anydoor.dev/appcast.xml still differs from the release feed"
+          cmp "$FEED" "$deployed"
