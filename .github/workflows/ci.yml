@@ -1,7 +1,7 @@
 name: CI
 
-# The one gate every pull request has to pass. scripts/release.sh never runs
-# the test suite, so nothing else stands between a red suite and a release.
+# The one gate every pull request has to pass. release.yml also calls this
+# workflow on the tag commit, so a red suite blocks a tag-triggered release.
 #
 # Changes that cannot affect the Swift build or the tooling workspace skip the
 # whole workflow (a run happens only when some changed file falls outside this
@@ -11,7 +11,9 @@ name: CI
 # the required check pending forever.
 on:
   push:
-    branches: [main]
+    # Beta release branches too: scripts/release/cut.py refuses to tag a HEAD
+    # without a green push run.
+    branches: [main, 'release/*-beta']
     paths-ignore: &docs-and-meta
       - '*.md'
       - 'docs/**'
@@ -21,17 +23,29 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - '.github/dependabot.yml'
+      - '.github/zizmor.yml'
+      - '.github/actionlint.yaml'
       - '.github/scripts/**'
       - '.github/workflows/check-commit-attribution.yml'
       - '.github/workflows/deploy-*.yml'
+      - '.github/workflows/workflow-lint.yml'
       - '.gitignore'
       - 'lefthook.yml'
   pull_request:
     paths-ignore: *docs-and-meta
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      skip-universal:
+        description: Skip the universal release build (the caller builds release binaries itself).
+        type: boolean
+        default: false
 
+# A called workflow sees its caller's name in github.workflow, so a release
+# run's test gate cannot cancel (or be cancelled by) the regular CI run on the
+# same ref.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -44,7 +58,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # .github/macos-toolchain.env owns the Xcode pin; the action fails if
       # this runner image no longer ships that exact build.
@@ -55,7 +71,7 @@ jobs:
       # `.build` would skip recompiling unchanged modules, and the warning gate
       # below only sees warnings that are actually re-emitted.
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
@@ -94,15 +110,17 @@ jobs:
         working-directory: tooling
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 10
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: pnpm
@@ -114,31 +132,57 @@ jobs:
       - name: Verify
         run: pnpm verify
 
+  release-tools:
+    name: Release tooling unit tests
+    # scripts/release/** unit tests. macOS-only cases (PlistBuddy, hdiutil,
+    # codesign) skip here; the release rehearsal exercises them on macOS.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+
+      - name: Test
+        run: uv run --locked --project scripts/release python -m unittest discover -s scripts/release/tests
+
   universal-build:
     name: Universal release build (arm64 + x86_64)
-    # Mirrors step 4 of scripts/release-driver.sh. The debug job only compiles arm64,
-    # so the x86_64 halves of every `#if arch(arm64)` else-branch (the Intel DDC
-    # brightness backend, most notably) are type-checked nowhere else until
-    # release day. Too slow for every PR, cheap once per merge.
-    if: github.event_name != 'pull_request'
+    # Builds and assembles the app with the release scripts and parameters.
+    # The debug job only compiles arm64, so the x86_64 halves of every
+    # `#if arch(arm64)` else-branch (the Intel DDC brightness backend, most
+    # notably) are type-checked nowhere else until release day. Too slow for
+    # every PR, cheap once per merge. A release run skips it: release-build.yml
+    # builds the same thing on the tag.
+    if: github.event_name != 'pull_request' && !inputs.skip-universal
     runs-on: xcode-27
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up the pinned toolchain
         uses: ./.github/actions/setup-macos-toolchain
 
       - name: Cache SwiftPM dependencies
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
             swiftpm-${{ runner.os }}-
 
-      # The release script additionally pins the deployment target via linker
-      # flags; that is a packaging concern, irrelevant to a compile check.
       - name: Build
-        run: swift build -c release --build-system swiftbuild --arch arm64 --arch x86_64
+        run: scripts/release/build.sh
+
+      - name: Assemble
+        run: scripts/release/assemble.sh --out dist

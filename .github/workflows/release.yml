@@ -1,0 +1,284 @@
+name: Release
+
+# Tag-triggered release: meta gate -> tests -> unsigned build + plugins -> one
+# approved signing job (release-build.yml) -> publish. See docs/releasing.md.
+#
+# Every job hangs off `meta`, whose job-level `if` is the phase-1 gate below,
+# so while RELEASE_PIPELINE is unset a tag pushed by the local `make release`
+# flow starts this workflow and every job skips.
+on:
+  push:
+    tags: ['v*']
+
+# The appcast is a read-modify-write of the previous release's feed, so every
+# release (stable and beta) runs strictly one after another and is never
+# cancelled halfway through notarization or upload.
+#
+# `queue: max` would keep every pending tag queued, but actionlint 1.7.12 still
+# rejects the key, so the default `single` queue applies: while one release
+# runs, a newer pending run replaces an older pending one. Push one release tag
+# at a time (cut.py waits on the run); a replaced run shows as cancelled and is
+# recovered with "Re-run all jobs". Add `queue: max` once actionlint accepts it.
+concurrency:
+  group: anydoor-release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  meta:
+    name: Release gate
+    # Phase-1 gate: the local `make release` flow stays authoritative until the
+    # cutover sets the RELEASE_PIPELINE repository variable to `actions`.
+    if: vars.RELEASE_PIPELINE == 'actions'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+      display_version: ${{ steps.identity.outputs.display_version }}
+      prerelease: ${{ steps.identity.outputs.prerelease }}
+      previous_tag: ${{ steps.published.outputs.previous_tag }}
+      phased_rollout_interval: ${{ steps.trailers.outputs.phased_rollout_interval }}
+      critical_update_version: ${{ steps.trailers.outputs.critical_update_version }}
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Later steps and jobs use only the validated outputs of this step, never
+      # the raw ref name.
+      - name: Resolve identity
+        id: identity
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/release/meta.py identity --tag "$TAG" --github-output "$GITHUB_OUTPUT"
+
+      # actions/checkout can materialize the pushed tag as a lightweight ref;
+      # fetch the tag object itself so the annotated-tag check sees it.
+      - name: Fetch the tag object
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: git fetch --no-tags --force origin "+refs/tags/$TAG:refs/tags/$TAG"
+
+      - name: List published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release list --exclude-drafts --limit 200 \
+            --json tagName,isPrerelease,publishedAt > "$RUNNER_TEMP/published.json"
+
+      - name: Verify the version is new
+        id: published
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          python3 scripts/release/meta.py verify-monotonic --tag "$TAG" \
+            --published "$RUNNER_TEMP/published.json" --github-output "$GITHUB_OUTPUT"
+
+      - name: Verify the tag
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+          LATEST_STABLE_TAG: ${{ steps.published.outputs.latest_stable_tag }}
+        run: |
+          python3 scripts/release/meta.py verify-tag --tag "$TAG" \
+            --latest-stable-tag "$LATEST_STABLE_TAG"
+
+      # SPARKLE_PUBLIC_ED_KEY is a repository variable, not a `release`
+      # environment variable: this job references no environment, and
+      # environment variables reach only jobs that do.
+      - name: Verify Info.plist
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+            echo "::error::The SPARKLE_PUBLIC_ED_KEY variable is not set"
+            exit 1
+          fi
+          python3 scripts/release/meta.py verify-plist --tag "$TAG" \
+            --plist Info.plist --package-swift Package.swift \
+            --expected-public-key "$SPARKLE_PUBLIC_ED_KEY"
+
+      - name: Parse tag trailers
+        id: trailers
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: python3 scripts/release/meta.py trailers --tag "$TAG" --github-output "$GITHUB_OUTPUT"
+
+      - name: Extract release notes
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          python3 scripts/release/meta.py notes --tag "$TAG" --changelog CHANGELOG.md \
+            --out "$RUNNER_TEMP/notes/release-notes.md"
+          cat "$RUNNER_TEMP/notes/release-notes.md"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Test gate
+    needs: meta
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      # release-build.yml builds the universal app itself.
+      skip-universal: true
+
+  build:
+    name: Build and sign
+    needs: [meta, test]
+    permissions:
+      contents: read
+      id-token: write # package-signed: OIDC token for provenance signing
+      attestations: write # package-signed: store the attestations
+    uses: ./.github/workflows/release-build.yml
+    with:
+      mode: signed
+      tag: ${{ needs.meta.outputs.tag }}
+      notes-artifact: release-notes
+      previous-tag: ${{ needs.meta.outputs.previous_tag }}
+      phased-rollout-interval: ${{ needs.meta.outputs.phased_rollout_interval }}
+      critical-update-version: ${{ needs.meta.outputs.critical_update_version }}
+
+  publish:
+    name: Publish GitHub Release
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write # create, upload to and publish the draft release
+      attestations: read # gh attestation verify
+    env:
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.meta.outputs.tag }}
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.build.outputs.assets-artifact }}
+          path: ${{ runner.temp }}/assets
+
+      - name: Download release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+
+      # Everything is checked locally before the draft exists: a published
+      # release cannot be changed, only replaced by a new version.
+      - name: Verify checksums and the asset set
+        working-directory: ${{ runner.temp }}/assets
+        run: |
+          sha256sum --check --strict SHA256SUMS
+          listed="$(awk '{print $2}' SHA256SUMS | LC_ALL=C sort)"
+          present="$(find . -maxdepth 1 -type f ! -name SHA256SUMS -exec basename {} \; | LC_ALL=C sort)"
+          if [[ "$listed" != "$present" ]]; then
+            echo "::error::SHA256SUMS does not list exactly the downloaded assets"
+            diff <(echo "$listed") <(echo "$present") || true
+            exit 1
+          fi
+          for required in "AnyDoor-$VERSION.dmg" "AnyDoor-$VERSION.zip" appcast.xml; do
+            if [[ ! -f "$required" ]]; then
+              echo "::error::Missing release asset $required"
+              exit 1
+            fi
+          done
+          if ! compgen -G 'plugin-*.zip' > /dev/null; then
+            echo "::error::No plugin-*.zip release assets"
+            exit 1
+          fi
+          for file in $present; do
+            case "$file" in
+              "AnyDoor-$VERSION.dmg" | "AnyDoor-$VERSION.zip" | appcast.xml | plugin-*.zip) ;;
+              *)
+                echo "::error::Unexpected release asset $file"
+                exit 1
+                ;;
+            esac
+          done
+
+      - name: Verify provenance attestations
+        working-directory: ${{ runner.temp }}/assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for file in *; do
+            gh attestation verify "$file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-build.yml" \
+              --source-ref "refs/tags/$TAG" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
+
+      # From here on every call addresses the release id bound by `create`,
+      # never the tag name: GitHub allows several drafts per tag, and only this
+      # draft carries the verified bytes. publish_release.py compares remote
+      # assets by sha256 digest and publishes with make_latest=false.
+      - name: Create the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPLAY_VERSION: ${{ needs.meta.outputs.display_version }}
+          PRERELEASE: ${{ needs.meta.outputs.prerelease }}
+        run: |
+          args=(create --tag "$TAG" --commit "$GITHUB_SHA" --title "AnyDoor $DISPLAY_VERSION"
+            --notes "$RUNNER_TEMP/notes/release-notes.md")
+          if [[ "$PRERELEASE" == true ]]; then
+            args+=(--prerelease)
+          fi
+          python3 scripts/release/publish_release.py --github-output "$GITHUB_OUTPUT" "${args[@]}"
+
+      - name: Upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          python3 scripts/release/publish_release.py upload --release-id "$RELEASE_ID" \
+            --tag "$TAG" --assets "$RUNNER_TEMP/assets"
+
+      - name: Compare remote assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          python3 scripts/release/publish_release.py verify --release-id "$RELEASE_ID" \
+            --tag "$TAG" --assets "$RUNNER_TEMP/assets"
+
+      # `latest` stays where it is; phase 2 moves it after the feed deploys.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          python3 scripts/release/publish_release.py publish --release-id "$RELEASE_ID" \
+            --tag "$TAG" --assets "$RUNNER_TEMP/assets"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 2 (cutover PR) adds jobs here, after `publish`:
+  #   - deploy-feed: deploy this release's appcast.xml asset (workflow_call)
+  #   - latest: `gh release edit --latest` for stable once the feed is live
+  #   - deploy-landing: stable only (workflow_call)
+  #   - verify: post-release smoke checks (live feed bytes, landing version,
+  #     `gh release verify`, attestation)
+  # ---------------------------------------------------------------------------

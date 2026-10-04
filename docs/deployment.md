@@ -6,7 +6,7 @@ path; account-side Git integrations can deploy the same Worker independently.
 
 | Surface | Entry point | Trigger and verification |
 | --- | --- | --- |
-| macOS app | [Release runbook](beta-updates.md), [release driver](../scripts/release-driver.sh) | Explicit Stable/Beta release command after its matching dry run; verify the Release assets and canonical feed. |
+| macOS app | [Release runbook](beta-updates.md), [release driver](../scripts/release-driver.sh), [Actions release pipeline](releasing.md) | Explicit Stable/Beta release command after its matching dry run; verify the Release assets and canonical feed. The tag-triggered `release.yml` pipeline is gated off by the `RELEASE_PIPELINE` repository variable until cutover. |
 | Marketing Worker `anydoor` | [Landing workflow](../.github/workflows/deploy-landing.yml), [Worker config](../landing/wrangler.jsonc) | Pull requests build without deploying. Published Stable releases deploy; manual `workflow_dispatch` also deploys. Inspect the workflow event and checked-out ref. |
 | Marketing Worker `anydoor` | Cloudflare Workers Builds Git integration | Account-side production branch and watch paths determine push-triggered builds and deployments. Inspect the live Worker settings and deployment history before assuming a merge is release-only. |
 | Update-feed Worker `anydoor-feed` | [Feed workflow](../.github/workflows/deploy-feed.yml), [Worker config](../feed/wrangler.jsonc) | Every published GitHub Release, including Beta, updates the canonical mixed-channel feed. Manual bootstrap/repair paths have separate validation. |

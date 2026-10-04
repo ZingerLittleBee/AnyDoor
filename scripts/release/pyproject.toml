@@ -1,0 +1,12 @@
+[project]
+name = "anydoor-release-tools"
+version = "0"
+description = "AnyDoor release pipeline tooling: DMG layout and Sparkle signature checks."
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography>=46",
+    "dmgbuild==1.6.7",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,29 @@
+# zizmor suppressions. Every entry needs a justification and an exit condition;
+# fix findings in the workflow instead whenever possible.
+rules:
+  # zizmor recommends the `uses: $/...` self-repository syntax, but actionlint
+  # 1.7.12 (the other required workflow check) rejects it as an invalid action
+  # and reusable-workflow reference. Our `./` references point at the commit
+  # being built: every job that uses a local action checks out that commit
+  # first and clones nothing else into the workspace. Remove this entry and
+  # migrate once actionlint accepts `$/`.
+  self-repository:
+    disable: true
+
+  # Release phase 1 freezes deploy-feed.yml and deploy-landing.yml except for
+  # SHA-pinning (the local release flow still depends on them). The cutover PR
+  # rewrites both workflows; remove these entries there.
+  artipacked:
+    ignore:
+      - deploy-feed.yml
+      - deploy-landing.yml
+  # ci.yml: zizmor treats the `release/*-beta` push trigger as a publishing
+  # workflow, but ci.yml uploads no artifacts and only caches SwiftPM clones and
+  # the pnpm store for its own test jobs. Release binaries come from
+  # release-build.yml, which restores no cache at all. Remove the entry if
+  # ci.yml ever publishes or uploads what it builds.
+  cache-poisoning:
+    ignore:
+      - ci.yml
+      - deploy-feed.yml
+      - deploy-landing.yml
