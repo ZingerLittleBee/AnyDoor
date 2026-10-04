@@ -1,0 +1,79 @@
+name: Workflow lint
+
+# Static checks for every workflow, composite action and Dependabot config:
+# actionlint (syntax, expressions, shellcheck on run blocks) and zizmor
+# (template injection, credential persistence, excessive permissions, unpinned
+# actions, cache poisoning). Suppressions live in .github/zizmor.yml, each with
+# its justification.
+on:
+  pull_request:
+    paths:
+      - '.github/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/**'
+
+concurrency:
+  group: workflow-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  ACTIONLINT_VERSION: '1.7.12'
+  # sha256 of actionlint_<version>_linux_amd64.tar.gz (the release's checksums
+  # file and the GitHub asset digest agree).
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  ZIZMOR_VERSION: '1.30.1'
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+
+      # actionlint runs the runner image's shellcheck on every run: block.
+      - name: Run actionlint
+        run: '"$RUNNER_TEMP/actionlint" -color'
+
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+
+      # The token enables zizmor's online audits (impostor commits, known
+      # vulnerable actions, ref confusion); it only needs read access.
+      - name: Run zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx "zizmor==$ZIZMOR_VERSION" --format github .github
