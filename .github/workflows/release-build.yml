@@ -1,0 +1,585 @@
+name: Release build
+
+# Shared by release.yml (mode: signed) and release-rehearsal.yml (mode: unsigned).
+#
+# Trust boundaries:
+# - build and plugins run third-party code (SwiftPM build plugins and macros,
+#   npm packages) and never see a secret or a cache. Their outputs are data:
+#   no job below executes a binary or script that came from an artifact.
+# - package-signed is the only job that references the `release` environment,
+#   so one approval releases the Developer ID, notary and Sparkle secrets, each
+#   scoped to the single step that uses it. Everything it executes runs as one
+#   user on one disk, so all of it is trusted: the tag's scripts, Apple's tools,
+#   the checksum-pinned Sparkle tools, and the uv.lock-pinned Python packages
+#   (cryptography, dmgbuild, ds_store, mac_alias), installed before any secret.
+# - package-unsigned rehearses the same steps with an ad-hoc signature and a
+#   throwaway Sparkle key, and has no environment.
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: '`signed` (release environment, real credentials) or `unsigned` (rehearsal).'
+        type: string
+        required: true
+      tag:
+        description: Release tag vX.Y.Z[-beta.N]; synthetic in unsigned mode.
+        type: string
+        required: true
+      notes-artifact:
+        description: Artifact holding release-notes.md (the release body and embedded Sparkle notes).
+        type: string
+        required: true
+      previous-tag:
+        description: Most recently published release; its appcast.xml asset seeds generate_appcast.
+        type: string
+        default: ''
+      seed-from-git:
+        description: First migration only. Seed from `git show REV:appcast.xml` instead of the previous asset.
+        type: string
+        default: ''
+      phased-rollout-interval:
+        description: Sparkle phased rollout interval in seconds; empty to disable.
+        type: string
+        default: ''
+      critical-update-version:
+        description: Sparkle critical update version; empty to disable.
+        type: string
+        default: ''
+      rehearsal-version:
+        description: Unsigned mode only. Release id written into Info.plist before building.
+        type: string
+        default: ''
+    outputs:
+      assets-artifact:
+        description: Artifact with the publishable assets and SHA256SUMS.
+        value: ${{ jobs.package-signed.outputs.assets-artifact || jobs.package-unsigned.outputs.assets-artifact }}
+      notary-logs-artifact:
+        description: Artifact with notarytool logs (signed mode only).
+        value: ${{ jobs.package-signed.outputs.notary-logs-artifact }}
+
+permissions: {}
+
+env:
+  UV_VERSION: '0.12.23'
+
+jobs:
+  build:
+    name: Build universal app (no secrets)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          REHEARSAL_VERSION: ${{ inputs.rehearsal-version }}
+        run: |
+          case "$MODE" in
+            signed)
+              if [[ -n "$REHEARSAL_VERSION" ]]; then
+                echo "::error::rehearsal-version is only valid in unsigned mode"
+                exit 1
+              fi
+              ;;
+            unsigned) ;;
+            *)
+              echo "::error::mode must be signed or unsigned, got '$MODE'"
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the pinned toolchain
+        uses: ./.github/actions/setup-macos-toolchain
+
+      # Deliberately no actions/cache: a tag run can restore caches written by
+      # the default branch, and the signed app must not depend on them.
+
+      - name: Apply the rehearsal version
+        if: inputs.rehearsal-version != ''
+        env:
+          REHEARSAL_VERSION: ${{ inputs.rehearsal-version }}
+        run: scripts/bump-version.sh "$REHEARSAL_VERSION"
+
+      - name: Build
+        run: scripts/release/build.sh
+
+      - name: Assemble
+        run: scripts/release/assemble.sh --out dist
+
+      # upload-artifact drops symlinks and executable bits inside frameworks;
+      # ditto keeps the bundle intact.
+      - name: Archive the app
+        run: ditto -c -k --keepParent dist/AnyDoor.app "$RUNNER_TEMP/AnyDoor.app.zip"
+
+      - name: Upload app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-unsigned
+          path: ${{ runner.temp }}/AnyDoor.app.zip
+          if-no-files-found: error
+          compression-level: 0
+          # Signed runs wait for the environment approval and may re-run
+          # package-signed after an Apple outage; keep the inputs for that window.
+          retention-days: ${{ inputs.mode == 'signed' && 7 || 1 }}
+
+  plugins:
+    name: Package Script Plugins (no secrets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same pnpm major as ci.yml's tooling job. No dependency cache: these
+      # zips ship as release assets.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Package plugins
+        run: scripts/release/package-plugins.sh --out "$RUNNER_TEMP/plugins"
+
+      - name: Upload plugins
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plugins
+          path: ${{ runner.temp }}/plugins/plugin-*.zip
+          if-no-files-found: error
+          retention-days: ${{ inputs.mode == 'signed' && 7 || 1 }}
+
+  package-unsigned:
+    name: Package (unsigned rehearsal)
+    if: inputs.mode == 'unsigned'
+    needs: [build, plugins]
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      assets-artifact: rehearsal-assets
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the pinned toolchain
+        uses: ./.github/actions/setup-macos-toolchain
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install release tooling
+        run: uv sync --locked --project scripts/release
+
+      - name: Resolve identity
+        id: identity
+        env:
+          TAG: ${{ inputs.tag }}
+        run: uv run --locked --project scripts/release python scripts/release/meta.py identity --tag "$TAG" --github-output "$GITHUB_OUTPUT"
+
+      - name: Download app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-unsigned
+          path: ${{ runner.temp }}/app-unsigned
+
+      - name: Download plugins
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugins
+          path: ${{ runner.temp }}/plugins
+
+      - name: Download notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.notes-artifact }}
+          path: ${{ runner.temp }}/notes
+
+      - name: Extract app
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" "$RUNNER_TEMP/out"
+          ditto -x -k "$RUNNER_TEMP/app-unsigned/AnyDoor.app.zip" "$RUNNER_TEMP/work"
+          test -d "$RUNNER_TEMP/work/AnyDoor.app"
+
+      # The rehearsal never touches the real Sparkle key: the app copy trusts
+      # a throwaway key that dies with this job.
+      - name: Generate a rehearsal Sparkle key
+        id: rehearsal-key
+        run: |
+          key_dir="$(mktemp -d "$RUNNER_TEMP/rehearsal-key.XXXXXX")"
+          chmod 700 "$key_dir"
+          uv run --locked --project scripts/release python scripts/release/sparkle_keys.py generate \
+            --private-out "$key_dir/private.key" --public-out "$key_dir/public.key"
+          echo "dir=$key_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Trust the rehearsal key in the app copy
+        env:
+          KEY_DIR: ${{ steps.rehearsal-key.outputs.dir }}
+        run: |
+          public_key="$(tr -d '[:space:]' < "$KEY_DIR/public.key")"
+          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $public_key" \
+            "$RUNNER_TEMP/work/AnyDoor.app/Contents/Info.plist"
+
+      - name: Sign ad hoc
+        run: scripts/release/codesign.sh --app "$RUNNER_TEMP/work/AnyDoor.app" --identity -
+
+      - name: Zip the update archive
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          ditto -c -k --keepParent \
+            "$RUNNER_TEMP/work/AnyDoor.app" "$RUNNER_TEMP/out/AnyDoor-$VERSION.zip"
+
+      - name: Build the DMG
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          scripts/release/dmg.sh --app "$RUNNER_TEMP/work/AnyDoor.app" \
+            --out "$RUNNER_TEMP/out/AnyDoor-$VERSION.dmg" --volname "AnyDoor $VERSION"
+
+      - name: Fetch Sparkle tools
+        run: scripts/release/fetch-sparkle-tools.sh --dest "$RUNNER_TEMP/sparkle-tools"
+
+      - name: Seed the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous-tag }}
+          SEED_FROM_GIT: ${{ inputs.seed-from-git }}
+        run: |
+          # With neither source, rehearsal mode seeds from the live feed.
+          args=(--out "$RUNNER_TEMP/seed.xml" --mode rehearsal)
+          if [[ -n "$SEED_FROM_GIT" ]]; then
+            args+=(--from-git "$SEED_FROM_GIT")
+          elif [[ -n "$PREVIOUS_TAG" ]]; then
+            args+=(--previous-tag "$PREVIOUS_TAG")
+          fi
+          scripts/release/seed-feed.sh "${args[@]}"
+
+      - name: Generate the appcast
+        env:
+          TAG: ${{ inputs.tag }}
+          KEY_DIR: ${{ steps.rehearsal-key.outputs.dir }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          PHASED_ROLLOUT_INTERVAL: ${{ inputs.phased-rollout-interval }}
+          CRITICAL_UPDATE_VERSION: ${{ inputs.critical-update-version }}
+        run: |
+          SPARKLE_ED_PRIVATE_KEY="$(cat "$KEY_DIR/private.key")"
+          export SPARKLE_ED_PRIVATE_KEY
+          public_key="$(tr -d '[:space:]' < "$KEY_DIR/public.key")"
+          args=(
+            --seed "$RUNNER_TEMP/seed.xml"
+            --zip "$RUNNER_TEMP/out/AnyDoor-$VERSION.zip"
+            --notes "$RUNNER_TEMP/notes/release-notes.md"
+            --tools "$RUNNER_TEMP/sparkle-tools"
+            --tag "$TAG"
+            --public-key "$public_key"
+            --out "$RUNNER_TEMP/out/appcast.xml"
+          )
+          if [[ -n "$PHASED_ROLLOUT_INTERVAL" ]]; then
+            args+=(--phased-rollout-interval "$PHASED_ROLLOUT_INTERVAL")
+          fi
+          if [[ -n "$CRITICAL_UPDATE_VERSION" ]]; then
+            args+=(--critical-update-version "$CRITICAL_UPDATE_VERSION")
+          fi
+          scripts/release/appcast.sh "${args[@]}"
+          rm -rf "$KEY_DIR"
+
+      - name: Checksum the assets
+        run: |
+          cp "$RUNNER_TEMP"/plugins/plugin-*.zip "$RUNNER_TEMP/out/"
+          cd "$RUNNER_TEMP/out"
+          shasum -a 256 AnyDoor-*.dmg AnyDoor-*.zip appcast.xml plugin-*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload rehearsal assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-assets
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 3
+
+  package-signed:
+    name: Sign, notarize and sign the feed
+    if: inputs.mode == 'signed'
+    needs: [build, plugins]
+    runs-on: xcode-27
+    timeout-minutes: 150
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # OIDC token for provenance signing
+      attestations: write # store the provenance attestations
+    outputs:
+      assets-artifact: release-assets
+      notary-logs-artifact: notary-logs
+    steps:
+      # Secrets must never land on a persistent machine.
+      - name: Require a GitHub-hosted runner
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          if [[ "$RUNNER_KIND" != github-hosted ]]; then
+            echo "::error::package-signed must run on a GitHub-hosted runner, got '$RUNNER_KIND'"
+            exit 1
+          fi
+
+      # Fully qualified: an unqualified ref would resolve a branch with the
+      # tag's name before the tag itself.
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Set up the pinned toolchain
+        uses: ./.github/actions/setup-macos-toolchain
+
+      # Everything this job executes is installed before the first secret is
+      # read; later uv invocations run offline against this environment.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install release tooling
+        run: uv sync --locked --project scripts/release
+
+      - name: Fetch Sparkle tools
+        run: scripts/release/fetch-sparkle-tools.sh --dest "$RUNNER_TEMP/sparkle-tools"
+
+      - name: Resolve identity
+        id: identity
+        env:
+          TAG: ${{ inputs.tag }}
+        run: uv run --locked --project scripts/release python scripts/release/meta.py identity --tag "$TAG" --github-output "$GITHUB_OUTPUT"
+
+      - name: Download app
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: app-unsigned
+          path: ${{ runner.temp }}/app-unsigned
+
+      - name: Download plugins
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plugins
+          path: ${{ runner.temp }}/plugins
+
+      - name: Download notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.notes-artifact }}
+          path: ${{ runner.temp }}/notes
+
+      - name: Extract app
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" "$RUNNER_TEMP/out" "$RUNNER_TEMP/notary-logs"
+          ditto -x -k "$RUNNER_TEMP/app-unsigned/AnyDoor.app.zip" "$RUNNER_TEMP/work"
+          test -d "$RUNNER_TEMP/work/AnyDoor.app"
+
+      # The app was assembled by a job that ran third-party build code. Before
+      # signing it, require its Info.plist to be the tag's bytes and its update
+      # key to be the pinned one, so a tampered bundle cannot swap the key
+      # existing users will trust next.
+      - name: Verify the assembled app
+        env:
+          TAG: ${{ inputs.tag }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+            echo "::error::The SPARKLE_PUBLIC_ED_KEY variable is not set"
+            exit 1
+          fi
+          if [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$GITHUB_SHA" \
+            || "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo "::error::$TAG and the checkout must both be the commit this run built ($GITHUB_SHA)"
+            exit 1
+          fi
+          git show "refs/tags/$TAG:Info.plist" > "$RUNNER_TEMP/Info.plist.ref"
+          uv run --locked --project scripts/release python scripts/release/meta.py verify-app \
+            --app "$RUNNER_TEMP/work/AnyDoor.app" \
+            --plist-ref "$RUNNER_TEMP/Info.plist.ref" \
+            --public-key "$SPARKLE_PUBLIC_ED_KEY"
+
+      - name: Create the signing keychain
+        id: keychain
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          DEVELOPER_ID_SHA1: ${{ vars.DEVELOPER_ID_SHA1 }}
+        run: scripts/release/keychain.sh create
+
+      - name: Sign the app
+        env:
+          DEVELOPER_ID_SHA1: ${{ vars.DEVELOPER_ID_SHA1 }}
+          KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain_path }}
+        run: |
+          scripts/release/codesign.sh --app "$RUNNER_TEMP/work/AnyDoor.app" \
+            --identity "$DEVELOPER_ID_SHA1" --keychain "$KEYCHAIN_PATH"
+
+      # notarize.sh writes the API key into a private temp dir it removes on
+      # exit, so the key file never outlives the step.
+      - name: Notarize and staple the app
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ vars.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ vars.ASC_API_ISSUER_ID }}
+        run: |
+          scripts/release/notarize.sh --file "$RUNNER_TEMP/work/AnyDoor.app" --staple \
+            --log-dir "$RUNNER_TEMP/notary-logs"
+
+      - name: Zip the update archive
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          ditto -c -k --keepParent \
+            "$RUNNER_TEMP/work/AnyDoor.app" "$RUNNER_TEMP/out/AnyDoor-$VERSION.zip"
+
+      # dmgbuild is pinned third-party Python and part of this job's trusted
+      # code (see the header): locking the keychain around it would not contain
+      # it, because it runs as the same user as every later step.
+      - name: Build the DMG
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          UV_OFFLINE: '1'
+        run: |
+          scripts/release/dmg.sh --app "$RUNNER_TEMP/work/AnyDoor.app" \
+            --out "$RUNNER_TEMP/out/AnyDoor-$VERSION.dmg" --volname "AnyDoor $VERSION"
+
+      - name: Sign the DMG
+        env:
+          DEVELOPER_ID_SHA1: ${{ vars.DEVELOPER_ID_SHA1 }}
+          KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain_path }}
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          source scripts/release/lib.sh
+          dmg="$RUNNER_TEMP/out/AnyDoor-$VERSION.dmg"
+          codesign --force --sign "$DEVELOPER_ID_SHA1" --keychain "$KEYCHAIN_PATH" --timestamp \
+            -i "$(release_conf BUNDLE_ID).dmg" "$dmg"
+          codesign --verify --strict --verbose=2 "$dmg"
+          team_id="$(codesign -dvv "$dmg" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+          if [[ "$team_id" != "$(release_conf APPLE_TEAM_ID)" ]]; then
+            echo "::error::DMG TeamIdentifier is '$team_id', expected $(release_conf APPLE_TEAM_ID)"
+            exit 1
+          fi
+
+      - name: Notarize and staple the DMG
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ vars.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ vars.ASC_API_ISSUER_ID }}
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          scripts/release/notarize.sh --file "$RUNNER_TEMP/out/AnyDoor-$VERSION.dmg" --staple \
+            --log-dir "$RUNNER_TEMP/notary-logs"
+
+      # Authenticates the seed with the pinned key: appcast.sh re-signs every
+      # item it carries over, so the seed must already be signed by that key.
+      - name: Seed the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous-tag }}
+          SEED_FROM_GIT: ${{ inputs.seed-from-git }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          UV_OFFLINE: '1'
+        run: |
+          args=(--out "$RUNNER_TEMP/seed.xml" --mode release --repository "$GITHUB_REPOSITORY"
+            --public-key "$SPARKLE_PUBLIC_ED_KEY")
+          if [[ -n "$SEED_FROM_GIT" ]]; then
+            args+=(--from-git "$SEED_FROM_GIT")
+          else
+            args+=(--previous-tag "$PREVIOUS_TAG")
+          fi
+          scripts/release/seed-feed.sh "${args[@]}"
+
+      - name: Generate and sign the appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          PHASED_ROLLOUT_INTERVAL: ${{ inputs.phased-rollout-interval }}
+          CRITICAL_UPDATE_VERSION: ${{ inputs.critical-update-version }}
+          UV_OFFLINE: '1'
+        run: |
+          args=(
+            --seed "$RUNNER_TEMP/seed.xml"
+            --zip "$RUNNER_TEMP/out/AnyDoor-$VERSION.zip"
+            --notes "$RUNNER_TEMP/notes/release-notes.md"
+            --tools "$RUNNER_TEMP/sparkle-tools"
+            --tag "$TAG"
+            --public-key "$SPARKLE_PUBLIC_ED_KEY"
+            --repository "$GITHUB_REPOSITORY"
+            --out "$RUNNER_TEMP/out/appcast.xml"
+          )
+          if [[ -n "$PHASED_ROLLOUT_INTERVAL" ]]; then
+            args+=(--phased-rollout-interval "$PHASED_ROLLOUT_INTERVAL")
+          fi
+          if [[ -n "$CRITICAL_UPDATE_VERSION" ]]; then
+            args+=(--critical-update-version "$CRITICAL_UPDATE_VERSION")
+          fi
+          scripts/release/appcast.sh "${args[@]}"
+
+      - name: Checksum the assets
+        run: |
+          cp "$RUNNER_TEMP"/plugins/plugin-*.zip "$RUNNER_TEMP/out/"
+          cd "$RUNNER_TEMP/out"
+          shasum -a 256 AnyDoor-*.dmg AnyDoor-*.zip appcast.xml plugin-*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      # Attesting inside this reusable workflow makes release-build.yml the
+      # signer workflow that publish verifies against.
+      - name: Attest provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/out/AnyDoor-*.dmg
+            ${{ runner.temp }}/out/AnyDoor-*.zip
+            ${{ runner.temp }}/out/plugin-*.zip
+            ${{ runner.temp }}/out/appcast.xml
+            ${{ runner.temp }}/out/SHA256SUMS
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload notary logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notary-logs
+          path: ${{ runner.temp }}/notary-logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Delete the signing keychain
+        if: always() && steps.keychain.outcome != 'skipped'
+        run: scripts/release/keychain.sh delete

@@ -1,0 +1,110 @@
+name: Release rehearsal
+
+# Runs release-build.yml end to end without credentials: an ad-hoc signature,
+# no notarization, and a throwaway Sparkle key. The synthetic identity is the
+# first Beta after both Info.plist and every published release, so the appcast,
+# DMG and plugin steps see a version that is newer than every published release.
+on:
+  pull_request:
+    paths:
+      - 'scripts/release/**'
+      - 'scripts/resolve-release-version.sh'
+      - 'scripts/bump-version.sh'
+      - 'scripts/set-appcast-display.py'
+      - 'scripts/validate-appcast.py'
+      - 'scripts/verify-feed-publication.py'
+      - 'scripts/unwrap-release-notes.py'
+      - '.github/workflows/release*.yml'
+      - '.github/actions/**'
+      - '.github/macos-toolchain.env'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'Info.plist'
+      - 'Resources/**'
+      - 'tooling/**'
+  workflow_dispatch:
+
+concurrency:
+  group: release-rehearsal-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Plan rehearsal identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
+      previous_tag: ${{ steps.published.outputs.previous_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release list --exclude-drafts --limit 200 \
+            --json tagName,isPrerelease,publishedAt > "$RUNNER_TEMP/published.json"
+
+      # The first Beta after Info.plist and every published release: during a
+      # Beta cycle main's Info.plist trails the Betas on the release branch.
+      - name: Resolve the rehearsal identity
+        id: identity
+        run: |
+          python3 scripts/release/meta.py rehearsal-identity --plist Info.plist \
+            --published "$RUNNER_TEMP/published.json" --github-output "$GITHUB_OUTPUT"
+
+      - name: Verify the version is new
+        id: published
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          python3 scripts/release/meta.py verify-monotonic --tag "$TAG" \
+            --published "$RUNNER_TEMP/published.json" --github-output "$GITHUB_OUTPUT"
+
+      # Beta semantics: the notes are [Unreleased]. Right after a release that
+      # section is legitimately empty, which must not block rehearsing the
+      # packaging changes in this pull request.
+      - name: Extract release notes
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          notes="$RUNNER_TEMP/notes/release-notes.md"
+          python3 scripts/release/meta.py notes --tag "$TAG" --changelog CHANGELOG.md \
+            --out "$notes" --empty-placeholder '- Release rehearsal build.'
+          cat "$notes"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-notes
+          path: ${{ runner.temp }}/notes/release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Rehearse
+    needs: plan
+    # Only the signed-mode job uses id-token/attestations, and it is skipped
+    # here; GitHub still rejects a caller that grants less than any called job
+    # declares. Pull requests from forks get a read-only token regardless.
+    permissions:
+      contents: read
+      id-token: write # declared by the skipped signed-mode job
+      attestations: write # declared by the skipped signed-mode job
+    uses: ./.github/workflows/release-build.yml
+    with:
+      mode: unsigned
+      tag: ${{ needs.plan.outputs.tag }}
+      rehearsal-version: ${{ needs.plan.outputs.version }}
+      notes-artifact: rehearsal-notes
+      previous-tag: ${{ needs.plan.outputs.previous_tag }}
