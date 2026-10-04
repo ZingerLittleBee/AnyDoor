@@ -37,29 +37,19 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Pin the toolchain instead of taking the runner image default. The default
-  # drifts as the image is rebuilt, and a compiler bump changes the diagnostic
-  # set — which would turn the warning gate red on a PR that touched nothing
-  # related. Keep this equal to the Xcode developers build against locally, and
-  # bump it deliberately. If the image ever drops this version the select step
-  # fails loudly, which is the point.
-  XCODE_APP: /Applications/Xcode_26.6.app
-
 jobs:
   test:
     name: Build and test (debug, arm64)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select and report the toolchain
-        run: |
-          sudo xcode-select -s "$XCODE_APP"
-          swift --version
-          xcodebuild -version
+      # .github/macos-toolchain.env owns the Xcode pin; the action fails if
+      # this runner image no longer ships that exact build.
+      - name: Set up the pinned toolchain
+        uses: ./.github/actions/setup-macos-toolchain
 
       # Cache only SwiftPM's clone/manifest cache — never `.build`. A restored
       # `.build` would skip recompiling unchanged modules, and the warning gate
@@ -131,16 +121,14 @@ jobs:
     # brightness backend, most notably) are type-checked nowhere else until
     # release day. Too slow for every PR, cheap once per merge.
     if: github.event_name != 'pull_request'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Select and report the toolchain
-        run: |
-          sudo xcode-select -s "$XCODE_APP"
-          swift --version
+      - name: Set up the pinned toolchain
+        uses: ./.github/actions/setup-macos-toolchain
 
       - name: Cache SwiftPM dependencies
         uses: actions/cache@v6

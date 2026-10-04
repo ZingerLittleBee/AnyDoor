@@ -15,8 +15,8 @@ a pull request merged.
 ### Requirements
 
 - macOS 14+
-- The CI-pinned Xcode for verification; see `XCODE_APP` in
-  [ci.yml](.github/workflows/ci.yml) and [toolchain setup](docs/development.md).
+- The CI-pinned Xcode build for verification; see
+  [macos-toolchain.env](.github/macos-toolchain.env) and [toolchain setup](docs/development.md).
 - [`watchexec`](https://github.com/watchexec/watchexec) (optional, for hot-reload development)
 
 ### Build and run

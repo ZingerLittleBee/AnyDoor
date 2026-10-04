@@ -33,18 +33,33 @@ if [[ "$skip_build" -eq 1 && "$clean_build" -eq 1 ]]; then
 fi
 
 # CI owns the pin. Select it per process; never change global xcode-select.
-ci_xcode="$(sed -n 's/^  XCODE_APP: //p' .github/workflows/ci.yml)"
-if [[ -z "$ci_xcode" ]]; then
-  echo 'The CI XCODE_APP pin is missing' >&2
+pin_file=.github/macos-toolchain.env
+ci_xcode="$(sed -n 's/^XCODE_APP=//p' "$pin_file" 2>/dev/null || true)"
+ci_build="$(sed -n 's/^XCODE_BUILD=//p' "$pin_file" 2>/dev/null || true)"
+if [[ -z "$ci_xcode" || -z "$ci_build" ]]; then
+  echo "The CI Xcode pin (XCODE_APP, XCODE_BUILD) is missing from $pin_file" >&2
   exit 1
 fi
 if [[ -z "${DEVELOPER_DIR:-}" && -d "$ci_xcode/Contents/Developer" ]]; then
   export DEVELOPER_DIR="$ci_xcode/Contents/Developer"
 fi
 active_developer="${DEVELOPER_DIR:-$(xcode-select -p)}"
-if [[ "$active_developer" != "$ci_xcode/Contents/Developer" ]]; then
-  echo "CI toolchain: $ci_xcode/Contents/Developer" >&2
-  echo "Active toolchain: $active_developer" >&2
+# The pin is the Xcode build, not its install path: /Applications/Xcode.app
+# holding the pinned build is the same compiler as the runner's versioned path.
+active_build="$(python3 - "$active_developer/../version.plist" <<'PY'
+import plistlib
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        print(plistlib.load(handle).get("ProductBuildVersion", ""))
+except (OSError, plistlib.InvalidFileException):
+    print("")
+PY
+)"
+if [[ "$active_build" != "$ci_build" ]]; then
+  echo "CI toolchain: $ci_xcode (build $ci_build)" >&2
+  echo "Active toolchain: $active_developer (build ${active_build:-unknown})" >&2
   if [[ "$allow_mismatch" -ne 1 ]]; then
     echo 'Install/select the CI-pinned Xcode, or explicitly pass --allow-toolchain-mismatch for local evidence only.' >&2
     exit 1
