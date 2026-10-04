@@ -9,8 +9,10 @@ name: Landing
 # - A pull request that touches landing/ runs the same build without
 #   deploying, so a broken site surfaces on the PR instead of during a release.
 #
-# Both deploying paths use the `landing-production` environment, which holds
-# the Cloudflare credentials.
+# The site is a static-assets Worker. `build` runs the Astro build and its npm
+# dependencies without any secret; `deploy` only uploads that output with a
+# pinned wrangler, in the `landing-production` environment that holds the
+# Cloudflare credentials.
 on:
   workflow_call:
     inputs:
@@ -29,7 +31,6 @@ permissions: {}
 jobs:
   build:
     name: Build
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -52,15 +53,38 @@ jobs:
       - name: Test Stable release metadata
         run: bun test
 
+      # Without ANYDOOR_APPCAST (a pull request or a manual dispatch),
       # prepare-appcast.mjs fetches the live feed.
+      - name: Use the release feed
+        if: inputs.tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release download "$TAG" --pattern appcast.xml --dir "$RUNNER_TEMP/release-feed"
+          echo "ANYDOOR_APPCAST=$RUNNER_TEMP/release-feed/appcast.xml" >> "$GITHUB_ENV"
+
       - name: Build
         run: bun run build
 
+      # dist/client holds the assets and the generated wrangler.json that
+      # deploys them.
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: landing-site
+          path: landing/dist/client/
+          if-no-files-found: error
+          retention-days: 1
+
   deploy:
-    name: Build and deploy
+    name: Deploy
+    needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     environment:
@@ -79,30 +103,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Download the site
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: landing-site
+          path: landing/dist/client
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Test Stable release metadata
-        run: bun test
-
-      # Without ANYDOOR_APPCAST (a manual dispatch), prepare-appcast.mjs
-      # fetches the live feed.
-      - name: Use the release feed
-        if: inputs.tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
-        run: |
-          gh release download "$TAG" --pattern appcast.xml --dir "$RUNNER_TEMP/release-feed"
-          echo "ANYDOOR_APPCAST=$RUNNER_TEMP/release-feed/appcast.xml" >> "$GITHUB_ENV"
-
-      # `bun run deploy` builds and then deploys.
-      - name: Build and deploy to Cloudflare
-        run: bun run deploy
+      # Keep the wrangler version equal to the one landing/bun.lock resolves.
+      - name: Deploy to Cloudflare
+        run: bunx wrangler@4.145.0 deploy --config dist/client/wrangler.json
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
