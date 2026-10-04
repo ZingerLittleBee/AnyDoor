@@ -28,3 +28,4 @@ lefthook-local.yml
 # Python navigation/check tooling
 __pycache__/
 *.py[cod]
+/scripts/release/.venv/

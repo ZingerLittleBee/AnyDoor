@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
 SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+DEFAULT_REPOSITORY = "ZingerLittleBee/AnyDoor"
 
 
 def child_text(item: ET.Element, name: str, *, sparkle: bool = False) -> str | None:
@@ -73,7 +75,7 @@ def validate(args: argparse.Namespace) -> list[str]:
     enclosure = candidate.find("enclosure")
     actual_url = enclosure.get("url") if enclosure is not None else None
     expected_url = (
-        "https://github.com/ZingerLittleBee/AnyDoor/releases/download/"
+        f"https://github.com/{args.repository}/releases/download/"
         f"v{args.release_id}/AnyDoor-{args.release_id}.zip"
     )
     if actual_url != expected_url:
@@ -123,6 +125,12 @@ def validate(args: argparse.Namespace) -> list[str]:
     return errors
 
 
+def repository(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+", value):
+        raise argparse.ArgumentTypeError(f"expected OWNER/REPO, got {value!r}")
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--appcast", type=Path, required=True)
@@ -131,6 +139,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--short-version", required=True)
     parser.add_argument("--build-version", required=True)
     parser.add_argument("--display-version", required=True)
+    # Release rehearsals run in forks, whose enclosure URLs name the fork.
+    parser.add_argument(
+        "--repository",
+        type=repository,
+        default=DEFAULT_REPOSITORY,
+        help=f"GitHub OWNER/REPO hosting the release assets (default: {DEFAULT_REPOSITORY})",
+    )
     return parser.parse_args()
 
 
