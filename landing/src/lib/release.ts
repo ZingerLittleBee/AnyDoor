@@ -4,8 +4,8 @@ import { latestStableRelease, latestVersion } from './version';
 export const REPO = 'https://github.com/ZingerLittleBee/AnyDoor';
 export const RELEASES = `${REPO}/releases`;
 
-// Direct .dmg asset for the latest release. `scripts/release.sh` always uploads
-// both AnyDoor-<ver>.dmg and AnyDoor-<ver>.zip to the GitHub release.
+// Direct .dmg asset for the latest release. The release pipeline always
+// publishes both AnyDoor-<ver>.dmg and AnyDoor-<ver>.zip on the GitHub release.
 export const dmgUrl = `${RELEASES}/download/v${latestVersion}/AnyDoor-${latestVersion}.dmg`;
 
 // The .dmg wraps the same .app and is approximately the enclosure zip size.
