@@ -59,6 +59,56 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         XCTAssertEqual(none, [])
     }
 
+    @MainActor
+    func testCapturedQRImagesBecomeSearchableWithoutDrivingScheduler()
+        async throws
+    {
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingDatabaseURL: fixture.databaseURL,
+            databaseKey: fixture.databaseKey
+        ))
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        var capturedIDs: [ClipboardHistoryEntryID] = []
+        for name in ["no-qr", "single-qr", "multi-qr"] {
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setData(try visionFixture(named: name), forType: .png)
+            XCTAssertTrue(pasteboard.writeObjects([item]))
+            let outcome = try await module.capture(
+                ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+                source: .unknown
+            )
+            guard case .captured(let capture) = outcome else {
+                return XCTFail("Expected the \(name) image to be captured")
+            }
+            capturedIDs.append(capture.entryID)
+        }
+
+        // Poll only the public read API. The testing drain also starts the
+        // scheduler and would hide a broken automatic capture-to-index path.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var qrPage = try await module.page(.init(facet: .qrCode))
+        while qrPage.entries.count < 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+            qrPage = try await module.page(.init(facet: .qrCode))
+        }
+        XCTAssertEqual(
+            Set(qrPage.entries.map(\.id)),
+            Set(capturedIDs.dropFirst()),
+            "Only QR images should gain the QR facet automatically"
+        )
+        for (payload, entryID) in [
+            ("anydoor://fixture/single", capturedIDs[1]),
+            ("anydoor://fixture/alpha", capturedIDs[2]),
+            ("anydoor://fixture/beta", capturedIDs[2]),
+        ] {
+            let results = try await module.page(.init(text: payload))
+            XCTAssertEqual(results.entries.map(\.id), [entryID])
+        }
+    }
+
     func testOCRDefaultsOffAndEnablingOnlyAffectsLaterOwnedBitmapCaptures()
         async throws
     {
