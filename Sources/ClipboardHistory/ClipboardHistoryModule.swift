@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import SQLCipher
 
 public actor ClipboardHistoryModule {
     /// The encrypted store's own folder, beside `legacyPayloadDirectory`.
@@ -764,11 +765,14 @@ extension ClipboardHistoryModule {
         var configuration = Configuration()
         configuration.foreignKeysEnabled = true
         configuration.journalMode = .wal
+        configuration.busyMode = .immediateError
         configuration.publicStatementArguments = false
         configuration.prepareDatabase { database in
             try database.usePassphrase(databaseKey)
             try database.execute(sql: "PRAGMA cipher_memory_security = ON")
             try database.execute(sql: "PRAGMA secure_delete = ON")
+            // Reclaim a previously busy WAL when the next writer resets it.
+            try database.execute(sql: "PRAGMA journal_size_limit = 0")
         }
 
         do {
@@ -781,6 +785,21 @@ extension ClipboardHistoryModule {
             }
             try validateSearchRuntimeCapabilities(of: database)
             try database.writeWithoutTransaction { database in
+                // Replace SQLite's 1,000-frame PASSIVE auto-checkpoint with
+                // best-effort truncation, so completed checkpoints do not
+                // retain a second disk copy until daily maintenance. The
+                // writer's immediate busy policy preserves active readers.
+                sqlite3_wal_hook(database.sqliteConnection, { _, connection, schema, frames in
+                    if frames >= 1_000 {
+                        _ = sqlite3_wal_checkpoint_v2(
+                            connection, schema, SQLITE_CHECKPOINT_TRUNCATE,
+                            nil, nil
+                        )
+                    }
+                    // The commit already succeeded. A busy reader or a
+                    // cleanup failure must not turn it into a failed write.
+                    return SQLITE_OK
+                }, nil)
                 try database.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
                 let mode =
                     try Int.fetchOne(

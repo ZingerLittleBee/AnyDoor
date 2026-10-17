@@ -322,13 +322,24 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         let module = try fixture.open()
         await module.awaitDerivedJobsForTesting()
         _ = try await module.performMaintenance(orphanGracePeriod: 0)
-        let baseline = try await module.storageUsage()
         let text = String(
             repeating: "lorem ipsum dolor sit amet ",
             count: 80_000
         )
+        // An empty WAL hides the regression. The second large capture
+        // crosses the automatic checkpoint threshold with earlier frames
+        // still present, so retaining the WAL duplicates both captures.
+        _ = try await Self.capture("earlier " + text, in: module)
+        let baseline = try await module.storageUsage()
         _ = try await Self.capture(text, in: module)
-        await module.awaitDerivedJobsForTesting()
+        let immediateUsage = try await module.storageUsage()
+        let immediateGrowth = Double(immediateUsage) - Double(baseline)
+        XCTAssertLessThan(
+            immediateGrowth,
+            Double(text.utf8.count) * 1.6,
+            "Immediate growth was \(Int(immediateGrowth)) bytes for \(text.utf8.count) bytes of text"
+        )
+
         _ = try await module.performMaintenance(orphanGracePeriod: 0)
         let usage = try await module.storageUsage()
         let grown = Double(usage) - Double(baseline)
@@ -338,6 +349,75 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
             Double(text.utf8.count) * 1.6,
             "A \(text.utf8.count)-byte text grew storage by \(Int(grown)) bytes"
         )
+    }
+
+    func testBusyWALReaderDoesNotFailCaptureAndSpaceIsReclaimedAfterRelease()
+        async throws
+    {
+        for checkpointLatestSnapshot in [false, true] {
+            let fixture = try SearchBoundTemporaryDatabase(in: self)
+            let module = try fixture.open()
+            let text = Self.longText(
+                head: "zqxheadmarker",
+                tail: "zqxtailmarker",
+                fillerCount: 80_000
+            )
+            let first = try await Self.capture("earlier " + text, in: module)
+            let pool = try await module.requiredDatabase()
+            let oldSnapshot = try pool.makeSnapshot()
+            addTeardownBlock { try oldSnapshot.close() }
+            let oldCount = try await oldSnapshot.read {
+                try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM clipboard_entries")
+            }
+            XCTAssertEqual(oldCount, 1)
+
+            let committed = expectation(description: "capture returns while reader holds WAL")
+            let capture = Task {
+                defer { committed.fulfill() }
+                return try await ClipboardHistorySearchBoundTests.capture(text, in: module)
+            }
+            await fulfillment(of: [committed], timeout: 5)
+            let stillOldCount = try await oldSnapshot.read {
+                try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM clipboard_entries")
+            }
+            XCTAssertEqual(stillOldCount, 1)
+
+            // A reader on the latest snapshot permits backfill but still
+            // blocks TRUNCATE. The next small write can reset the frame
+            // count below the hook threshold; journal_size_limit must then
+            // reclaim the old allocation as the WAL is reused.
+            if checkpointLatestSnapshot {
+                let latestSnapshot = try pool.makeSnapshot()
+                addTeardownBlock { try latestSnapshot.close() }
+                try oldSnapshot.close()
+                let checkpoint = try await pool.writeWithoutTransaction {
+                    let row = try XCTUnwrap(Row.fetchOne(
+                        $0,
+                        sql: "PRAGMA wal_checkpoint(TRUNCATE)"
+                    ))
+                    return (busy: row[0] as Int, frames: row[1] as Int, copied: row[2] as Int)
+                }
+                XCTAssertEqual(checkpoint.busy, 1)
+                XCTAssertGreaterThan(checkpoint.frames, 1_000)
+                XCTAssertEqual(checkpoint.frames, checkpoint.copied)
+                try latestSnapshot.close()
+            } else {
+                try oldSnapshot.close()
+            }
+
+            let second = try await capture.value
+            let beforeReleaseWrite = try await module.storageUsage()
+            _ = try await module.apply(.setFavorite(first, true))
+            let afterReleaseWrite = try await module.storageUsage()
+            XCTAssertLessThan(afterReleaseWrite, beforeReleaseWrite)
+            try await Self.assertSearch("zqxheadmarker", in: module, finds: [first, second])
+            try await Self.assertSearch("zqxtailmarker", in: module, finds: [])
+            let pasted = try await module.materialize(.init(entryID: second, purpose: .normalPaste))
+            XCTAssertEqual(
+                pasted.items.first?.representations,
+                [.text(typeIdentifier: Self.plainTextType, value: text)]
+            )
+        }
     }
 
     // MARK: Search index version 2

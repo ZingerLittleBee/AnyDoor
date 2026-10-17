@@ -869,6 +869,11 @@ snapshot; repeat a changing sample before comparing the totals.
 **Long text.** Save a plain-text fixture, record its exact UTF-8 byte count,
 and take the baseline allocated-byte snapshot. Then copy the fixture:
 
+Run both an empty-WAL case and a populated-WAL case. For the latter, copy a
+different text of similar size before taking the baseline, without maintenance
+in between. A single 2 MB capture in a fresh WAL can stay below SQLite's
+automatic checkpoint threshold and hide retained-WAL duplication.
+
 ```bash
 CLIPBOARD_TEST_TEXT="$(mktemp -t anydoor-long-text)"
 { printf 'zebrahead '; yes 'lorem ipsum dolor sit amet' | head -n 80000; printf 'quokkatail'; } > "$CLIPBOARD_TEST_TEXT"
@@ -900,8 +905,18 @@ entry; `quokkatail` does not, because search covers only the first 64 KB.
 **Open product gate (known failing acceptance report).** The retest reported at
 `2026-10-01T17:46:52Z` on candidate `4a42721` observed immediate database-plus-WAL
 growth above the long-text expectation and attributed the extra space to WAL
-awaiting maintenance. That report used logical file lengths; an exact
-allocated-byte reproduction using the procedure above remains required. The
+awaiting maintenance. That report used logical file lengths. A disposable
+module reproduction on 2026-10-17 confirmed allocated-byte growth of 7,389,184
+bytes for a 2,160,020-byte capture after a similarly sized earlier capture.
+The default checkpoint copied frames into the database but retained the WAL.
+The writer now attempts a non-waiting TRUNCATE checkpoint at the same
+1,000-frame threshold; the same probe grew by 2,301,952 bytes immediately and
+2,310,144 bytes after maintenance. A busy reader keeps its snapshot and does
+not make a committed capture fail; a later write retries reclamation after
+that reader releases it. `ClipboardHistorySearchBoundTests` covers immediate
+growth and both old-snapshot and fully-backfilled WAL reader contention.
+Installed-app allocated-byte reproduction using the procedure above remains
+required. The
 earlier smoke prompt also used a stricter "just over 2 MB" expectation, so its
 `FAIL` and this plan's threshold are not interchangeable. Keep this gate open
 until the immediate and maintenance-after samples are reviewed against the

@@ -464,13 +464,13 @@ extension ClipboardHistoryModule {
         in database: DatabasePool
     ) throws {
         try Task.checkCancellation()
-        try database.write { database in
+        let didPublish = try database.write { database in
             guard try derivedJobMatches(
                 claim,
                 state: "running",
                 in: database
             ) else {
-                return
+                return false
             }
             try Self.deleteSearchFields(
                 forEntryID: claim.key.entryID,
@@ -537,6 +537,10 @@ extension ClipboardHistoryModule {
             try Self.bumpSearchIndexGeneration(in: database)
             try Self.bumpHistoryRevision(in: database)
             try faultInjector.check(.databaseTransaction)
+            return true
+        }
+        if didPublish {
+            publishMutation()
         }
     }
 

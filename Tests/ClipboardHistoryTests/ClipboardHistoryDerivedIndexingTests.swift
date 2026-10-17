@@ -59,6 +59,56 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         XCTAssertEqual(none, [])
     }
 
+    @MainActor
+    func testCapturedQRImagesBecomeSearchableWithoutDrivingScheduler()
+        async throws
+    {
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingDatabaseURL: fixture.databaseURL,
+            databaseKey: fixture.databaseKey
+        ))
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        var capturedIDs: [ClipboardHistoryEntryID] = []
+        for name in ["no-qr", "single-qr", "multi-qr"] {
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setData(try visionFixture(named: name), forType: .png)
+            XCTAssertTrue(pasteboard.writeObjects([item]))
+            let outcome = try await module.capture(
+                ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+                source: .unknown
+            )
+            guard case .captured(let capture) = outcome else {
+                return XCTFail("Expected the \(name) image to be captured")
+            }
+            capturedIDs.append(capture.entryID)
+        }
+
+        // Poll only the public read API. The testing drain also starts the
+        // scheduler and would hide a broken automatic capture-to-index path.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        var qrPage = try await module.page(.init(facet: .qrCode))
+        while qrPage.entries.count < 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+            qrPage = try await module.page(.init(facet: .qrCode))
+        }
+        XCTAssertEqual(
+            Set(qrPage.entries.map(\.id)),
+            Set(capturedIDs.dropFirst()),
+            "Only QR images should gain the QR facet automatically"
+        )
+        for (payload, entryID) in [
+            ("anydoor://fixture/single", capturedIDs[1]),
+            ("anydoor://fixture/alpha", capturedIDs[2]),
+            ("anydoor://fixture/beta", capturedIDs[2]),
+        ] {
+            let results = try await module.page(.init(text: payload))
+            XCTAssertEqual(results.entries.map(\.id), [entryID])
+        }
+    }
+
     func testOCRDefaultsOffAndEnablingOnlyAffectsLaterOwnedBitmapCaptures()
         async throws
     {
@@ -308,11 +358,14 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         async throws
     {
         let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
         let recognizer = RecaptureVisionRecognizer()
         let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
-            visionRecognizer: recognizer
+            visionRecognizer: recognizer,
+            notificationCenter: center
         ), beforeClosing: { await recognizer.releaseFirstCall() })
         let bitmap = try makeBitmap(color: .systemPurple)
         let first = try await module.capture(bitmapRequest(bitmap))
@@ -320,8 +373,10 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
 
         let duplicate = try await module.capture(bitmapRequest(bitmap))
         XCTAssertEqual(duplicate.entryID, first.entryID)
+        recorder.reset()
         await recognizer.releaseFirstCall()
         await module.awaitDerivedJobsForTesting()
+        XCTAssertEqual(recorder.count, 1, "Only the fresh result announces a change")
 
         let stale = try await module.page(
             ClipboardHistoryQuery(text: "stale generation")
@@ -337,6 +392,43 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         )
         XCTAssertEqual(job?.eligibleGeneration, 2)
         XCTAssertEqual(job?.attemptCount, 1)
+    }
+
+    func testDerivedSearchResultsPublishChangesAfterRecognition() async throws {
+        for kind in [ClipboardHistoryDerivedJobKind.qr, .ocr] {
+            let fixture = try DerivedIndexingTemporaryStore(in: self)
+            let center = NotificationCenter()
+            let recorder = ClipboardHistoryMutationRecorder(center: center)
+            let recognizer = GatedVisionRecognizer(
+                blockedKind: kind,
+                results: [kind: ["newly recognized content"]]
+            )
+            let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
+                testingDatabaseURL: fixture.databaseURL,
+                databaseKey: fixture.databaseKey,
+                visionRecognizer: recognizer,
+                notificationCenter: center
+            ), beforeClosing: { await recognizer.releaseAll() })
+            try await module.setAutomaticImageTextIndexingEnabled(kind == .ocr)
+            let capture = try await module.capture(
+                bitmapRequest(try makeBitmap(color: .systemTeal))
+            )
+            await recognizer.waitUntilStarted(kind)
+            let query = ClipboardHistoryQuery(text: "newly recognized")
+            let before = try await module.page(query)
+            XCTAssertEqual(before.entries, [])
+            recorder.reset()
+
+            await recognizer.release(kind)
+            await module.awaitDerivedJobsForTesting()
+
+            XCTAssertEqual(
+                recorder.count, 1,
+                "Open search surfaces need a change notification after \(kind) commits"
+            )
+            let after = try await module.page(query)
+            XCTAssertEqual(after.entries.map(\.id), [capture.entryID])
+        }
     }
 
     func testDisablingDoesNotCancelAlreadyEligibleOCRWork() async throws {
@@ -566,6 +658,8 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         async throws
     {
         let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
         let recognizer = CountingVisionRecognizer(
             results: [.qr: ["transactional QR"]]
         )
@@ -575,13 +669,15 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.searchInsertAfterField]
             ),
-            visionRecognizer: recognizer
+            visionRecognizer: recognizer,
+            notificationCenter: center
         ))
 
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemMint))
         )
         await module.awaitDerivedJobsForTesting()
+        XCTAssertEqual(recorder.count, 1, "Only the capture committed a change")
 
         let job = try await module.derivedJobForTesting(
             capture.entryID,

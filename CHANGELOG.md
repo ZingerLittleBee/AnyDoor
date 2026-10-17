@@ -6,6 +6,15 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clipboard History reclaims its write-ahead log after automatic checkpoints,
+  avoiding temporary duplicate disk usage after large text captures instead of
+  waiting for daily maintenance. Active readers keep their snapshots without
+  causing captures to fail.
+- Clipboard History refreshes open search results and QR filters when image
+  recognition finishes, without requiring the search query to be changed.
+
 ## [4.2.8] - 2026-10-05
 
 ### Fixed
