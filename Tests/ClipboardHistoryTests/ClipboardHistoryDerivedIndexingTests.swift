@@ -358,11 +358,14 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         async throws
     {
         let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
         let recognizer = RecaptureVisionRecognizer()
         let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
-            visionRecognizer: recognizer
+            visionRecognizer: recognizer,
+            notificationCenter: center
         ), beforeClosing: { await recognizer.releaseFirstCall() })
         let bitmap = try makeBitmap(color: .systemPurple)
         let first = try await module.capture(bitmapRequest(bitmap))
@@ -370,8 +373,10 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
 
         let duplicate = try await module.capture(bitmapRequest(bitmap))
         XCTAssertEqual(duplicate.entryID, first.entryID)
+        recorder.reset()
         await recognizer.releaseFirstCall()
         await module.awaitDerivedJobsForTesting()
+        XCTAssertEqual(recorder.count, 1, "Only the fresh result announces a change")
 
         let stale = try await module.page(
             ClipboardHistoryQuery(text: "stale generation")
@@ -387,6 +392,43 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         )
         XCTAssertEqual(job?.eligibleGeneration, 2)
         XCTAssertEqual(job?.attemptCount, 1)
+    }
+
+    func testDerivedSearchResultsPublishChangesAfterRecognition() async throws {
+        for kind in [ClipboardHistoryDerivedJobKind.qr, .ocr] {
+            let fixture = try DerivedIndexingTemporaryStore(in: self)
+            let center = NotificationCenter()
+            let recorder = ClipboardHistoryMutationRecorder(center: center)
+            let recognizer = GatedVisionRecognizer(
+                blockedKind: kind,
+                results: [kind: ["newly recognized content"]]
+            )
+            let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
+                testingDatabaseURL: fixture.databaseURL,
+                databaseKey: fixture.databaseKey,
+                visionRecognizer: recognizer,
+                notificationCenter: center
+            ), beforeClosing: { await recognizer.releaseAll() })
+            try await module.setAutomaticImageTextIndexingEnabled(kind == .ocr)
+            let capture = try await module.capture(
+                bitmapRequest(try makeBitmap(color: .systemTeal))
+            )
+            await recognizer.waitUntilStarted(kind)
+            let query = ClipboardHistoryQuery(text: "newly recognized")
+            let before = try await module.page(query)
+            XCTAssertEqual(before.entries, [])
+            recorder.reset()
+
+            await recognizer.release(kind)
+            await module.awaitDerivedJobsForTesting()
+
+            XCTAssertEqual(
+                recorder.count, 1,
+                "Open search surfaces need a change notification after \(kind) commits"
+            )
+            let after = try await module.page(query)
+            XCTAssertEqual(after.entries.map(\.id), [capture.entryID])
+        }
     }
 
     func testDisablingDoesNotCancelAlreadyEligibleOCRWork() async throws {
@@ -616,6 +658,8 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         async throws
     {
         let fixture = try DerivedIndexingTemporaryStore(in: self)
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
         let recognizer = CountingVisionRecognizer(
             results: [.qr: ["transactional QR"]]
         )
@@ -625,13 +669,15 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.searchInsertAfterField]
             ),
-            visionRecognizer: recognizer
+            visionRecognizer: recognizer,
+            notificationCenter: center
         ))
 
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemMint))
         )
         await module.awaitDerivedJobsForTesting()
+        XCTAssertEqual(recorder.count, 1, "Only the capture committed a change")
 
         let job = try await module.derivedJobForTesting(
             capture.entryID,
