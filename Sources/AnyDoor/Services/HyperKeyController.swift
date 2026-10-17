@@ -11,22 +11,29 @@ actor HyperKeyController {
     private let hidutilURL = URL(fileURLWithPath: "/usr/bin/hidutil")
     private let runner: any SubprocessRunning
     private let defaultsKey = "hyperKey.ownedSignatures"
+    private let defaultsSuiteName: String?
 
-    init(runner: any SubprocessRunning = ProcessRunner()) {
+    init(runner: any SubprocessRunning = ProcessRunner(), defaultsSuiteName: String? = nil) {
         self.runner = runner
+        self.defaultsSuiteName = defaultsSuiteName
+    }
+
+    private nonisolated var defaults: UserDefaults {
+        if let defaultsSuiteName { return UserDefaults(suiteName: defaultsSuiteName)! }
+        return .standard
     }
 
     /// Synchronous probe used by `applicationShouldTerminate` to decide
     /// whether to delay termination.
     nonisolated var hasPersistedSignatures: Bool {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        guard let data = defaults.data(forKey: defaultsKey),
               let set = try? JSONDecoder().decode(OwnedSignatures.self, from: data)
         else { return false }
         return !set.isEmpty
     }
 
     private func loadOwned() -> OwnedSignatures {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        guard let data = defaults.data(forKey: defaultsKey),
               let set = try? JSONDecoder().decode(OwnedSignatures.self, from: data)
         else { return [] }
         return set
@@ -34,7 +41,7 @@ actor HyperKeyController {
 
     private func persistOwned(_ owned: OwnedSignatures) {
         guard let data = try? JSONEncoder().encode(owned) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        defaults.set(data, forKey: defaultsKey)
     }
 
     /// Read-modify-write: remove all `removeAll` entries, optionally add `add`.

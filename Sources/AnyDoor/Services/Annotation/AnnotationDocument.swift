@@ -75,13 +75,6 @@ final class AnnotationDocument {
         elements[elements.count - 1].kind = kind
     }
 
-    /// Replaces an element by id (no-op if absent).
-    func update(id: UUID, kind: AnnotationElement.Kind) {
-        guard let i = elements.firstIndex(where: { $0.id == id }) else { return }
-        checkpoint()
-        elements[i].kind = kind
-    }
-
     /// Replaces an element by id **without** a new undo checkpoint — for streaming
     /// updates during a gesture started with `beginEdit()`.
     func updateNoCheckpoint(id: UUID, kind: AnnotationElement.Kind) {

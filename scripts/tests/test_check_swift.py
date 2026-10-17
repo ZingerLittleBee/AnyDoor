@@ -45,6 +45,8 @@ class SwiftCheckTests(unittest.TestCase):
             '  build)\n'
             '    if [[ "${FAKE_WARNING:-}" == first ]]; then\n'
             '      echo "$PWD/Tests/Example.swift:1:1: warning: example"\n'
+            '    elif [[ "${FAKE_WARNING:-}" == first_colored ]]; then\n'
+            '      printf "\\033[1m%s:1:1: \\033[1;33mwarning: example\\033[0m\\n" "$PWD/Tests/Example.swift"\n'
             '    elif [[ "${FAKE_WARNING:-}" == dependency ]]; then\n'
             '      echo "$PWD/.build/checkouts/Dependency/Sources/Example.swift:1:1: warning: dependency"\n'
             '    fi\n'
@@ -134,6 +136,12 @@ class SwiftCheckTests(unittest.TestCase):
         result = self.run_lane(FAKE_WARNING="dependency")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("test --skip-build", self.calls())
+
+    def test_colored_first_party_warning_stops_before_tests(self):
+        result = self.run_lane(FAKE_WARNING="first_colored")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("First-party build warnings must be resolved", result.stderr)
+        self.assertFalse(any(call.startswith("test ") for call in self.calls()))
 
     def test_build_failure_stops_before_tests(self):
         result = self.run_lane(FAKE_BUILD_EXIT="7")

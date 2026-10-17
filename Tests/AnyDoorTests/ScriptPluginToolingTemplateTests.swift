@@ -62,10 +62,10 @@ final class ScriptPluginToolingTemplateTests: XCTestCase {
             Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Fixtures"),
             Bundle.module.url(forResource: name, withExtension: ext),
         ]
-        guard let url = candidates.compactMap({ $0 }).first else {
-            throw XCTSkip("fixture \(name).\(ext) not found in the test bundle")
-        }
-        return url
+        return try XCTUnwrap(
+            candidates.compactMap({ $0 }).first,
+            "Required committed fixture \(name).\(ext) not found in the test bundle"
+        )
     }
 
     private func makeRuntime(spy: ScriptCapabilitySpy) -> ScriptPluginRuntime {

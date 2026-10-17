@@ -99,7 +99,7 @@ function copyTemplate(srcDir, destDir, replace) {
       copyTemplate(srcPath, destPath, replace);
     } else {
       const contents = fs.readFileSync(srcPath, "utf8");
-      fs.writeFileSync(destPath, replace(contents));
+      fs.writeFileSync(destPath, replace(contents, srcPath));
     }
   }
 }
@@ -132,8 +132,11 @@ function main() {
     __PLUGIN_NAME__: pluginName,
     __API_SPEC__: apiSpec,
   };
-  const replace = (contents) =>
-    contents.replace(/__PACKAGE_NAME__|__PLUGIN_ID__|__PLUGIN_NAME__|__API_SPEC__/g, (m) => replacements[m]);
+  const replace = (contents, filePath) =>
+    contents.replace(/__PACKAGE_NAME__|__PLUGIN_ID__|__PLUGIN_NAME__|__API_SPEC__/g, (token) => {
+      const value = replacements[token];
+      return /\.(json|ts)$/.test(filePath) ? JSON.stringify(value).slice(1, -1) : value;
+    });
 
   copyTemplate(templateDir, targetDir, replace);
 

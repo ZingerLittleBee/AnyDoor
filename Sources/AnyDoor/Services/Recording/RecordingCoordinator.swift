@@ -11,7 +11,6 @@ final class RecordingCoordinator {
     static let shared = RecordingCoordinator()
 
     private let engine = ScreenRecordingEngine()
-    private let selectionOverlay = SelectionOverlayWindow()
     private(set) var state: RecordingState = .idle
     private var elapsedSeconds = 0
     private var timerTask: Task<Void, Never>?
@@ -25,15 +24,13 @@ final class RecordingCoordinator {
     /// Hotkey / builtin entry point: start a fullscreen recording, or stop one.
     func toggle() {
         switch state {
-        case .idle: record(region: false)
+        case .idle: recordDisplayUnderMouse()
         case .recording, .paused: stop()
         case .finalizing: break
         }
     }
 
-    /// Record the display under the mouse, or, when `region` is true, a region
-    /// the user selects first.
-    func record(region: Bool) {
+    private func recordDisplayUnderMouse() {
         guard RecordingPolicy.canStart(state) else { return }
         guard ScreenCapturePermission.ensureGranted() else {
             ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
@@ -42,8 +39,7 @@ final class RecordingCoordinator {
         }
         ensureMediaPermissions(mic: settings.includeMicrophone, camera: settings.includeCamera) { [weak self] in
             guard let self else { return }
-            if region { self.beginRegionSelection() }
-            else if let target = Self.displayUnderMouse() {
+            if let target = Self.displayUnderMouse() {
                 self.beginRecording(displayID: target.id, cropRect: nil)
             } else {
                 self.finishIdle()
@@ -52,7 +48,7 @@ final class RecordingCoordinator {
     }
 
     /// Record a pre-selected region (global AppKit coords) — used by the unified
-    /// capture toolbar. Gates the same permissions as `record(region:)`, then starts
+    /// capture toolbar. Gates the same permissions as fullscreen recording, then starts
     /// recording without presenting its own selection.
     func record(rect: CGRect) {
         guard RecordingPolicy.canStart(state) else { return }
@@ -88,24 +84,6 @@ final class RecordingCoordinator {
         engine.resume()
         state = .recording
         startTimer()
-    }
-
-    // MARK: - Region selection
-
-    private func beginRegionSelection() {
-        var frozen: [CGDirectDisplayID: CGImage] = [:]
-        var targets: [TargetDisplay] = []
-        for screen in NSScreen.screens {
-            guard let id = screen.displayID, let img = LegacyScreenCapture.display(id) else { continue }
-            targets.append(TargetDisplay(id: id, frame: screen.frame, backingScale: screen.backingScaleFactor))
-            frozen[id] = img
-        }
-        guard !targets.isEmpty else { finishIdle(); return }
-        selectionOverlay.present(targets: targets, mode: .region, frozen: frozen) { [weak self] result in
-            guard let self else { return }
-            guard case let .region(_, rect) = result else { self.finishIdle(); return }
-            self.beginRecording(globalRect: rect)
-        }
     }
 
     /// Map a global AppKit rect to its display + `AVCaptureScreenInput.cropRect`

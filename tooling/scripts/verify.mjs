@@ -9,6 +9,7 @@
 // the Swift test over the committed fixture (see scripts/refresh-fixture.mjs).
 
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
@@ -149,6 +150,39 @@ async function main() {
     assertManifest(distDir);
     const source = assertBundle(distDir);
     assertSelfRegisters(source);
+    const esbuild = createRequire(path.join(projectDir, "package.json"))("esbuild");
+    const fixtureDir = path.join(toolingRoot, "..", "Tests", "AnyDoorTests", "Fixtures", "ScriptToolingTemplate");
+    process.stdout.write("\n[verify] asserting the Swift template fixture is current\n");
+    const canonicalBundle = (text) => esbuild.transformSync(text, {
+      loader: "js", minifyWhitespace: true, legalComments: "none",
+    }).code;
+    for (const file of ["manifest.json", "bundle.js"]) {
+      const generated = fs.readFileSync(path.join(distDir, file), "utf8");
+      const committed = fs.readFileSync(path.join(fixtureDir, file), "utf8");
+      check(`${file} matches the template (run scripts/refresh-fixture.mjs)`,
+        file.endsWith(".json")
+          ? JSON.stringify(JSON.parse(generated)) === JSON.stringify(JSON.parse(committed))
+          : canonicalBundle(generated) === canonicalBundle(committed));
+    }
+
+    process.stdout.write("\n[verify] asserting scaffold string escaping\n");
+    const special = 'Say "Hello" \\ path\n__PLUGIN_ID__';
+    run("node", [cli, projectDir, "--force", "--name", special,
+      "--id", special, "--api-spec", special], tmp);
+    const generatedPackage = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf8"));
+    check("JSON dependency spec round-trips quotes, slashes and newlines",
+      generatedPackage.dependencies["@anydoor-dev/api"] === special);
+    const manifestSource = fs.readFileSync(path.join(projectDir, "src", "manifest.ts"), "utf8");
+    const sandbox = { module: { exports: {} } };
+    const manifestJS = esbuild.buildSync({
+      stdin: { contents: manifestSource, loader: "ts", resolveDir: path.join(projectDir, "src") },
+      bundle: true, write: false, format: "cjs", platform: "neutral",
+    }).outputFiles[0].text;
+    vm.runInNewContext(manifestJS, sandbox);
+    check("TypeScript manifest strings round-trip without recursive substitution",
+      sandbox.module.exports.default.name === special && sandbox.module.exports.default.id === special);
+    check("README preserves the unescaped display name",
+      fs.readFileSync(path.join(projectDir, "README.md"), "utf8").startsWith(`# ${special}\n`));
 
     for (const name of EXAMPLES) {
       const exampleDist = buildExample(name);

@@ -11,7 +11,7 @@ import PluginInterface
 /// invocation.
 ///
 /// `@unchecked Sendable` is load-bearing and narrow: every stored property that
-/// touches JavaScriptCore (`context`, `anydoor`, `registeredImpl`,
+/// touches JavaScriptCore (`context`, `anydoor`,
 /// `pendingResolvers`, `nextToken`) is read and written **only** inside a block
 /// dispatched on `queue`. `JSValue`s never leave the queue — results are decoded
 /// to `ScriptValue` on the queue before any `await` resumes.
@@ -30,7 +30,6 @@ final class ScriptPluginContext: @unchecked Sendable {
 
     private var context: JSContext?
     private var anydoor: JSValue?
-    private var registeredImpl: JSValue?
     private var pendingResolvers: [Int: (resolve: JSValue, reject: JSValue)] = [:]
     private var nextToken = 0
 
@@ -249,7 +248,6 @@ final class ScriptPluginContext: @unchecked Sendable {
         }
         pendingResolvers.removeAll()
         anydoor = nil
-        registeredImpl = nil
         context = nil
     }
 

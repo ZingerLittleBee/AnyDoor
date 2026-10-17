@@ -24,8 +24,7 @@ final class TranslationSettingsTests: XCTestCase {
 
     func testEmptyServicesArrayFallsBackToSeeded() {
         let d = makeDefaults()
-        let empty = try! JSONEncoder().encode([TranslationServiceConfig]())
-        d.set(empty, forKey: TranslationSettings.servicesKey)
+        d.set("[]", forKey: TranslationSettings.servicesKey)
         let s = TranslationSettings(defaults: d)
         XCTAssertEqual(s.services.map(\.id), TranslationServiceConfig.seededDefaults().map(\.id))
     }

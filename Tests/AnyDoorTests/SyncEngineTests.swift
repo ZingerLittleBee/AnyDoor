@@ -10,6 +10,94 @@ import XCTest
 /// unresponsive-folder tests stand in file calls that block like a hung mount.
 @MainActor
 final class SyncEngineTests: XCTestCase {
+    @MainActor
+    private final class LocalReadState {
+        var shouldFail = false
+    }
+
+    private actor CountingTransport: SyncTransport {
+        let base: SyncFolderTransport
+        nonisolated var watchableDirectory: URL? { nil }
+        private(set) var reads = 0
+        private(set) var writes = 0
+
+        init(folder: URL) { base = SyncFolderTransport(folderURL: folder) }
+
+        func readPeerDocuments(excludingDeviceID id: String) async throws -> [SyncDocument] {
+            reads += 1
+            return try await base.readPeerDocuments(excludingDeviceID: id)
+        }
+
+        func writeOwnDocument(_ data: Data, deviceID: String) async throws {
+            writes += 1
+            try await base.writeOwnDocument(data, deviceID: deviceID)
+        }
+    }
+
+    func testFailedLocalReadCannotPublishTombstonesAndCanRetry() async throws {
+        enum ReadFailure: Error { case unavailable }
+        let device = try makeDevice("capture")
+        let context = device.context
+        let binding = KeyBinding(
+            keyCode: 4, modifierFlags: 256, appBundleID: "com.apple.Safari",
+            appName: "Safari", appPath: "/Applications/Safari.app"
+        )
+        context.insert(binding)
+        context.insert(Quicklink(name: "Example", link: "https://example.com"))
+        try seedPreference(device)
+        let transport = CountingTransport(folder: folder)
+        let stateURL = folder.appendingPathComponent("local-state-capture.json")
+        let ownURL = folder.appendingPathComponent(SyncStateFile.name(forDeviceID: device.id))
+        let readState = LocalReadState()
+        let engine = SyncEngine(
+            config: .init(deviceID: device.id, deviceName: device.id),
+            context: context, defaults: device.defaults, transport: transport,
+            stateStore: SyncLocalStateStore(url: stateURL), reconcileRuntime: {},
+            readLocalContent: {
+                if readState.shouldFail { throw ReadFailure.unavailable }
+                return SyncSnapshotMapping.Content(
+                    appShortcuts: try context.fetch(FetchDescriptor<KeyBinding>()).map(AppShortcutDTO.init),
+                    builtinPreferences: try context.fetch(FetchDescriptor<BuiltinPreference>()).map(BuiltinPreferenceDTO.init),
+                    quicklinks: try context.fetch(FetchDescriptor<Quicklink>()).map(QuicklinkDTO.init),
+                    settings: SyncSettingsRegistry.read(from: device.defaults)
+                )
+            }
+        )
+        var status: SyncEngineStatus?
+        engine.onStatus = { status = $0 }
+        await engine.tick()
+        let document = engine.document
+        let localBytes = try Data(contentsOf: stateURL)
+        let ownBytes = try Data(contentsOf: ownURL)
+        let reads = await transport.reads
+        let writes = await transport.writes
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(writes, 1)
+
+        readState.shouldFail = true
+        await engine.tick()
+        XCTAssertEqual(engine.document, document)
+        XCTAssertEqual(try Data(contentsOf: stateURL), localBytes)
+        XCTAssertEqual(try Data(contentsOf: ownURL), ownBytes)
+        let readsAfterFailure = await transport.reads
+        let writesAfterFailure = await transport.writes
+        XCTAssertEqual(readsAfterFailure, reads)
+        XCTAssertEqual(writesAfterFailure, writes)
+        guard case .failed(_, .applyFailed) = status else {
+            return XCTFail("A failed local read must fail the tick")
+        }
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<KeyBinding>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BuiltinPreference>()), 1)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Quicklink>()), 1)
+
+        readState.shouldFail = false
+        binding.appName = "Safari renamed"
+        try context.save()
+        await engine.tick()
+        guard case .synced = status else { return XCTFail("The next tick must retry normally") }
+        XCTAssertNotEqual(try Data(contentsOf: ownURL), ownBytes)
+        XCTAssertFalse(engine.document.entries.values.contains(where: \.isTombstone))
+    }
 
     private final class WallClock {
         var now: Int64 = 1_000
