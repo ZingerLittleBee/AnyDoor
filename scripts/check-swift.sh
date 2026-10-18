@@ -106,7 +106,7 @@ diagnostic = re.compile(
 )
 warnings = sorted({
     line for line in Path(log_path).read_text().splitlines()
-    if diagnostic.match(line)
+    if diagnostic.match(re.sub(r"\x1b\[[0-9;]*m", "", line))
 })
 if warnings:
     print("\n".join(warnings))

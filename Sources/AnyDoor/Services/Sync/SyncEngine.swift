@@ -73,6 +73,7 @@ final class SyncEngine {
     private let appPathResolver: (String) -> String?
     private let reconcileRuntime: @MainActor () async throws -> Void
     private let wallNow: () -> Int64
+    private let localContentReader: (@MainActor () throws -> SyncSnapshotMapping.Content)?
 
     private var clock: SyncClock
     private(set) var document: SyncDocument
@@ -104,7 +105,8 @@ final class SyncEngine {
         reconcileRuntime: @escaping @MainActor () async throws -> Void = {
             try await BackupService.reconcileLiveRuntime()
         },
-        wallNow: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }
+        wallNow: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) },
+        readLocalContent: (@MainActor () throws -> SyncSnapshotMapping.Content)? = nil
     ) {
         self.config = config
         self.context = context
@@ -114,6 +116,7 @@ final class SyncEngine {
         self.appPathResolver = appPathResolver
         self.reconcileRuntime = reconcileRuntime
         self.wallNow = wallNow
+        self.localContentReader = readLocalContent
 
         if let persisted = stateStore.load(), persisted.clock.deviceID == config.deviceID {
             clock = persisted.clock
@@ -221,7 +224,13 @@ final class SyncEngine {
 
         // Capture first, so the document is a superset of local state before
         // it becomes authoritative in apply.
-        captureLocalChanges()
+        do {
+            try captureLocalChanges()
+        } catch {
+            logger.error("sync local capture failed: \(error)")
+            onStatus(.failed(Date(), .applyFailed))
+            return
+        }
 
         var failure: SyncFailureReason?
         var peers: [SyncDocument] = []
@@ -274,8 +283,8 @@ final class SyncEngine {
     /// own are ever tombstoned — an entry from a newer app version (unknown
     /// setting key, unknown builtin) or for a retired builtin is carried
     /// untouched, never deleted.
-    func captureLocalChanges() {
-        let payloads = SyncSnapshotMapping.payloads(from: readLocalContent())
+    private func captureLocalChanges() throws {
+        let payloads = SyncSnapshotMapping.payloads(from: try readLocalContent())
         var changed = false
         for (key, payload) in payloads where document.entries[key]?.payload != payload {
             document.entries[key] = SyncEntry(
@@ -297,10 +306,11 @@ final class SyncEngine {
         }
     }
 
-    private func readLocalContent() -> SyncSnapshotMapping.Content {
-        let bindings = (try? context.fetch(FetchDescriptor<KeyBinding>())) ?? []
-        let prefs = (try? context.fetch(FetchDescriptor<BuiltinPreference>())) ?? []
-        let quicklinks = (try? context.fetch(FetchDescriptor<Quicklink>())) ?? []
+    private func readLocalContent() throws -> SyncSnapshotMapping.Content {
+        if let localContentReader { return try localContentReader() }
+        let bindings = try context.fetch(FetchDescriptor<KeyBinding>())
+        let prefs = try context.fetch(FetchDescriptor<BuiltinPreference>())
+        let quicklinks = try context.fetch(FetchDescriptor<Quicklink>())
         return SyncSnapshotMapping.Content(
             appShortcuts: bindings.map(AppShortcutDTO.init),
             builtinPreferences: prefs

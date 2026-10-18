@@ -173,7 +173,13 @@ final class SyncCoordinator {
         guard let host = url.host?.lowercased() else { return false }
         switch url.scheme?.lowercased() {
         case "https": return true
-        case "http": return host == "localhost" || host == "::1" || host.hasPrefix("127.")
+        case "http":
+            if host == "localhost" || host == "::1" { return true }
+            let octets = host.split(separator: ".", omittingEmptySubsequences: false)
+            return octets.count == 4 && octets.first == "127" && octets.allSatisfy { octet in
+                !octet.isEmpty && octet.utf8.allSatisfy { (48...57).contains($0) }
+                    && UInt8(octet) != nil
+            }
         default: return false
         }
     }

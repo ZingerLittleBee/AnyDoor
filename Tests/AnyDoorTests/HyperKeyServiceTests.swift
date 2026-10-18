@@ -4,29 +4,23 @@ import AppKit
 
 @MainActor
 final class HyperKeyServiceTests: XCTestCase {
-    override func setUp() {
-        UserDefaults.standard.removeObject(forKey: "hyperKey.trigger")
-        UserDefaults.standard.removeObject(forKey: "hyperKey.quickPress")
-        UserDefaults.standard.removeObject(forKey: "hyperKey.includeShift")
-        UserDefaults.standard.removeObject(forKey: "hyperKey.ownedSignatures")
-    }
-
     func testFlagsWhenInactive() {
-        let s = HyperKeyService()
+        let s = HyperKeyService(defaults: makeTemporaryDefaults())
         XCTAssertEqual(s.hyperModifierFlags, 0)
         XCTAssertEqual(s.virtualKeyCode, -1)
     }
 
     func testIncludeShiftDefaultTrue() {
-        let s = HyperKeyService()
+        let s = HyperKeyService(defaults: makeTemporaryDefaults())
         XCTAssertTrue(s.includeShift)
     }
 
     func testPersistedSettingsRoundTrip() async {
-        UserDefaults.standard.set("capsLock", forKey: "hyperKey.trigger")
-        UserDefaults.standard.set("escape", forKey: "hyperKey.quickPress")
-        UserDefaults.standard.set(false, forKey: "hyperKey.includeShift")
-        let s = HyperKeyService()
+        let defaults = makeTemporaryDefaults()
+        defaults.set("capsLock", forKey: "hyperKey.trigger")
+        defaults.set("escape", forKey: "hyperKey.quickPress")
+        defaults.set(false, forKey: "hyperKey.includeShift")
+        let s = HyperKeyService(defaults: defaults)
         XCTAssertEqual(s.trigger, .capsLock)
         XCTAssertEqual(s.quickPress, .escape)
         XCTAssertFalse(s.includeShift)
@@ -46,11 +40,12 @@ final class HyperKeyServiceTests: XCTestCase {
             SubprocessResult(stdout: "(null)\n", stderr: "", exit: 0, timedOut: false),
             SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let suite = makeTemporaryDefaultsSuite()
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         try await controller.apply(trigger: .capsLock, virtualKey: .f19)
         XCTAssertTrue(controller.hasPersistedSignatures)
 
-        let defaults = makeTemporaryDefaults()
+        let defaults = suite.makeDefaults()
         let service = HyperKeyService(defaults: defaults, controller: controller)
 
         let reload = Task { await service.reloadFromDefaults() }

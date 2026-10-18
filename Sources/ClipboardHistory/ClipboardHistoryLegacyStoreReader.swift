@@ -109,6 +109,17 @@ public enum ClipboardHistoryLegacyStoreReader {
             guard try database.tableExists(Column.table) else {
                 return []
             }
+            let columns = Set(try database.columns(in: Column.table).map(\.name))
+            // These fields were added after v1.7; a snapshot has not undergone
+            // SwiftData's lightweight migration and may legitimately lack them.
+            let optionalColumns = [
+                Column.richData, Column.richType, Column.sourceBundleID,
+                Column.sourceAppName, Column.isFavorite, Column.tagIDsJSON,
+                Column.filesManifest,
+            ].map { column in
+                let fallback = column == Column.isFavorite ? "0" : "NULL"
+                return columns.contains(column) ? column : "\(fallback) AS \(column)"
+            }.joined(separator: ", ")
             var entries: [ClipboardHistoryLegacyEntry] = []
             // Z_PK breaks ties so the order is total: `recency_order` is
             // derived from this sequence downstream, and equal timestamps
@@ -119,10 +130,7 @@ public enum ClipboardHistoryLegacyStoreReader {
                     SELECT \(Column.primaryKey), \(Column.id), \(Column.kind),
                            \(Column.createdAt), \(Column.text),
                            \(Column.fileName), \(Column.colorHex),
-                           \(Column.previewTitle), \(Column.richData),
-                           \(Column.richType), \(Column.sourceBundleID),
-                           \(Column.sourceAppName), \(Column.isFavorite),
-                           \(Column.tagIDsJSON), \(Column.filesManifest)
+                           \(Column.previewTitle), \(optionalColumns)
                     FROM \(Column.table)
                     ORDER BY \(Column.createdAt) DESC,
                              \(Column.primaryKey) DESC

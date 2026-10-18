@@ -101,7 +101,10 @@ CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME="$ANYDOOR_FIXTURE_HOME" \
 ```
 
 The newly created empty directory satisfies the fixture's requirement that
-`AnyDoor.store` does not exist. `CFFIXED_USER_HOME` applies only to this test
+the app data directory is empty, including store sidecars and migration state.
+The fixture writes an identity marker that the migration harness requires;
+both harnesses reject missing, real-home, or mismatched support paths before
+opening a store. `CFFIXED_USER_HOME` applies only to this test
 command. Record the generated home and printed
 `CLIPBOARD_HISTORY_GUI_FIXTURE_ROOT`, and keep that profile until acceptance
 and reporting are complete. Cleanup removes only the recorded temporary

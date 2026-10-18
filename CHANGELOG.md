@@ -8,6 +8,14 @@ versioning.
 
 ### Fixed
 
+- Clipboard History can migrate snapshots from older releases that lack rich
+  metadata, favorites, file manifests, or JSON tag columns.
+- Config Sync stops a sync tick when reading local data fails, rather than
+  publishing accidental deletions. Plain HTTP WebDAV now requires a real
+  loopback address instead of accepting arbitrary `127.*` hostnames.
+- Script Plugin scaffolding escapes quotes, backslashes, and newlines in
+  generated TypeScript and JSON without changing README display text.
+
 - Clipboard History reclaims its write-ahead log after automatic checkpoints,
   avoiding temporary duplicate disk usage after large text captures instead of
   waiting for daily maintenance. Active readers keep their snapshots without

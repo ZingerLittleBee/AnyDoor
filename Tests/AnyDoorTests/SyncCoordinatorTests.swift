@@ -140,6 +140,17 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertFalse(accepted("file:///tmp/dav"))
     }
 
+    func testPlainHTTPRequiresAnActualLoopbackAddress() throws {
+        for host in ["127.attacker.example", "127.0.0.1.example", "127.999.0.1", "127.1", "127.0.0.1."] {
+            let url = try XCTUnwrap(URL(string: "http://\(host)/dav"))
+            XCTAssertFalse(SyncCoordinator.isAcceptableWebDAVURL(url), host)
+        }
+        for host in ["127.0.0.1", "127.255.255.254", "localhost", "[::1]"] {
+            let url = try XCTUnwrap(URL(string: "http://\(host)/dav"))
+            XCTAssertTrue(SyncCoordinator.isAcceptableWebDAVURL(url), host)
+        }
+    }
+
     func testBootstrapWithMissingFolderReportsFailure() async throws {
         defaults.set(true, forKey: SyncDefaultsKeys.enabled)
         defaults.set(folder.path + "-gone", forKey: SyncDefaultsKeys.folderPath)

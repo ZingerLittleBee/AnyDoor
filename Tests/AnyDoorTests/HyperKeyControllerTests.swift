@@ -18,8 +18,10 @@ final class FakeSubprocessRunner: SubprocessRunning, @unchecked Sendable {
 }
 
 final class HyperKeyControllerTests: XCTestCase {
-    override func setUp() async throws {
-        UserDefaults.standard.removeObject(forKey: "hyperKey.ownedSignatures")
+    private let suite = TemporaryDefaultsSuite()
+
+    override func tearDown() async throws {
+        suite.remove()
     }
 
     func testApplyOnEmptySystem() async throws {
@@ -28,11 +30,28 @@ final class HyperKeyControllerTests: XCTestCase {
             SubprocessResult(stdout: "(null)\n", stderr: "", exit: 0, timedOut: false),
             SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         let sig = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
         XCTAssertEqual(sig.src, HyperKeyTrigger.capsLock.hidUsage!)
         XCTAssertEqual(sig.dst, HyperKeyVirtualKey.f19.hidUsage)
         XCTAssertTrue(controller.hasPersistedSignatures)
+    }
+
+    func testOwnershipIsPrivateToTheInjectedDefaultsSuite() async throws {
+        let otherSuite = makeTemporaryDefaultsSuite()
+        let runner = FakeSubprocessRunner()
+        runner.responses = [
+            SubprocessResult(stdout: "(null)\n", stderr: "", exit: 0, timedOut: false),
+            SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false),
+        ]
+        let first = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
+        let reopened = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
+        let other = HyperKeyController(runner: runner, defaultsSuiteName: otherSuite.name)
+        try await first.apply(trigger: .capsLock, virtualKey: .f19)
+        XCTAssertTrue(first.hasPersistedSignatures)
+        XCTAssertTrue(reopened.hasPersistedSignatures)
+        XCTAssertFalse(other.hasPersistedSignatures)
+        XCTAssertNil(otherSuite.makeDefaults().data(forKey: "hyperKey.ownedSignatures"))
     }
 
     func testGetFailureDoesNotInvokeSet() async throws {
@@ -40,7 +59,7 @@ final class HyperKeyControllerTests: XCTestCase {
         runner.responses = [
             SubprocessResult(stdout: "", stderr: "boom", exit: 1, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         do {
             _ = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
             XCTFail("expected throw")
@@ -58,7 +77,7 @@ final class HyperKeyControllerTests: XCTestCase {
             // second apply: GET fails — hidutil never mutated, no SET
             SubprocessResult(stdout: "", stderr: "boom", exit: 1, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         let first = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
 
         do {
@@ -67,7 +86,7 @@ final class HyperKeyControllerTests: XCTestCase {
         } catch {
             // A failed GET means hidutil is unchanged, so the pre-persisted signature
             // must be rolled back to the prior state — not left dangling.
-            let data = UserDefaults.standard.data(forKey: "hyperKey.ownedSignatures")!
+            let data = suite.makeDefaults().data(forKey: "hyperKey.ownedSignatures")!
             let set = try JSONDecoder().decode(OwnedSignatures.self, from: data)
             XCTAssertEqual(set, [first])
         }
@@ -85,14 +104,14 @@ final class HyperKeyControllerTests: XCTestCase {
             SubprocessResult(stdout: "(\n  {\n    HIDKeyboardModifierMappingSrc = 30064771146;\n    HIDKeyboardModifierMappingDst = 30064771176;\n  }\n)\n", stderr: "", exit: 0, timedOut: false),
             SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         let first = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
 
         do {
             _ = try await controller.apply(trigger: .leftControl, virtualKey: .f19)
             XCTFail("expected throw")
         } catch {
-            let data = UserDefaults.standard.data(forKey: "hyperKey.ownedSignatures")!
+            let data = suite.makeDefaults().data(forKey: "hyperKey.ownedSignatures")!
             let set = try JSONDecoder().decode(OwnedSignatures.self, from: data)
             XCTAssertEqual(set, [first])
         }
@@ -105,7 +124,7 @@ final class HyperKeyControllerTests: XCTestCase {
         runner.responses = [
             SubprocessResult(stdout: "", stderr: "", exit: SIGTERM, timedOut: true),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         do {
             _ = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
             XCTFail("expected throw")
@@ -126,7 +145,7 @@ final class HyperKeyControllerTests: XCTestCase {
             SubprocessResult(stdout: "(null)\n", stderr: "", exit: 0, timedOut: false),
             SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false),
         ]
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         do {
             _ = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
             XCTFail("expected throw")
@@ -138,7 +157,7 @@ final class HyperKeyControllerTests: XCTestCase {
 
     func testClearWithEmptyOwnedIsNoOp() async throws {
         let runner = FakeSubprocessRunner()
-        let controller = HyperKeyController(runner: runner)
+        let controller = HyperKeyController(runner: runner, defaultsSuiteName: suite.name)
         try await controller.clear()
         XCTAssertEqual(runner.calls.count, 0)
     }
