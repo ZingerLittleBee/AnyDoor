@@ -8,8 +8,12 @@ versioning.
 
 ### Added
 
-- Right-click an app in the command palette to open it, reveal it in Finder
-  (在 Finder 中显示), or copy its path or bundle ID.
+- Right-click an app in the command palette, or press ⌘K on the selected app,
+  for a menu of app actions: reveal it in Finder (在 Finder 中显示) or show its
+  package contents, copy its path or bundle ID, set its hotkey, hide it from
+  the palette, quit or force quit it while it runs, or move it to the Trash.
+  Hidden apps come back from Settings → General; force quitting and moving to
+  the Trash ask for confirmation first.
 
 ### Fixed
 

@@ -39,6 +39,10 @@ final class SettingsOpener {
     /// Observed by `SettingsView`'s sidebar selection binding.
     var desiredTab: SettingsTab?
 
+    /// An app shortcut whose hotkey recorder should start recording once the
+    /// Panel pane shows it. The recorder clears this when it starts.
+    var pendingAppShortcutRecording: UUID?
+
     func tryOpen() {
         open()
     }
@@ -47,5 +51,11 @@ final class SettingsOpener {
     func tryOpen(tab: SettingsTab) {
         desiredTab = tab
         tryOpen()
+    }
+
+    /// Open the Panel pane and start recording the hotkey of app shortcut `id`.
+    func tryOpenRecordingHotkey(forAppShortcut id: UUID) {
+        pendingAppShortcutRecording = id
+        tryOpen(tab: .panel)
     }
 }

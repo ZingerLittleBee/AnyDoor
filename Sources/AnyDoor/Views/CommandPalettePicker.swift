@@ -5,9 +5,9 @@ import PluginInterface
 struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
     let onSelect: (PanelEntry) -> Void
-    /// Runs an application row's context-menu action other than Open, which
-    /// goes through `onSelect` like a click.
-    let onAppAction: (CommandPaletteAppAction, CommandPaletteAppRow) -> Void
+    /// Builds an application row's context menu, the same one ⌘K opens; nil
+    /// when the app can no longer be resolved.
+    let appMenu: (PanelEntry) -> NSMenu?
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
@@ -621,8 +621,11 @@ struct CommandPalettePicker: View {
                                 hyperFlags: state.hyperFlags,
                                 isSelected: entry.id == selectedID,
                                 onSelect: { onSelect(entry) },
-                                contextMenu: CommandPaletteAppRow(entry.source).map { app in
-                                    { appContextMenu(for: entry, app: app) }
+                                contextMenu: CommandPaletteAppRow(entry.source) == nil ? nil : {
+                                    // Select first so the highlight stays on the
+                                    // row the menu acts on.
+                                    state.select(entryID: entry.id)
+                                    return appMenu(entry) ?? NSMenu()
                                 }
                             )
                         }
@@ -671,27 +674,6 @@ struct CommandPalettePicker: View {
                     + section.entries.map(CommandPaletteListItem.row)
             }
         }
-    }
-
-    /// Built when the menu opens. Selecting the row first keeps the highlight on
-    /// the row the menu acts on.
-    private func appContextMenu(for entry: PanelEntry, app: CommandPaletteAppRow) -> NSMenu {
-        state.select(entryID: entry.id)
-        let menu = NSMenu()
-        menu.addItem(ClosureMenuItem(title: L(.commandPaletteActionOpen), systemImage: "arrow.up.forward.app") {
-            onSelect(entry)
-        })
-        menu.addItem(ClosureMenuItem(title: L(.clipboardActionRevealInFinder), systemImage: "folder") {
-            onAppAction(.revealInFinder, app)
-        })
-        menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem(title: L(.commandPaletteAppCopyPath), systemImage: "doc.on.doc") {
-            onAppAction(.copyPath, app)
-        })
-        menu.addItem(ClosureMenuItem(title: L(.commandPaletteAppCopyBundleID), systemImage: "shippingbox") {
-            onAppAction(.copyBundleID, app)
-        })
-        return menu
     }
 
     private func sectionHeader(titleKey: String) -> some View {

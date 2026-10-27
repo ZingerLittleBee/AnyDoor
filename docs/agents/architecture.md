@@ -565,11 +565,17 @@ shortcut with no installed copy leaves the palette but keeps its row and hotkey 
 `AppSwitcher` also falls back to Launch Services when a recorded path is gone, so a hotkey launches
 before the palette has re-pointed it.
 
-Both kinds of application row carry a native right-click menu (`RightClickMenu`) with Open, Reveal in
-Finder, Copy Path, and Copy Bundle ID. `CommandPaletteAppRow` classifies rows from their Source alone
-and resolves an app shortcut through its binding only when an action runs, so the menu acts on a
-re-pointed path. Opening the menu selects its row; Open reuses the row's commit, and every other
-action closes the palette before it acts (`CommandPaletteWindowController.performAppAction`).
+Both kinds of application row carry a native menu, opened by right-click (`RightClickMenu`, which
+selects the row first) or by ⌘K on the selected row (popped at the palette's bottom-trailing corner).
+`CommandPaletteAppRow` classifies rows from their Source alone; `CommandPaletteAppContext.resolve`
+reads an app shortcut's binding and the app's running and trashable state when the menu opens, and
+`menuGroups` decides the items: Quit and Force Quit only while the app runs, Hide only for scanned
+apps, and Move to Trash only outside `/System` and other bundles in a deletable folder, disabled while
+running. Open reuses the row's commit; Force Quit and Move to Trash go through the confirmation card;
+every other action closes the palette first (`CommandPaletteWindowController.performAppAction`).
+Hidden apps are bundle IDs in `CommandPaletteService.hiddenAppBundleIDs` (a synced setting), restored
+from Settings → General. Set Hotkey adds a scanned app as an app shortcut, then opens the Panel pane
+through `SettingsOpener.tryOpenRecordingHotkey`, whose request the row's `HotkeyRecorder` consumes.
 
 ### Command palette second-level menu
 

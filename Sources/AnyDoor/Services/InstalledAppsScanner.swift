@@ -140,6 +140,12 @@ enum InstalledAppsScanner {
         }
     }
 
+    /// The app bundle at `path`, named the way a scan names it; nil when the
+    /// path holds no bundle with an identifier.
+    static func app(atPath path: String) -> InstalledApp? {
+        makeApp(at: path, preferredName: nil)
+    }
+
     /// Locate a recorded app among `installed`. A recorded path that still
     /// holds the bundle wins even when the scan deduped to another copy (e.g.
     /// Xcode-beta beside Xcode), so a deliberate choice is never re-pointed;

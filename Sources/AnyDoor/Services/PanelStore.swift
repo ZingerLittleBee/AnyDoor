@@ -723,8 +723,10 @@ final class PanelStore {
     /// The new row is inserted with `isEnabled: false` and `keyCode: -1` as a sentinel,
     /// meaning it appears in the submenu but doesn't fire until the user records a hotkey
     /// via `updateAppShortcut(id:hotkey:)` (which flips `isEnabled = true`).
-    func addAppShortcut(appBundleID: String, appName: String, appPath: String) {
-        guard let container = modelContainer else { return }
+    /// Returns the new row's id, or nil before the store is bootstrapped.
+    @discardableResult
+    func addAppShortcut(appBundleID: String, appName: String, appPath: String) -> UUID? {
+        guard let container = modelContainer else { return nil }
         let context = container.mainContext
         let nextOrder = (appShortcutChildren.map(\.displayOrder).max() ?? 0) + 100
         let new = KeyBinding(
@@ -739,6 +741,7 @@ final class PanelStore {
         )
         context.insert(new)
         persistMutation()
+        return new.id
     }
 
     /// Delete an app shortcut by id.

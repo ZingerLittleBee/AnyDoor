@@ -6,6 +6,7 @@ import PluginSupport
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var grouping = PanelGroupingStore.shared
+    @State private var opener = SettingsOpener.shared
     @State private var conflictAlert: ConflictAlert?
     @State private var pendingDelete: PendingDelete?
 
@@ -23,6 +24,10 @@ struct PanelSettingsView: View {
     /// clean reference view — hidden items still convey their state via dimming.
     /// Changes apply live; there is no separate save step.
     @State private var isEditing = false
+
+    /// The row whose recorder a Settings deep link started, scrolled into view
+    /// once; the list is eager, so an off-screen recorder starts too.
+    @State private var recordingScrollTarget: String?
 
     /// Spring for entering/leaving edit mode — drives the leading columns sliding
     /// in and the content reflowing right in lockstep.
@@ -51,67 +56,74 @@ struct PanelSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             editModeHeader
-            ScrollView {
-                // The List → ScrollView migration. Rows render in a plain VStack
-                // (not a List) so collapse/expand and reorder animate: macOS
-                // `List` is NSTableView-backed and ignores row insert/delete and
-                // move animations even under a live transaction (the chevron
-                // animates, the rows do not). A plain VStack — not LazyVStack —
-                // keeps every row in the tree so its transition is reliable and
-                // scrolling never rebuilds a row (the bounded row count makes
-                // eager layout cheap, and it drops the NSTableView cell-recycling
-                // that made scrolling janky). Reordering is a custom drag gesture
-                // on each row's handle (see `dragGesture`), since `.onMove` only
-                // works inside a List.
-                VStack(spacing: 0) {
-                    ForEach(displayRows) { row in
-                        let dragging = drag?.rowID == row.id
-                        rowView(row)
-                            .opacity(row.opacity)
-                            // Per-row frame probes feed the drag's drop-index math,
-                            // which only runs in edit mode. Gating them here keeps
-                            // the resting (non-edit) list free of ~40 GeometryReader
-                            // layout passes — entering edit mode attaches them
-                            // before any drag can start, so frames are ready in time.
-                            .background { if isEditing { rowFrameReader(row) } }
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Color.accentColor.opacity(dragging ? 0.10 : 0))
-                            )
-                            .scaleEffect(dragging ? 1.01 : 1)
-                            .shadow(color: .black.opacity(dragging ? 0.16 : 0),
-                                    radius: dragging ? 5 : 0, y: 2)
-                            .zIndex(dragging ? 1 : 0)
-                            .transition(.move(edge: .top).combined(with: .opacity))
+            ScrollViewReader { proxy in
+                ScrollView {
+                    // The List → ScrollView migration. Rows render in a plain VStack
+                    // (not a List) so collapse/expand and reorder animate: macOS
+                    // `List` is NSTableView-backed and ignores row insert/delete and
+                    // move animations even under a live transaction (the chevron
+                    // animates, the rows do not). A plain VStack — not LazyVStack —
+                    // keeps every row in the tree so its transition is reliable and
+                    // scrolling never rebuilds a row (the bounded row count makes
+                    // eager layout cheap, and it drops the NSTableView cell-recycling
+                    // that made scrolling janky). Reordering is a custom drag gesture
+                    // on each row's handle (see `dragGesture`), since `.onMove` only
+                    // works inside a List.
+                    VStack(spacing: 0) {
+                        ForEach(displayRows) { row in
+                            let dragging = drag?.rowID == row.id
+                            rowView(row)
+                                .opacity(row.opacity)
+                                // Per-row frame probes feed the drag's drop-index math,
+                                // which only runs in edit mode. Gating them here keeps
+                                // the resting (non-edit) list free of ~40 GeometryReader
+                                // layout passes — entering edit mode attaches them
+                                // before any drag can start, so frames are ready in time.
+                                .background { if isEditing { rowFrameReader(row) } }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(Color.accentColor.opacity(dragging ? 0.10 : 0))
+                                )
+                                .scaleEffect(dragging ? 1.01 : 1)
+                                .shadow(color: .black.opacity(dragging ? 0.16 : 0),
+                                        radius: dragging ? 5 : 0, y: 2)
+                                .zIndex(dragging ? 1 : 0)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .coordinateSpace(name: Self.listSpace)
+                    .overlay(alignment: .topLeading) { insertionIndicator }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 4)
+                    // Trailing breathing room so the last row never butts against the
+                    // window's bottom edge (the tip footer only shows in edit mode).
+                    .padding(.bottom, 12)
+                    // One value-keyed animation for every structural change: collapse
+                    // (ids added/removed, with the row `.transition`) and drop-settle
+                    // (ids reordered, rows slide). A visibility toggle leaves the id
+                    // list unchanged, so it stays instant.
+                    .animation(Self.collapseAnimation, value: rowsKey)
+                    .overlayScrollers()
+                    .onPreferenceChange(RowFrameKey.self) { frames in
+                        MainThreadIsolation.run { rowFrames = frames }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .coordinateSpace(name: Self.listSpace)
-                .overlay(alignment: .topLeading) { insertionIndicator }
-                .padding(.horizontal, 10)
-                .padding(.top, 4)
-                // Trailing breathing room so the last row never butts against the
-                // window's bottom edge (the tip footer only shows in edit mode).
-                .padding(.bottom, 12)
-                // One value-keyed animation for every structural change: collapse
-                // (ids added/removed, with the row `.transition`) and drop-settle
-                // (ids reordered, rows slide). A visibility toggle leaves the id
-                // list unchanged, so it stays instant.
-                .animation(Self.collapseAnimation, value: rowsKey)
-                .overlayScrollers()
-                .onPreferenceChange(RowFrameKey.self) { frames in
-                    MainThreadIsolation.run { rowFrames = frames }
+                // Don't clip the lifted (scaled, shadowed) dragged row at the scroll
+                // edges.
+                .scrollClipDisabled()
+                // Warm the icon cache for every app-shortcut path off the main
+                // thread when the list appears (and whenever the set changes), so
+                // the first scroll past an app row finds a resolved icon instead of
+                // a cold-cache disk hit. Re-keyed on count so add/remove re-warms.
+                .task(id: panel.appShortcutPaths.count) {
+                    AppIconCache.prewarm(Array(panel.appShortcutPaths.values))
                 }
-            }
-            // Don't clip the lifted (scaled, shadowed) dragged row at the scroll
-            // edges.
-            .scrollClipDisabled()
-            // Warm the icon cache for every app-shortcut path off the main
-            // thread when the list appears (and whenever the set changes), so
-            // the first scroll past an app row finds a resolved icon instead of
-            // a cold-cache disk hit. Re-keyed on count so add/remove re-warms.
-            .task(id: panel.appShortcutPaths.count) {
-                AppIconCache.prewarm(Array(panel.appShortcutPaths.values))
+                .onChange(of: recordingScrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(Self.collapseAnimation) { proxy.scrollTo(target, anchor: .center) }
+                    recordingScrollTarget = nil
+                }
             }
 
             // The tip describes edit-only affordances (hiding via the checkbox,
@@ -574,7 +586,12 @@ struct PanelSettingsView: View {
             HotkeyRecorder(
                 hotkey: .constant(child.hotkey),
                 onChange: { newValue in handleHotkeyChange(entry: child, newValue: newValue) },
-                allowsClear: false
+                allowsClear: false,
+                recordingRequested: opener.pendingAppShortcutRecording.map(PanelEntry.Source.appShortcut) == child.source,
+                onRecordingRequestHandled: {
+                    opener.pendingAppShortcutRecording = nil
+                    recordingScrollTarget = row.id
+                }
             )
             .frame(width: 150, alignment: .trailing)
             deleteButton(for: child)

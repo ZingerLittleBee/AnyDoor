@@ -384,4 +384,60 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
         XCTAssertNil(CommandPaletteAppRow(.builtin(.lockScreen)))
         XCTAssertNil(CommandPaletteAppRow(.quicklink(id: UUID())))
     }
+
+    func testAppMenuOffersQuitOnlyWhileRunningAndHideOnlyForScannedApps() {
+        func actions(_ context: CommandPaletteAppContext) -> [[CommandPaletteAppAction]] {
+            context.menuGroups.map { $0.map(\.action) }
+        }
+        let idle = appContext(row: .installedApp(bundleID: "com.example.app", path: "/Applications/Example.app"))
+        XCTAssertEqual(actions(idle), [
+            [.open, .revealInFinder, .showPackageContents],
+            [.copyPath, .copyBundleID],
+            [.assignHotkey, .hideFromPalette],
+            [.moveToTrash],
+        ])
+
+        let runningShortcut = appContext(row: .appShortcut(id: UUID()), isRunning: true)
+        XCTAssertEqual(actions(runningShortcut), [
+            [.open, .revealInFinder, .showPackageContents],
+            [.copyPath, .copyBundleID],
+            [.assignHotkey],
+            [.quit, .forceQuit],
+            [.moveToTrash],
+        ])
+    }
+
+    func testMoveToTrashIsDisabledWhileRunningAndAbsentWhereTheAppCannotBeTrashed() {
+        let row = CommandPaletteAppRow.installedApp(bundleID: "com.example.app", path: "/Applications/Example.app")
+        XCTAssertEqual(appContext(row: row).menuGroups.last, [.init(action: .moveToTrash, isEnabled: true)])
+        XCTAssertEqual(
+            appContext(row: row, isRunning: true).menuGroups.last,
+            [.init(action: .moveToTrash, isEnabled: false)]
+        )
+        let untrashable = appContext(row: row, canMoveToTrash: false)
+        XCTAssertFalse(untrashable.menuGroups.joined().contains { $0.action == .moveToTrash })
+
+        XCTAssertTrue(CommandPaletteAppContext.isTrashableLocation("/Applications/Example.app"))
+        XCTAssertTrue(CommandPaletteAppContext.isTrashableLocation("/Applications/Setapp/CleanShot X.app"))
+        XCTAssertFalse(CommandPaletteAppContext.isTrashableLocation("/System/Applications/Notes.app"))
+        XCTAssertFalse(CommandPaletteAppContext.isTrashableLocation(
+            "/Applications/Xcode.app/Contents/Applications/DeviceHub.app"
+        ))
+    }
+
+    private func appContext(
+        row: CommandPaletteAppRow,
+        isRunning: Bool = false,
+        canMoveToTrash: Bool = true
+    ) -> CommandPaletteAppContext {
+        CommandPaletteAppContext(
+            row: row,
+            displayName: "Example",
+            bundleID: "com.example.app",
+            path: "/Applications/Example.app",
+            hasHotkey: false,
+            isRunning: isRunning,
+            canMoveToTrash: canMoveToTrash
+        )
+    }
 }

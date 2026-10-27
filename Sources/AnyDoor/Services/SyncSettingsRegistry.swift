@@ -43,6 +43,7 @@ enum SyncSettingsRegistry {
         Entry(key: "menuBar.iconName", type: .string),
         Entry(key: "commandPalette.hotkey.keyCode", type: .int),
         Entry(key: "commandPalette.hotkey.modifierFlags", type: .int),
+        Entry(key: CommandPaletteService.hiddenAppsDefaultsKey, type: .stringArray),
         Entry(key: "dev.bybee.AnyDoor.language", type: .string),
         Entry(key: "hyperKey.trigger", type: .string),
         Entry(key: "hyperKey.quickPress", type: .string),

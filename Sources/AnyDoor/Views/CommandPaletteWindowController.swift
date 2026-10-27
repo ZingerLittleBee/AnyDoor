@@ -200,8 +200,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onSelect: { [weak self] entry in
                 self?.commit(entry)
             },
-            onAppAction: { [weak self] action, app in
-                self?.performAppAction(action, on: app)
+            appMenu: { [weak self] entry in
+                self?.appMenu(for: entry)
             },
             onCancel: { [weak self] in
                 self?.cancel()
@@ -546,10 +546,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
         // Apps installed on the system but not bound to a hotkey are listed
         // after the bound rows in the same section so they're searchable from
-        // the palette without polluting the menu-bar panel itself.
+        // the palette without polluting the menu-bar panel itself. Apps the
+        // user hid from the palette stay out until Settings shows them again.
+        let hiddenBundleIDs = Set(CommandPaletteService.shared.hiddenAppBundleIDs)
         let unboundOrder = Double(appShortcuts.count) * 100 + 1_000_000
         let installedExtras: [PanelEntry] = installedApps
-            .filter { !boundBundleIDs.contains($0.bundleID) }
+            .filter { !boundBundleIDs.contains($0.bundleID) && !hiddenBundleIDs.contains($0.bundleID) }
             .enumerated()
             .map { offset, app in
                 PanelEntry.paletteRow(
@@ -604,8 +606,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
             let consumed = MainThreadIsolation.run {
-                self?.handle(keyCode: keyCode) ?? false
+                self?.handle(keyCode: keyCode, modifiers: modifiers) ?? false
             }
             return consumed ? nil : event
         }
@@ -618,7 +621,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func handle(keyCode: UInt16) -> Bool {
+    private func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         guard let state else { return false }
 
@@ -631,6 +634,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             default: break
             }
             return true
+        }
+
+        // ⌘K opens the selected application row's menu; on any other row the
+        // key falls through to the search field.
+        if keyCode == 40, modifiers == .command, !window.hasIMEComposition {
+            return showAppMenuForSelection()
         }
 
         guard Self.paletteControlKeyCodes.contains(keyCode) else { return false }
@@ -797,23 +806,133 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    /// An application row's context-menu action. Like opening the app, each one
-    /// closes the palette first: Finder takes focus for a reveal, and a copy
-    /// confirms with a toast over the app the palette came from.
-    private func performAppAction(_ action: CommandPaletteAppAction, on app: CommandPaletteAppRow) {
-        let resolved = app.resolve()
-        close()
-        guard let resolved else { return }
+    /// An application row's context menu, shared by right-click and ⌘K. The
+    /// app's state (running, trashable) is read when the menu opens.
+    private func appMenu(for entry: PanelEntry) -> NSMenu? {
+        guard let context = CommandPaletteAppContext.resolve(entry) else { return nil }
+        return CommandPaletteAppMenu.make(for: context) { [weak self] action in
+            self?.performAppAction(action, entry: entry, context: context)
+        }
+    }
+
+    /// ⌘K: open the selected application row's menu at the palette's
+    /// bottom-trailing corner, where Raycast shows its actions. Deferred out of
+    /// the key monitor because the menu runs its own tracking loop.
+    private func showAppMenuForSelection() -> Bool {
+        guard let state, state.isAtRoot, let entry = state.commitSelection(),
+              CommandPaletteAppRow(entry.source) != nil else { return false }
+        Task { @MainActor [weak self] in
+            guard let self, self.state === state,
+                  let contentView = self.window?.contentView,
+                  let menu = self.appMenu(for: entry) else { return }
+            let size = menu.size
+            let inset: CGFloat = 12
+            let origin = NSPoint(
+                x: contentView.bounds.maxX - size.width - inset,
+                y: contentView.isFlipped ? contentView.bounds.maxY - size.height - inset : size.height + inset
+            )
+            menu.popUp(positioning: nil, at: origin, in: contentView)
+        }
+        return true
+    }
+
+    /// Opening, revealing, copying, hiding, and quitting close the palette
+    /// first, like opening the app. Force Quit and Move to Trash stay open on
+    /// the confirmation card, which closes it on confirm.
+    private func performAppAction(
+        _ action: CommandPaletteAppAction,
+        entry: PanelEntry,
+        context: CommandPaletteAppContext
+    ) {
         switch action {
+        case .open:
+            commit(entry)
         case .revealInFinder:
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: resolved.path)])
+            close()
+            NSWorkspace.shared.activateFileViewerSelecting([context.url])
+        case .showPackageContents:
+            close()
+            NSWorkspace.shared.activateFileViewerSelecting([context.url.appendingPathComponent("Contents")])
         case .copyPath:
-            ClipboardSelfWrites.write(string: resolved.path)
+            close()
+            ClipboardSelfWrites.write(string: context.path)
             ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         case .copyBundleID:
-            ClipboardSelfWrites.write(string: resolved.bundleID)
+            close()
+            ClipboardSelfWrites.write(string: context.bundleID)
             ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        case .assignHotkey:
+            // Settings takes focus next, so don't hand it back to the app the
+            // palette came from on the way out.
+            restoresFocusOnClose = false
+            close()
+            assignHotkey(for: context)
+        case .hideFromPalette:
+            close()
+            CommandPaletteService.shared.hideApp(bundleID: context.bundleID)
+            ToastPresenter.shared.show(.success(L(.toastAppHidden, context.displayName)))
+        case .quit:
+            close()
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: context.bundleID) {
+                app.terminate()
+            }
+        case .forceQuit:
+            let confirmation = CommandPaletteConfirmation(
+                title: L(.commandPaletteAppForceQuitConfirmTitle, context.displayName),
+                message: L(.commandPaletteAppForceQuitConfirmMessage),
+                confirmLabel: L(.commandPaletteAppForceQuitConfirmButton)
+            )
+            state?.requestConfirmation(confirmation) {
+                let apps = NSRunningApplication.runningApplications(withBundleIdentifier: context.bundleID)
+                guard !apps.isEmpty else { return }
+                let terminated = apps.map { $0.forceTerminate() }.allSatisfy { $0 }
+                ToastPresenter.shared.show(terminated
+                    ? .success(L(.toastAppForceQuitSuccess, context.displayName))
+                    : .failure(L(.toastAppForceQuitFailed, context.displayName)))
+            }
+        case .moveToTrash:
+            let confirmation = CommandPaletteConfirmation(
+                title: L(.commandPaletteAppMoveToTrashConfirmTitle, context.displayName),
+                message: L(.commandPaletteAppMoveToTrashConfirmMessage),
+                confirmLabel: L(.commandPaletteAppMoveToTrashConfirmButton)
+            )
+            state?.requestConfirmation(confirmation) { [weak self] in
+                let url = context.url
+                let moved = await Task.detached {
+                    (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil
+                }.value
+                guard moved else {
+                    ToastPresenter.shared.show(.failure(L(.toastAppTrashFailed, context.displayName)))
+                    return
+                }
+                // The next open lists apps from these caches before its rescan
+                // finishes; drop the trashed copy so it doesn't flash back.
+                self?.cachedApps.removeAll { $0.path == context.path }
+                if case .appShortcut(let id) = context.row {
+                    self?.uninstalledAppShortcutIDs.insert(id)
+                }
+                ToastPresenter.shared.show(.success(L(.toastAppTrashSuccess, context.displayName)))
+            }
         }
+    }
+
+    /// Opens the Panel pane recording the app's hotkey, adding the app as an
+    /// app shortcut first when it is a scanned app.
+    private func assignHotkey(for context: CommandPaletteAppContext) {
+        let shortcutID: UUID?
+        switch context.row {
+        case .appShortcut(let id):
+            shortcutID = id
+        case .installedApp:
+            shortcutID = PanelStore.shared.addAppShortcut(
+                appBundleID: context.bundleID,
+                appName: context.displayName,
+                appPath: context.path
+            )
+        }
+        guard let shortcutID else { return }
+        PanelGroupingStore.shared.setParentCollapsed(.appShortcuts, false)
+        SettingsOpener.shared.tryOpenRecordingHotkey(forAppShortcut: shortcutID)
     }
 
     /// Push a plugin row's markdown Detail: show the loading level immediately,
