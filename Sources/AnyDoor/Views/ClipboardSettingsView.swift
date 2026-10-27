@@ -430,7 +430,12 @@ struct ClipboardSettingsView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(clipboardExcludedApps) { app in
-                        ClipboardExcludedAppRow(app: app) {
+                        AppListRow(
+                            displayName: app.displayName,
+                            bundleID: app.bundleID,
+                            path: app.path,
+                            removeLabel: L(.settingsClipboardExcludedAppsRemove)
+                        ) {
                             Task {
                                 await model.removeExcludedBundleID(
                                     app.bundleID
@@ -464,59 +469,4 @@ private struct ClipboardExcludedSourceApp: Identifiable {
     let path: String?
 
     var id: String { bundleID }
-}
-
-private struct ClipboardExcludedAppRow: View {
-    let app: ClipboardExcludedSourceApp
-    let onRemove: () -> Void
-
-    @State private var icon: NSImage?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Group {
-                if let icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                } else {
-                    Image(systemName: "app")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 22, height: 22)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(app.displayName)
-                    .lineLimit(1)
-                Text(app.bundleID)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer()
-
-            Button(action: onRemove) {
-                Image(systemName: "minus.circle")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help(L(.settingsClipboardExcludedAppsRemove))
-            .accessibilityLabel(
-                L(.settingsClipboardExcludedAppsRemove)
-            )
-        }
-        .padding(.vertical, 5)
-        .task(id: app.path) {
-            icon = nil
-            guard let path = app.path else { return }
-            if let cached = AppIconCache.cached(path) {
-                icon = cached
-            } else {
-                icon = await AppIconCache.icon(for: path)
-            }
-        }
-    }
 }
