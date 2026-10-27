@@ -22,6 +22,7 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertTrue(keys.contains("clipboard.customTags"))
         XCTAssertTrue(keys.contains("clipboard.categoryOrder"))
         XCTAssertTrue(keys.contains("clipboard.excludedBundleIDs"))
+        XCTAssertTrue(keys.contains("commandPalette.hiddenAppBundleIDs"))
         XCTAssertTrue(
             keys.contains(
                 ClipboardPreferences.ignoresUniversalClipboardKey

@@ -158,6 +158,8 @@ struct GeneralSettingsView: View {
                 LocalizedText(.settingsGeneralCommandPaletteDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                HiddenPaletteAppsList()
             } header: {
                 LocalizedText(.settingsGeneralCommandPaletteSection)
             }
@@ -409,5 +411,56 @@ struct GeneralSettingsView: View {
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")
         else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+/// The apps hidden from the command palette, each with a button that shows it
+/// there again; nothing while none is hidden. A separate view so the General
+/// pane's permission polling does not repeat the Launch Services lookups.
+private struct HiddenPaletteAppsList: View {
+    @State private var commandPalette = CommandPaletteService.shared
+
+    var body: some View {
+        let apps = commandPalette.hiddenAppBundleIDs.map(HiddenPaletteApp.init(bundleID:))
+        if !apps.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Label {
+                    LocalizedText(.settingsGeneralCommandPaletteHiddenApps)
+                } icon: {
+                    Image(systemName: "eye.slash")
+                }
+                VStack(spacing: 0) {
+                    ForEach(apps) { app in
+                        AppListRow(
+                            displayName: app.displayName,
+                            bundleID: app.bundleID,
+                            path: app.path,
+                            removeLabel: L(.settingsGeneralCommandPaletteShowApp)
+                        ) {
+                            commandPalette.showApp(bundleID: app.bundleID)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+}
+
+private struct HiddenPaletteApp: Identifiable {
+    let bundleID: String
+    let displayName: String
+    /// Nil when no copy is installed on this Mac (a synced preference).
+    let path: String?
+
+    var id: String { bundleID }
+
+    @MainActor
+    init(bundleID: String) {
+        let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+            .flatMap { InstalledAppsScanner.app(atPath: $0.path) }
+        self.bundleID = bundleID
+        self.displayName = app?.displayName ?? bundleID
+        self.path = app?.path
     }
 }

@@ -6,6 +6,15 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Right-click an app in the command palette, or press ⌘K on the selected app,
+  for a menu of app actions: reveal it in Finder (在 Finder 中显示) or show its
+  package contents, copy its path or bundle ID, set its hotkey, hide it from
+  the palette, quit or force quit it while it runs, or move it to the Trash.
+  Hidden apps come back from Settings → General; force quitting and moving to
+  the Trash ask for confirmation first.
+
 ### Fixed
 
 - Clipboard History can migrate snapshots from older releases that lack rich
@@ -27,6 +36,11 @@ versioning.
   the installed app instead of the removed one, which also hid the new app
   from search, and its hotkey keeps launching it. Shortcuts whose app is
   uninstalled no longer appear in the palette.
+- The command palette finds apps that ship inside another app, such as Xcode's
+  Device Hub, Instruments, and Accessibility Inspector. Before, it skipped
+  everything inside an app bundle, so searching `devicehub` found nothing.
+  Background helpers stored there, such as Google Drive's Finder helper, stay
+  hidden.
 
 ## [4.2.8] - 2026-10-05
 

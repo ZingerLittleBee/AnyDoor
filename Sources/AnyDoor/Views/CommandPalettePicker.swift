@@ -5,6 +5,9 @@ import PluginInterface
 struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
     let onSelect: (PanelEntry) -> Void
+    /// Builds an application row's context menu, the same one ⌘K opens; nil
+    /// when the app can no longer be resolved.
+    let appMenu: (PanelEntry) -> NSMenu?
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
@@ -617,7 +620,13 @@ struct CommandPalettePicker: View {
                                 entry: entry,
                                 hyperFlags: state.hyperFlags,
                                 isSelected: entry.id == selectedID,
-                                onSelect: { onSelect(entry) }
+                                onSelect: { onSelect(entry) },
+                                contextMenu: CommandPaletteAppRow(entry.source) == nil ? nil : {
+                                    // Select first so the highlight stays on the
+                                    // row the menu acts on.
+                                    state.select(entryID: entry.id)
+                                    return appMenu(entry) ?? NSMenu()
+                                }
                             )
                         }
                     }
@@ -685,6 +694,9 @@ private struct CommandPaletteRow: View {
     let isSelected: Bool
     var option: CommandPaletteOption? = nil
     let onSelect: () -> Void
+    /// Native right-click menu, built at click time. Nil rows get no catcher
+    /// view.
+    var contextMenu: (() -> NSMenu)? = nil
 
     @State private var isHovering = false
     @State private var appIcon: NSImage?
@@ -729,6 +741,11 @@ private struct CommandPaletteRow: View {
         )
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
+        .overlay {
+            if let contextMenu {
+                RightClickMenu(makeMenu: contextMenu)
+            }
+        }
         .onHoverSafe { isHovering = $0 }
         .onTapGesture(perform: onSelect)
         .task(id: entry.id) {

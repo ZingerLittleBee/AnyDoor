@@ -43,6 +43,11 @@ struct HotkeyRecorder: View {
     /// Disable for entries where clearing makes no sense (e.g. an app shortcut
     /// without a hotkey has nothing to trigger it — delete the row instead).
     var allowsClear: Bool = true
+    /// Starts recording when this turns true, or when the recorder appears with
+    /// it true, then calls `onRecordingRequestHandled` so the caller clears the
+    /// request. Settings uses it to record the hotkey a deep link asked for.
+    var recordingRequested: Bool = false
+    var onRecordingRequestHandled: () -> Void = {}
 
     @State private var instanceID = UUID()
     @State private var isRecording = false
@@ -96,7 +101,15 @@ struct HotkeyRecorder: View {
         )
         .help(L(hotkey == nil ? .hotkeyRecorderTipUnbound : .hotkeyRecorderTipBound))
         .onHoverSafe { fieldHovered = $0 }
+        .onAppear { handleRecordingRequest() }
+        .onChange(of: recordingRequested) { _, _ in handleRecordingRequest() }
         .onDisappear { stopRecording() }
+    }
+
+    private func handleRecordingRequest() {
+        guard recordingRequested else { return }
+        onRecordingRequestHandled()
+        startRecording()
     }
 
     @ViewBuilder

@@ -52,9 +52,19 @@ enum InstalledAppsScanner {
     /// folder — e.g. `Setapp/CleanShot X.app`, `Adobe Photoshop 2026/Adobe
     /// Photoshop 2026.app`, or a symlink `Adobe Creative Cloud/Adobe Creative
     /// Cloud` pointing at the real bundle. A depth of 2 covers these while
-    /// keeping the walk cheap (we never descend into a bundle, and Spotlight is
-    /// unreliable — it can be index-disabled — so we don't rely on `mdfind`).
+    /// keeping the walk cheap (we never walk a bundle's payload, and Spotlight
+    /// is unreliable — it can be index-disabled — so we don't rely on `mdfind`).
     private static let maxDepth = 2
+
+    /// Folders inside an app bundle where it ships companion apps people launch
+    /// directly: Xcode keeps Instruments, DeviceHub, and Accessibility
+    /// Inspector in `Contents/Applications`, and older Xcode releases keep
+    /// Simulator in `Contents/Developer/Applications`. Only these folders are
+    /// read, one level deep; the rest of the bundle stays unwalked.
+    private static let embeddedAppDirectories = [
+        "Contents/Applications",
+        "Contents/Developer/Applications",
+    ]
 
     static func scan() -> [InstalledApp] {
         scan(roots: scanRoots, extraAppPaths: extraAppPaths)
@@ -72,6 +82,26 @@ enum InstalledAppsScanner {
             }
         }
 
+        func recordBundle(at path: String, preferredName: String?) {
+            guard let app = makeApp(at: path, preferredName: preferredName) else { return }
+            record(app)
+            for subdirectory in embeddedAppDirectories {
+                let dir = (path as NSString).appendingPathComponent(subdirectory)
+                guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+                for entry in entries where !entry.hasPrefix(".") {
+                    let entryPath = (dir as NSString).appendingPathComponent(entry)
+                    let resolved = URL(fileURLWithPath: entryPath).resolvingSymlinksInPath().path
+                    // Hosts also embed agents here (Google Drive's FinderHelper,
+                    // Finder's AirDrop and Recents shims) that are not apps a
+                    // person opens from a launcher.
+                    guard resolved.hasSuffix(".app"),
+                          !isAgent(at: resolved),
+                          let embedded = makeApp(at: resolved, preferredName: nil) else { continue }
+                    record(embedded)
+                }
+            }
+        }
+
         func walk(_ dir: String, depth: Int) {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
             for entry in entries {
@@ -82,13 +112,12 @@ enum InstalledAppsScanner {
                 // "Adobe Creative Cloud" alias) still resolve to their bundle.
                 let resolved = URL(fileURLWithPath: entryPath).resolvingSymlinksInPath().path
                 if resolved.hasSuffix(".app") {
-                    // Application bundle (a leaf): record it, never descend into
-                    // it. For links whose on-disk name differs from the bundle
-                    // name, prefer the name shown in `/Applications`.
+                    // Application bundle: record it and its embedded companion
+                    // apps, but never walk into it. For links whose on-disk
+                    // name differs from the bundle name, prefer the name shown
+                    // in `/Applications`.
                     let preferredName = entry.hasSuffix(".app") ? nil : entry
-                    if let app = makeApp(at: resolved, preferredName: preferredName) {
-                        record(app)
-                    }
+                    recordBundle(at: resolved, preferredName: preferredName)
                 } else if depth < maxDepth {
                     var isDir: ObjCBool = false
                     if fm.fileExists(atPath: resolved, isDirectory: &isDir), isDir.boolValue {
@@ -103,14 +132,18 @@ enum InstalledAppsScanner {
         }
 
         for path in extraAppPaths where fm.fileExists(atPath: path) {
-            if let app = makeApp(at: path, preferredName: nil) {
-                record(app)
-            }
+            recordBundle(at: path, preferredName: nil)
         }
 
         return byBundleID.values.sorted { lhs, rhs in
             lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         }
+    }
+
+    /// The app bundle at `path`, named the way a scan names it; nil when the
+    /// path holds no bundle with an identifier.
+    static func app(atPath path: String) -> InstalledApp? {
+        makeApp(at: path, preferredName: nil)
     }
 
     /// Locate a recorded app among `installed`. A recorded path that still
@@ -161,6 +194,23 @@ enum InstalledAppsScanner {
                 basename: basename
             )
         )
+    }
+
+    /// Whether the bundle declares itself a UI-less agent or background-only
+    /// process. Info.plists store these flags as booleans or as "1"/"YES"
+    /// strings.
+    private static func isAgent(at path: String) -> Bool {
+        guard let info = Bundle(path: path)?.infoDictionary else { return false }
+        return ["LSUIElement", "LSBackgroundOnly"].contains { key in
+            switch info[key] {
+            case let flag as Bool:
+                return flag
+            case let flag as String:
+                return ["1", "yes", "true"].contains(flag.lowercased())
+            default:
+                return false
+            }
+        }
     }
 
     private static func nonEmptyString(_ value: Any?) -> String? {

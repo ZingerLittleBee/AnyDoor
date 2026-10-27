@@ -553,7 +553,10 @@ Screen ("screen recording") above an app that a Chinese-UI user opens by its Eng
 ### Command palette applications
 
 The Applications section lists app shortcuts (`KeyBinding` rows) first, then every scanned app whose
-bundle ID no shortcut claims, so a shortcut's recorded app hides the scanned copy. Each open rescans
+bundle ID no shortcut claims, so a shortcut's recorded app hides the scanned copy. The scanner never
+walks a bundle's payload, but it lists the apps a bundle ships directly in `Contents/Applications` or
+`Contents/Developer/Applications` (Xcode's Device Hub and Instruments), skipping `LSUIElement` /
+`LSBackgroundOnly` helpers there; top-level agents such as menu-bar apps stay listed. Each open rescans
 off the main actor and checks every shortcut with `InstalledAppsScanner.locate`. A recorded path that
 still holds the bundle is kept, even when the scan deduped to another copy such as Xcode-beta. A gone
 path whose bundle ID is installed elsewhere (a reinstall under a new name) is re-pointed through
@@ -561,6 +564,18 @@ path whose bundle ID is installed elsewhere (a reinstall under a new name) is re
 shortcut with no installed copy leaves the palette but keeps its row and hotkey for a reinstall.
 `AppSwitcher` also falls back to Launch Services when a recorded path is gone, so a hotkey launches
 before the palette has re-pointed it.
+
+Both kinds of application row carry a native menu, opened by right-click (`RightClickMenu`, which
+selects the row first) or by ⌘K on the selected row (popped at the palette's bottom-trailing corner).
+`CommandPaletteAppRow` classifies rows from their Source alone; `CommandPaletteAppContext.resolve`
+reads an app shortcut's binding and the app's running and trashable state when the menu opens, and
+`menuGroups` decides the items: Quit and Force Quit only while the app runs, Hide only for scanned
+apps, and Move to Trash only outside `/System` and other bundles in a deletable folder, disabled while
+running. Open reuses the row's commit; Force Quit and Move to Trash go through the confirmation card;
+every other action closes the palette first (`CommandPaletteWindowController.performAppAction`).
+Hidden apps are bundle IDs in `CommandPaletteService.hiddenAppBundleIDs` (a synced setting), restored
+from Settings → General. Set Hotkey adds a scanned app as an app shortcut, then opens the Panel pane
+through `SettingsOpener.tryOpenRecordingHotkey`, whose request the row's `HotkeyRecorder` consumes.
 
 ### Command palette second-level menu
 
