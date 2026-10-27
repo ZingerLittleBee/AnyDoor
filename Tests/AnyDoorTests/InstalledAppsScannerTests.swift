@@ -105,6 +105,62 @@ final class InstalledAppsScannerTests: XCTestCase {
         XCTAssertEqual(app?.searchAliases, ["InternalName-macOS"])
     }
 
+    // MARK: - Recorded app location
+
+    func testLocateFollowsAppReinstalledUnderNewName() throws {
+        // An app shortcut recorded "T3 Code (Nightly).app"; the user replaced it
+        // with "T3 Code (Beta).app", which keeps the bundle identifier.
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let beta = try makeAppBundle(in: root, named: "T3 Code (Beta).app", bundleID: "com.t3tools.t3code")
+        let installed = InstalledAppsScanner.scan(roots: [root.path], extraAppPaths: [])
+
+        let location = InstalledAppsScanner.locate(
+            bundleID: "com.t3tools.t3code",
+            recordedPath: root.appendingPathComponent("T3 Code (Nightly).app").path,
+            in: installed
+        )
+
+        guard case .moved(let app) = location else {
+            return XCTFail("Expected the reinstalled copy, got \(location)")
+        }
+        XCTAssertEqual(app.path, beta.path)
+        XCTAssertEqual(app.displayName, "T3 Code (Beta)")
+    }
+
+    func testLocateKeepsRecordedCopyWhenScanDedupedToAnother() throws {
+        // Xcode and Xcode-beta share a bundle identifier, so the scan lists only
+        // one. A shortcut bound to the other copy must not be re-pointed.
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = try makeAppBundle(in: root, named: "Xcode.app", bundleID: "com.apple.dt.Xcode")
+        let second = try makeAppBundle(in: root, named: "Xcode-beta.app", bundleID: "com.apple.dt.Xcode")
+        let installed = InstalledAppsScanner.scan(roots: [root.path], extraAppPaths: [])
+        let scannedPath = try XCTUnwrap(installed.first { $0.bundleID == "com.apple.dt.Xcode" }?.path)
+        let otherCopy = scannedPath == first.path ? second.path : first.path
+
+        XCTAssertEqual(
+            InstalledAppsScanner.locate(bundleID: "com.apple.dt.Xcode", recordedPath: otherCopy, in: installed),
+            .unchanged
+        )
+    }
+
+    func testLocateReportsUninstalledApp() throws {
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try makeAppBundle(in: root, named: "Other.app", bundleID: "test.other")
+        let installed = InstalledAppsScanner.scan(roots: [root.path], extraAppPaths: [])
+
+        XCTAssertEqual(
+            InstalledAppsScanner.locate(
+                bundleID: "test.gone",
+                recordedPath: root.appendingPathComponent("Gone.app").path,
+                in: installed
+            ),
+            .missing
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeTempRoot() throws -> URL {

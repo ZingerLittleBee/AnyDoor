@@ -14,6 +14,19 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     var isSystemApp: Bool { path.hasPrefix("/System/") }
 }
 
+/// Where a previously recorded app (an app shortcut's bundle ID and path) is
+/// now, relative to a fresh scan.
+enum RecordedAppLocation: Equatable, Sendable {
+    /// The recorded path still holds the app.
+    case unchanged
+    /// The recorded path no longer holds the app, but a copy with the same
+    /// bundle identifier is installed elsewhere, typically a reinstall under a
+    /// new bundle name such as "T3 Code (Nightly)" → "T3 Code (Beta)".
+    case moved(InstalledApp)
+    /// No installed copy remains.
+    case missing
+}
+
 /// Stateless filesystem scan for installed `.app` bundles. Deliberately
 /// `nonisolated`: it only touches `FileManager`/`Bundle` and returns a Sendable
 /// `[InstalledApp]`, so callers can (and the command palette does) run it off
@@ -98,6 +111,26 @@ enum InstalledAppsScanner {
         return byBundleID.values.sorted { lhs, rhs in
             lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
         }
+    }
+
+    /// Locate a recorded app among `installed`. A recorded path that still
+    /// holds the bundle wins even when the scan deduped to another copy (e.g.
+    /// Xcode-beta beside Xcode), so a deliberate choice is never re-pointed;
+    /// otherwise the scanned copy with the same bundle identifier replaces it.
+    static func locate(
+        bundleID: String,
+        recordedPath: String,
+        in installed: [InstalledApp]
+    ) -> RecordedAppLocation {
+        if !recordedPath.isEmpty,
+           FileManager.default.fileExists(atPath: recordedPath),
+           Bundle(path: recordedPath)?.bundleIdentifier == bundleID {
+            return .unchanged
+        }
+        if let app = installed.first(where: { $0.bundleID == bundleID }) {
+            return .moved(app)
+        }
+        return .missing
     }
 
     private static func makeApp(at path: String, preferredName: String?) -> InstalledApp? {

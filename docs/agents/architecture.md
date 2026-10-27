@@ -550,6 +550,18 @@ terms work in either UI; they are never shown; and they match only at the start 
 of its whitespace-separated words. Substring matching there would let "ding" or "co" put Record
 Screen ("screen recording") above an app that a Chinese-UI user opens by its English name.
 
+### Command palette applications
+
+The Applications section lists app shortcuts (`KeyBinding` rows) first, then every scanned app whose
+bundle ID no shortcut claims, so a shortcut's recorded app hides the scanned copy. Each open rescans
+off the main actor and checks every shortcut with `InstalledAppsScanner.locate`. A recorded path that
+still holds the bundle is kept, even when the scan deduped to another copy such as Xcode-beta. A gone
+path whose bundle ID is installed elsewhere (a reinstall under a new name) is re-pointed through
+`PanelStore.relocateAppShortcuts`, which persists the new name and path and recompiles hotkeys. A
+shortcut with no installed copy leaves the palette but keeps its row and hotkey for a reinstall.
+`AppSwitcher` also falls back to Launch Services when a recorded path is gone, so a hotkey launches
+before the palette has re-pointed it.
+
 ### Command palette second-level menu
 
 Option-bearing commands drill into a second level instead of acting with a default.

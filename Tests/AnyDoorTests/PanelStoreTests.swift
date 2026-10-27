@@ -126,6 +126,38 @@ final class PanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRelocateAppShortcutFollowsAppAndKeepsHotkey() throws {
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let binding = KeyBinding(
+            keyCode: 7, modifierFlags: 1_966_080,
+            appBundleID: "com.t3tools.t3code", appName: "T3 Code (Nightly)",
+            appPath: "/Applications/T3 Code (Nightly).app"
+        )
+        container.mainContext.insert(binding)
+        try container.mainContext.save()
+        var refreshCount = 0
+        let store = PanelStore()
+        store.bootstrap(modelContainer: container, providers: [], refreshHotkeys: { refreshCount += 1 })
+
+        store.relocateAppShortcuts([binding.id: InstalledApp(
+            bundleID: "com.t3tools.t3code",
+            displayName: "T3 Code (Beta)",
+            path: "/Applications/T3 Code (Beta).app",
+            searchAliases: []
+        )])
+
+        let entry = try XCTUnwrap(store.appShortcutChildren.first)
+        XCTAssertEqual(entry.title, "T3 Code (Beta)")
+        XCTAssertEqual(entry.hotkey, HotkeyDescriptor(keyCode: 7, modifierFlags: 1_966_080))
+        XCTAssertEqual(store.appShortcutPaths[binding.id], "/Applications/T3 Code (Beta).app")
+        // Hotkey snapshots bake in the launch path, so they must recompile.
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    @MainActor
     func testHotkeyMutationUsesBootstrappedRefreshHandler() throws {
         let container = try ModelContainer(
             for: KeyBinding.self, BuiltinPreference.self,
