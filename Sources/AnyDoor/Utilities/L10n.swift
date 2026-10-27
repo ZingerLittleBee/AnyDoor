@@ -641,6 +641,8 @@ enum L10n {
         case commandPaletteActionEnter = "commandPalette.action.enter"
         case commandPaletteActionSelect = "commandPalette.action.select"
         case commandPaletteActionQuit = "commandPalette.action.quit"
+        case commandPaletteAppCopyPath = "commandPalette.app.copyPath"
+        case commandPaletteAppCopyBundleID = "commandPalette.app.copyBundleID"
         case commandPalettePluginRowLoading = "commandPalette.pluginRow.loading"
         case commandPalettePluginRowError = "commandPalette.pluginRow.error"
         case commandPaletteDetailFailed = "commandPalette.detail.failed"

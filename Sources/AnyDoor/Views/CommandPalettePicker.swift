@@ -5,6 +5,9 @@ import PluginInterface
 struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
     let onSelect: (PanelEntry) -> Void
+    /// Runs an application row's context-menu action other than Open, which
+    /// goes through `onSelect` like a click.
+    let onAppAction: (CommandPaletteAppAction, CommandPaletteAppRow) -> Void
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
@@ -617,7 +620,10 @@ struct CommandPalettePicker: View {
                                 entry: entry,
                                 hyperFlags: state.hyperFlags,
                                 isSelected: entry.id == selectedID,
-                                onSelect: { onSelect(entry) }
+                                onSelect: { onSelect(entry) },
+                                contextMenu: CommandPaletteAppRow(entry.source).map { app in
+                                    { appContextMenu(for: entry, app: app) }
+                                }
                             )
                         }
                     }
@@ -667,6 +673,27 @@ struct CommandPalettePicker: View {
         }
     }
 
+    /// Built when the menu opens. Selecting the row first keeps the highlight on
+    /// the row the menu acts on.
+    private func appContextMenu(for entry: PanelEntry, app: CommandPaletteAppRow) -> NSMenu {
+        state.select(entryID: entry.id)
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem(title: L(.commandPaletteActionOpen), systemImage: "arrow.up.forward.app") {
+            onSelect(entry)
+        })
+        menu.addItem(ClosureMenuItem(title: L(.clipboardActionRevealInFinder), systemImage: "folder") {
+            onAppAction(.revealInFinder, app)
+        })
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: L(.commandPaletteAppCopyPath), systemImage: "doc.on.doc") {
+            onAppAction(.copyPath, app)
+        })
+        menu.addItem(ClosureMenuItem(title: L(.commandPaletteAppCopyBundleID), systemImage: "shippingbox") {
+            onAppAction(.copyBundleID, app)
+        })
+        return menu
+    }
+
     private func sectionHeader(titleKey: String) -> some View {
         LocalizedText(raw: titleKey)
             .font(.system(size: 11, weight: .semibold))
@@ -685,6 +712,9 @@ private struct CommandPaletteRow: View {
     let isSelected: Bool
     var option: CommandPaletteOption? = nil
     let onSelect: () -> Void
+    /// Native right-click menu, built at click time. Nil rows get no catcher
+    /// view.
+    var contextMenu: (() -> NSMenu)? = nil
 
     @State private var isHovering = false
     @State private var appIcon: NSImage?
@@ -729,6 +759,11 @@ private struct CommandPaletteRow: View {
         )
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
+        .overlay {
+            if let contextMenu {
+                RightClickMenu(makeMenu: contextMenu)
+            }
+        }
         .onHoverSafe { isHovering = $0 }
         .onTapGesture(perform: onSelect)
         .task(id: entry.id) {

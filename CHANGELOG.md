@@ -6,6 +6,11 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Right-click an app in the command palette to open it, reveal it in Finder
+  (在 Finder 中显示), or copy its path or bundle ID.
+
 ### Fixed
 
 - Clipboard History can migrate snapshots from older releases that lack rich

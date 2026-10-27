@@ -200,6 +200,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onSelect: { [weak self] entry in
                 self?.commit(entry)
             },
+            onAppAction: { [weak self] action, app in
+                self?.performAppAction(action, on: app)
+            },
             onCancel: { [weak self] in
                 self?.cancel()
             },
@@ -791,6 +794,25 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             QuicklinkOpener.shared.open(quicklink, argument: argument)
         case .dismiss:
             close()
+        }
+    }
+
+    /// An application row's context-menu action. Like opening the app, each one
+    /// closes the palette first: Finder takes focus for a reveal, and a copy
+    /// confirms with a toast over the app the palette came from.
+    private func performAppAction(_ action: CommandPaletteAppAction, on app: CommandPaletteAppRow) {
+        let resolved = app.resolve()
+        close()
+        guard let resolved else { return }
+        switch action {
+        case .revealInFinder:
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: resolved.path)])
+        case .copyPath:
+            ClipboardSelfWrites.write(string: resolved.path)
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        case .copyBundleID:
+            ClipboardSelfWrites.write(string: resolved.bundleID)
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         }
     }
 

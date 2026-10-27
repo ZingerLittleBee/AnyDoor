@@ -1353,6 +1353,13 @@ final class CommandPaletteState {
         selectedIndex = max(selectedIndex - 1, 0)
     }
 
+    /// Moves the selection to a listed row, so a row's context menu acts on
+    /// the highlighted row. An unlisted id leaves the selection unchanged.
+    func select(entryID: String) {
+        guard let index = flatEntries.firstIndex(where: { $0.id == entryID }) else { return }
+        selectedIndex = index
+    }
+
     func commitSelection() -> PanelEntry? {
         let list = flatEntries
         guard list.indices.contains(selectedIndex) else { return list.first }

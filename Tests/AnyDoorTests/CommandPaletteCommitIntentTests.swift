@@ -1,5 +1,6 @@
 import XCTest
 import PluginInterface
+import SwiftData
 @testable import AnyDoor
 
 /// Pins the Source → commit-intent mapping so the palette's four commit
@@ -340,5 +341,47 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
             CommandPaletteCommitIntent.classify(.quicklinkArgument(id: id, argument: "AnyDoor")),
             .openQuicklinkArgument(id: id, argument: "AnyDoor")
         )
+    }
+
+    // MARK: - Application context menu
+
+    @MainActor
+    func testOnlyApplicationRowsHaveAContextMenuTargetingTheCurrentApp() throws {
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let binding = KeyBinding(
+            keyCode: 7, modifierFlags: 1_966_080,
+            appBundleID: "com.t3tools.t3code", appName: "T3 Code (Nightly)",
+            appPath: "/Applications/T3 Code (Nightly).app"
+        )
+        container.mainContext.insert(binding)
+        try container.mainContext.save()
+        let store = PanelStore()
+        store.bootstrap(modelContainer: container, providers: [])
+        // The palette re-points a shortcut after a reinstall; Reveal in Finder
+        // and Copy Path must follow it rather than the recorded name.
+        store.relocateAppShortcuts([binding.id: InstalledApp(
+            bundleID: "com.t3tools.t3code",
+            displayName: "T3 Code (Beta)",
+            path: "/Applications/T3 Code (Beta).app",
+            searchAliases: []
+        )])
+
+        let shortcut = try XCTUnwrap(CommandPaletteAppRow(.appShortcut(binding.id))?.resolve(in: store))
+        XCTAssertEqual(shortcut.bundleID, "com.t3tools.t3code")
+        XCTAssertEqual(shortcut.path, "/Applications/T3 Code (Beta).app")
+
+        let hubPath = "/Applications/Xcode.app/Contents/Applications/DeviceHub.app"
+        let installed = try XCTUnwrap(
+            CommandPaletteAppRow(.installedApp(bundleID: "com.apple.dt.Devices", path: hubPath))?.resolve(in: store)
+        )
+        XCTAssertEqual(installed.bundleID, "com.apple.dt.Devices")
+        XCTAssertEqual(installed.path, hubPath)
+
+        XCTAssertNil(CommandPaletteAppRow(.appShortcut(UUID()))?.resolve(in: store))
+        XCTAssertNil(CommandPaletteAppRow(.builtin(.lockScreen)))
+        XCTAssertNil(CommandPaletteAppRow(.quicklink(id: UUID())))
     }
 }

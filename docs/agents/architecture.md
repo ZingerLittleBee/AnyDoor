@@ -565,6 +565,12 @@ shortcut with no installed copy leaves the palette but keeps its row and hotkey 
 `AppSwitcher` also falls back to Launch Services when a recorded path is gone, so a hotkey launches
 before the palette has re-pointed it.
 
+Both kinds of application row carry a native right-click menu (`RightClickMenu`) with Open, Reveal in
+Finder, Copy Path, and Copy Bundle ID. `CommandPaletteAppRow` classifies rows from their Source alone
+and resolves an app shortcut through its binding only when an action runs, so the menu acts on a
+re-pointed path. Opening the menu selects its row; Open reuses the row's commit, and every other
+action closes the palette before it acts (`CommandPaletteWindowController.performAppAction`).
+
 ### Command palette second-level menu
 
 Option-bearing commands drill into a second level instead of acting with a default.
