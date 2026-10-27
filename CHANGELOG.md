@@ -22,6 +22,11 @@ versioning.
   causing captures to fail.
 - Clipboard History refreshes open search results and QR filters when image
   recognition finishes, without requiring the search query to be changed.
+- The command palette follows an app shortcut to its app after a reinstall
+  under a new name, such as T3 Code (Nightly) to T3 Code (Beta). The row shows
+  the installed app instead of the removed one, which also hid the new app
+  from search, and its hotkey keeps launching it. Shortcuts whose app is
+  uninstalled no longer appear in the palette.
 
 ## [4.2.8] - 2026-10-05
 

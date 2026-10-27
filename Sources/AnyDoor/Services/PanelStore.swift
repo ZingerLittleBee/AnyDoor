@@ -747,6 +747,40 @@ final class PanelStore {
         container.mainContext.delete(binding)
         persistMutation()
     }
+
+    /// Each app shortcut's recorded app, copied out of SwiftData so it can be
+    /// checked against the filesystem off the main actor.
+    func appShortcutRecords() -> [AppShortcutRecord] {
+        guard let container = modelContainer,
+              let bindings = try? container.mainContext.fetch(FetchDescriptor<KeyBinding>())
+        else { return [] }
+        return bindings.map {
+            AppShortcutRecord(id: $0.id, bundleID: $0.appBundleID, path: $0.appPath)
+        }
+    }
+
+    /// Point app shortcuts whose recorded app moved at the installed copy with
+    /// the same bundle identifier. The recorded name follows the app so every
+    /// surface shows what is installed; the hotkey and row settings are kept.
+    func relocateAppShortcuts(_ moves: [UUID: InstalledApp]) {
+        var changed = false
+        for (id, app) in moves {
+            guard let binding = binding(id: id), binding.appBundleID == app.bundleID,
+                  binding.appPath != app.path || binding.appName != app.displayName
+            else { continue }
+            binding.appPath = app.path
+            binding.appName = app.displayName
+            changed = true
+        }
+        if changed { persistMutation() }
+    }
+}
+
+/// A Sendable copy of one app shortcut's recorded app.
+struct AppShortcutRecord: Sendable {
+    let id: UUID
+    let bundleID: String
+    let path: String
 }
 
 enum HyperAppShortcutMigrationError: Error {

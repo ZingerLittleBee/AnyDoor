@@ -38,6 +38,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// the Applications section instantly so summoning the palette never blocks on
     /// a fresh `/Applications` walk; empty only before the very first scan returns.
     private var cachedApps: [InstalledApp] = []
+    /// App shortcuts with no installed copy of their app as of the last scan.
+    /// They leave the palette, where they cannot launch, but stay in Settings
+    /// and the menu-bar panel so a reinstall brings them back with their hotkey.
+    private var uninstalledAppShortcutIDs: Set<UUID> = []
 
     static func makePanel() -> NSPanel {
         let panel = NSPanel(
@@ -311,14 +315,37 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         //      `/Applications` walk never delays summoning the palette. The
         //      scan needs no provider state, so it starts before
         //      `refreshAll()`, which can wait on a provider's Automation check.
+        //      The same pass checks each app shortcut's recorded app: a moved
+        //      app (reinstalled under a new name) is re-pointed, and one with
+        //      no installed copy is dropped from the palette.
         Task { [weak self, weak pickerState] in
+            let records = PanelStore.shared.appShortcutRecords()
             let scan = Task.detached(priority: .userInitiated) {
-                InstalledAppsScanner.scan()
+                let apps = InstalledAppsScanner.scan()
+                let locations = records.map { record in
+                    (record.id, InstalledAppsScanner.locate(
+                        bundleID: record.bundleID,
+                        recordedPath: record.path,
+                        in: apps
+                    ))
+                }
+                return (apps, locations)
             }
             await PanelStore.shared.refreshAll()
-            let apps = await scan.value
+            let (apps, locations) = await scan.value
+            var moves: [UUID: InstalledApp] = [:]
+            var uninstalled: Set<UUID> = []
+            for (id, location) in locations {
+                switch location {
+                case .unchanged: break
+                case .moved(let app): moves[id] = app
+                case .missing: uninstalled.insert(id)
+                }
+            }
+            PanelStore.shared.relocateAppShortcuts(moves)
             guard let self else { return }
             self.cachedApps = apps
+            self.uninstalledAppShortcutIDs = uninstalled
             guard let pickerState, self.state === pickerState, self.window?.isVisible == true else { return }
             let refreshed = self.collectSections(installedApps: apps)
             pickerState.updateSections(
@@ -503,7 +530,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             ))
         }
 
-        let appShortcuts = store.appShortcutChildren.filter(\.isVisible)
+        let appShortcuts = store.appShortcutChildren.filter { entry in
+            guard entry.isVisible else { return false }
+            guard case .appShortcut(let id) = entry.source else { return true }
+            return !uninstalledAppShortcutIDs.contains(id)
+        }
         let boundBundleIDs: Set<String> = Set(appShortcuts.compactMap { entry in
             guard case .appShortcut(let id) = entry.source,
                   let binding = store.binding(id: id) else { return nil }
