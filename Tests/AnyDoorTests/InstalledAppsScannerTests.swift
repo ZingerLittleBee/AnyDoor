@@ -85,6 +85,42 @@ final class InstalledAppsScannerTests: XCTestCase {
         XCTAssertFalse(apps.contains { $0.bundleID == "test.inner" }, "Must not walk into .app bundles")
     }
 
+    func testScanFindsCompanionAppsEmbeddedInHostBundleButNotAgents() throws {
+        // Mirrors Xcode.app/Contents/Applications/DeviceHub.app and older
+        // Xcode's Contents/Developer/Applications/Simulator.app, beside agents
+        // such as Google Drive.app/Contents/Applications/FinderHelper.app.
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = try makeAppBundle(in: root, named: "Host.app", bundleID: "test.host")
+        let companions = host.appendingPathComponent("Contents/Applications")
+        try makeAppBundle(in: companions, named: "Companion.app", bundleID: "test.companion")
+        try makeAppBundle(
+            in: companions, named: "Helper.app", bundleID: "test.helper",
+            extraInfo: ["LSUIElement": true]
+        )
+        try makeAppBundle(
+            in: companions, named: "Daemon.app", bundleID: "test.daemon",
+            extraInfo: ["LSBackgroundOnly": "1"]
+        )
+        try makeAppBundle(
+            in: host.appendingPathComponent("Contents/Developer/Applications"),
+            named: "Simulator.app", bundleID: "test.simulator"
+        )
+        // A top-level menu-bar app is an agent too, but people launch it.
+        try makeAppBundle(
+            in: root, named: "MenuBar.app", bundleID: "test.menubar",
+            extraInfo: ["LSUIElement": true]
+        )
+
+        let apps = InstalledAppsScanner.scan(roots: [root.path], extraAppPaths: [])
+        let ids = Set(apps.map(\.bundleID))
+        XCTAssertEqual(ids, ["test.host", "test.companion", "test.simulator", "test.menubar"])
+        XCTAssertEqual(
+            apps.first { $0.bundleID == "test.companion" }?.path,
+            companions.appendingPathComponent("Companion.app").path
+        )
+    }
+
     func testScanUsesLocalizedDisplayNameNotUnlocalizedInfoPlist() throws {
         // Info.plist stores an internal bundle name; every InfoPlist.strings
         // file stores a localized display name. Searching the localized name
@@ -176,17 +212,18 @@ final class InstalledAppsScannerTests: XCTestCase {
         named name: String,
         bundleID: String,
         unlocalizedDisplayName: String? = nil,
-        localizedDisplayName: String? = nil
+        localizedDisplayName: String? = nil,
+        extraInfo: [String: Any] = [:]
     ) throws -> URL {
         let appURL = dir.appendingPathComponent(name)
         let contents = appURL.appendingPathComponent("Contents")
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         let fallbackName = appURL.deletingPathExtension().lastPathComponent
-        var info: [String: Any] = [
+        var info: [String: Any] = extraInfo.merging([
             "CFBundleIdentifier": bundleID,
             "CFBundleName": unlocalizedDisplayName ?? fallbackName,
             "CFBundleDevelopmentRegion": "en",
-        ]
+        ]) { _, required in required }
         if let unlocalizedDisplayName {
             info["CFBundleDisplayName"] = unlocalizedDisplayName
         }

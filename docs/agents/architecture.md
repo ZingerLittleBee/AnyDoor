@@ -553,7 +553,10 @@ Screen ("screen recording") above an app that a Chinese-UI user opens by its Eng
 ### Command palette applications
 
 The Applications section lists app shortcuts (`KeyBinding` rows) first, then every scanned app whose
-bundle ID no shortcut claims, so a shortcut's recorded app hides the scanned copy. Each open rescans
+bundle ID no shortcut claims, so a shortcut's recorded app hides the scanned copy. The scanner never
+walks a bundle's payload, but it lists the apps a bundle ships directly in `Contents/Applications` or
+`Contents/Developer/Applications` (Xcode's Device Hub and Instruments), skipping `LSUIElement` /
+`LSBackgroundOnly` helpers there; top-level agents such as menu-bar apps stay listed. Each open rescans
 off the main actor and checks every shortcut with `InstalledAppsScanner.locate`. A recorded path that
 still holds the bundle is kept, even when the scan deduped to another copy such as Xcode-beta. A gone
 path whose bundle ID is installed elsewhere (a reinstall under a new name) is re-pointed through
