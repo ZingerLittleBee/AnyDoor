@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.9] - 2026-10-27
+
 ### Added
 
 - Right-click an app in the command palette, or press ⌘K on the selected app,
