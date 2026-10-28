@@ -290,6 +290,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             onOpenFiles: { [weak self] item in self?.openFiles(item) },
             onSaveFiles: { [weak self] item in self?.saveFiles(item) },
             onAssociateFile: { [weak self] item, objectID in self?.associateFile(item, objectID: objectID) },
+            onReassociateFile: { [weak self] selection in self?.reassociateFile(selection) },
+            onSetFileLocationPaused: { [weak self] selection, paused in self?.setFileLocationPaused(selection, paused: paused) },
             onRevealLinkedLocation: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
             onDelete: { [weak self] item in
                 self?.performMutation(.delete(item.id))
@@ -1059,6 +1061,38 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             if !(await state.presentation.associateFileLocation(.init(entryID: entry.id, objectID: objectID, url: url))) {
                 presentActionFailure()
             }
+        }
+    }
+
+    private func reassociateFile(_ selection: ClipboardHistoryFileLocationSelection) {
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardLinkedFileReassociate)
+        panel.message = L(.clipboardLinkedFileReassociateMessage)
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if !(await state.presentation.reassociateFileLocation(.init(selection: selection, url: url))) {
+                presentFileLocationFailure()
+            }
+        }
+    }
+
+    private func setFileLocationPaused(_ selection: ClipboardHistoryFileLocationSelection, paused: Bool) {
+        Task {
+            if !(await state.presentation.setFileLocationPaused(selection, paused: paused)) {
+                presentFileLocationFailure()
+            }
+        }
+    }
+
+    private func presentFileLocationFailure() {
+        if state.presentation.actionFailure == .operationUnavailable {
+            ToastPresenter.shared.show(.failure(L(.clipboardLinkedFileActionChanged)))
+        } else {
+            presentActionFailure()
         }
     }
 

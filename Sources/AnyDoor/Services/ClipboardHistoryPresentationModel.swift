@@ -29,6 +29,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
     let retrySyncFileTransfer: @Sendable () async -> Void
     let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
     let associateFileLocation: @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation
+    let reassociateFileLocation: @Sendable (ClipboardHistoryFileLocationReassociation) async throws -> ClipboardHistoryLinkedFileLocation
+    let setFileLocationPaused: @Sendable (ClipboardHistoryFileLocationSelection, Bool) async throws -> Void
     let tagDefinitions:
         @Sendable () async throws -> [ClipboardHistoryTagDefinition]
     let sourceSummaries:
@@ -102,6 +104,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             try await module.exportFiles(entryID, to: destinations)
         }
         associateFileLocation = { try await module.associateFileLocation($0) }
+        reassociateFileLocation = { try await module.reassociateFileLocation($0) }
+        setFileLocationPaused = { try await module.setFileLocationPaused($0, paused: $1) }
         createTagDefinition = { name, entryID in
             let assignment = try await module.createTagDefinition(
                 named: name,
@@ -200,6 +204,12 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         associateFileLocation: @escaping @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation = { _ in
             throw ClipboardHistoryModuleError.operationUnavailable
         },
+        reassociateFileLocation: @escaping @Sendable (ClipboardHistoryFileLocationReassociation) async throws -> ClipboardHistoryLinkedFileLocation = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        setFileLocationPaused: @escaping @Sendable (ClipboardHistoryFileLocationSelection, Bool) async throws -> Void = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
         retrySearchIndex:
             @escaping @Sendable () async throws
                 -> ClipboardHistorySearchIndexStatus = {
@@ -215,6 +225,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.retrySyncFileTransfer = retrySyncFileTransfer
         self.exportFiles = exportFiles
         self.associateFileLocation = associateFileLocation
+        self.reassociateFileLocation = reassociateFileLocation
+        self.setFileLocationPaused = setFileLocationPaused
         self.tagDefinitions = tagDefinitions
         self.sourceSummaries = sourceSummaries
         self.createTagDefinition = createTagDefinition
@@ -580,6 +592,38 @@ final class ClipboardHistoryPresentationModel {
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func reassociateFileLocation(_ request: ClipboardHistoryFileLocationReassociation) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.reassociateFileLocation(request)
+            invalidateMaterializations(for: request.selection.entryID)
+            await reload()
+            return true
+        } catch {
+            let failure = ClipboardHistoryActionFailure(error)
+            invalidateMaterializations(for: request.selection.entryID)
+            await reload()
+            actionFailure = failure
+            return false
+        }
+    }
+
+    func setFileLocationPaused(_ selection: ClipboardHistoryFileLocationSelection, paused: Bool) async -> Bool {
+        actionFailure = nil
+        do {
+            try await operations.setFileLocationPaused(selection, paused)
+            invalidateMaterializations(for: selection.entryID)
+            await reload()
+            return true
+        } catch {
+            let failure = ClipboardHistoryActionFailure(error)
+            invalidateMaterializations(for: selection.entryID)
+            await reload()
+            actionFailure = failure
             return false
         }
     }
@@ -960,6 +1004,7 @@ final class ClipboardHistoryPresentationModel {
         guard requestRevision == revision, requestQuery == query else {
             return
         }
+        invalidateChangedFileMaterializations(in: rebasedEntries)
         entries = rebasedEntries
         nextCursor = cursor
         totalCount = refreshedCount
@@ -1257,6 +1302,7 @@ final class ClipboardHistoryPresentationModel {
             }
             switch loadedPage.state {
             case .ready:
+                invalidateChangedFileMaterializations(in: loadedPage.entries)
                 entries = loadedPage.entries
                 nextCursor = loadedPage.nextCursor
                 pagingState = loadedPage.nextCursor == nil
@@ -1324,6 +1370,15 @@ final class ClipboardHistoryPresentationModel {
     ) {
         pruneMaterializations(keepsEligibility: !payloadChanged) {
             $0 != entryID
+        }
+    }
+
+    private func invalidateChangedFileMaterializations(in incoming: [ClipboardHistoryEntry]) {
+        let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.filePresentationIdentity) })
+        for entry in incoming {
+            if let identity = previous[entry.id], identity != entry.filePresentationIdentity {
+                invalidateMaterializations(for: entry.id)
+            }
         }
     }
 

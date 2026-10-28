@@ -17,6 +17,8 @@ struct ClipboardCardView: View {
     var onOpenFiles: (() -> Void)?
     var onSaveFiles: (() -> Void)?
     var onAssociateFile: ((UUID) -> Void)?
+    var onReassociateFile: ((ClipboardHistoryFileLocationSelection) -> Void)?
+    var onSetFileLocationPaused: ((ClipboardHistoryFileLocationSelection, Bool) -> Void)?
     var onRevealLinkedLocation: ((URL) -> Void)?
     var onToggleTag: ((String) -> Void)?
     var onNewTag: (() -> Void)?
@@ -61,6 +63,8 @@ struct ClipboardCardView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.presentationTitle)
         .task(id: entry.filePresentationIdentity) {
+            previewMaterialization = nil
+            hostMaterialization = nil
             async let preview = presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
@@ -71,8 +75,10 @@ struct ClipboardCardView: View {
                 purpose: .hostAction,
                 recordsFailure: false
             )
-            previewMaterialization = await preview
-            hostMaterialization = await host
+            let (loadedPreview, loadedHost) = await (preview, host)
+            guard !Task.isCancelled else { return }
+            previewMaterialization = loadedPreview
+            hostMaterialization = loadedHost
         }
     }
 
@@ -202,9 +208,37 @@ struct ClipboardCardView: View {
                 case .workingCopy: .clipboardLinkedFileWorkingCopy
                 case .associated: .clipboardLinkedFileAssociated
                 }
-                let item = ClosureMenuItem(title: L(kind) + ": " + location.url.path,
-                    systemImage: "folder") { onRevealLinkedLocation?(location.url) }
+                let item = NSMenuItem(title: L(kind) + ": " + location.url.path, action: nil, keyEquivalent: "")
                 item.toolTip = location.url.path
+                let actions = NSMenu()
+                let status = NSMenuItem(title: location.trackingStatusText, action: nil, keyEquivalent: "")
+                status.isEnabled = false
+                actions.addItem(status)
+                actions.addItem(.separator())
+                let selection = ClipboardHistoryFileLocationSelection(entryID: entry.id,
+                    locationID: location.id, expectedRevision: location.revision)
+                if location.trackingActions.contains(.pause), let onRevealLinkedLocation {
+                    actions.addItem(ClosureMenuItem(title: L(.clipboardActionRevealInFinder), systemImage: "folder") {
+                        onRevealLinkedLocation(location.url)
+                    })
+                }
+                for action in location.trackingActions {
+                    switch action {
+                    case .reassociate:
+                        if let onReassociateFile {
+                            actions.addItem(ClosureMenuItem(title: L(action.titleKey), systemImage: action.systemImage) {
+                                onReassociateFile(selection)
+                            })
+                        }
+                    case .pause, .resume, .retry:
+                        if let onSetFileLocationPaused {
+                            actions.addItem(ClosureMenuItem(title: L(action.titleKey), systemImage: action.systemImage) {
+                                onSetFileLocationPaused(selection, action == .pause)
+                            })
+                        }
+                    }
+                }
+                item.submenu = actions
                 destination.addItem(item)
             }
             if let onAssociateFile {
