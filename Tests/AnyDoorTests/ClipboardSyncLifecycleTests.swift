@@ -18,18 +18,19 @@ final class ClipboardSyncLifecycleTests: XCTestCase {
             withIntermediateDirectories: true
         )
         removeClipboardHistoryDirectoryAfterTest(directory)
-        let databaseURL = directory.appendingPathComponent("history.sqlite")
-        let key = Data(repeating: 0x52, count: 32)
-        let first = try trackClipboardHistoryModule(ClipboardHistoryModule(
-            testingDatabaseURL: databaseURL,
-            databaseKey: key
+        let transport = UnavailableLifecycleSyncCloud()
+        let services = ClipboardSyncServices(transport: transport, keys: UnavailableLifecycleSyncKeys(), pollingInterval: nil)
+        let first = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: directory,
+            keyStore: LifecycleSyncLocalKey(), syncServices: services
         ))
         try await first.setSyncEnabled(true)
         try await first.closeStoreForTesting()
-        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
-            testingDatabaseURL: databaseURL,
-            databaseKey: key
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: directory,
+            keyStore: LifecycleSyncLocalKey(), syncServices: services
         ))
+        let accountReadsBeforeMigration = await transport.readCount()
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("ClipboardSyncLifecycleTests-\(UUID().uuidString)")
         )
@@ -64,7 +65,9 @@ final class ClipboardSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(lifecycle.state, .migrationFailed)
         let waiting = await reopened.syncStatus()
         XCTAssertTrue(waiting.isEnabled)
-        XCTAssertEqual(waiting.phase, .connecting)
+        XCTAssertEqual(waiting.phase, .capabilityUnavailable, "The previous fault remains visible before resuming")
+        let readsWhileMigrationFailed = await transport.readCount()
+        XCTAssertEqual(readsWhileMigrationFailed, accountReadsBeforeMigration)
 
         lifecycle.retry()
         await lifecycle.awaitCurrentOperationForTesting()
@@ -72,10 +75,52 @@ final class ClipboardSyncLifecycleTests: XCTestCase {
         XCTAssertEqual(lifecycle.state, .ready)
         let resumed = await reopened.syncStatus()
         XCTAssertEqual(resumed.phase, .capabilityUnavailable)
+        let resumedReads = await transport.readCount()
+        XCTAssertEqual(resumedReads, accountReadsBeforeMigration + 1)
         await lifecycle.stop()
         let stopped = await reopened.syncStatus()
         XCTAssertTrue(stopped.isEnabled, "Quitting does not revoke device participation")
         let history = await reopened.status()
         XCTAssertFalse(history.isMonitoring)
     }
+}
+
+private struct LifecycleSyncLocalKey: ClipboardHistoryMasterKeyStoring {
+    func load() -> ClipboardHistoryMasterKeyResult { .key(Data(repeating: 0x52, count: 32)) }
+    func create() -> ClipboardHistoryMasterKeyResult { load() }
+    func delete() -> ClipboardHistoryMasterKeyResult { .missing }
+}
+
+private struct UnavailableLifecycleSyncKeys: ClipboardSyncKeyStoring {
+    func load(account: ClipboardSyncAccount, keyID: UUID) async throws -> Data? {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) async throws -> Data {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+}
+
+private actor UnavailableLifecycleSyncCloud: ClipboardSyncTransport {
+    private var reads = 0
+    func readCount() -> Int { reads }
+    func account() throws -> ClipboardSyncAccount {
+        reads += 1
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func control(for account: ClipboardSyncAccount) throws -> ClipboardSyncControl? {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncChanges {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func cancel() {}
 }
