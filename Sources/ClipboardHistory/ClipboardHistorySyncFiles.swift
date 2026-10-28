@@ -53,13 +53,19 @@ extension ClipboardHistoryModule {
         let rows = try database.read { database in
             try Row.fetchAll(database, sql: """
                 SELECT member.item_index, version.descriptor, version.transfer_state,
-                       version.local_path, version.local_bookmark, version.local_identity
+                       COALESCE(location.path, version.local_path) AS local_path,
+                       COALESCE(location.bookmark, version.local_bookmark) AS local_bookmark,
+                       COALESCE(location.identity, version.local_identity) AS local_identity
                 FROM clipboard_sync_file_members AS member
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
                 JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
                   AND version.epoch = member.epoch AND version.object_id = member.object_id
                   AND version.version_id = COALESCE(choice.complete_version_id, choice.current_version_id)
-                WHERE member.entry_id = ? AND member.origin = 'remote' AND \(Self.liveSyncFileMember)
+                LEFT JOIN clipboard_sync_linked_locations AS location ON location.id = (
+                  SELECT linked.id FROM clipboard_sync_linked_locations AS linked
+                  WHERE linked.account_id = member.account_id AND linked.epoch = member.epoch AND linked.object_id = member.object_id
+                  ORDER BY CASE linked.kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, linked.id LIMIT 1)
+                WHERE member.entry_id = ? AND (member.origin = 'remote' OR location.id IS NOT NULL) AND \(Self.liveSyncFileMember)
                 ORDER BY member.item_index, member.representation_index
                 """, arguments: [entryID.value.uuidString.lowercased()])
         }

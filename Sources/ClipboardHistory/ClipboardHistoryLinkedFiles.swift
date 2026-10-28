@@ -80,6 +80,7 @@ extension ClipboardHistoryModule {
                 path TEXT NOT NULL, bookmark BLOB NOT NULL, identity BLOB NOT NULL,
                 kind TEXT NOT NULL, base_version_id TEXT NOT NULL, base_digest BLOB NOT NULL,
                 state TEXT NOT NULL, pending_version_id TEXT, observed_digest BLOB,
+                applying_version_id TEXT, applying_digest BLOB, replacement_path TEXT, replacement_identity BLOB,
                 UNIQUE(account_id, epoch, object_id, path)
             ) WITHOUT ROWID;
             CREATE INDEX clipboard_sync_linked_locations_object
@@ -95,7 +96,10 @@ extension ClipboardHistoryModule {
             SELECT member.account_id, member.epoch, member.object_id, member.origin,
                    version.descriptor, version.local_path, version.local_bookmark, version.local_identity
             FROM clipboard_sync_file_members AS member
-            JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
+            JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+            JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
+              AND version.epoch = member.epoch AND version.object_id = member.object_id
+              AND version.version_id = choice.complete_version_id
             WHERE version.transfer_state = 'complete' AND \(liveSyncFileMember)
               AND version.local_path IS NOT NULL AND version.local_bookmark IS NOT NULL
               AND version.local_identity IS NOT NULL
@@ -141,7 +145,10 @@ extension ClipboardHistoryModule {
               let row = try Row.fetchOne(database, SQLRequest<Row>(literal: """
                 SELECT member.epoch, version.descriptor FROM clipboard_sync_file_members AS member
                 JOIN clipboard_entries AS entry ON entry.id = member.entry_id
-                JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
+                JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
+                  AND version.epoch = member.epoch AND version.object_id = member.object_id
+                  AND version.version_id = choice.complete_version_id
                 WHERE member.entry_id = \(request.entryID.value.uuidString.lowercased())
                   AND member.object_id = \(request.objectID.uuidString) AND member.account_id = \(accountID)
                   AND version.transfer_state = 'complete' AND \(SQL(sql: liveSyncFileMember))

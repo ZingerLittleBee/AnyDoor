@@ -317,6 +317,7 @@ extension ClipboardHistoryModule {
         var resolved: [ResolvedFile] = []
         var unavailableCount = 0
         for row in rows {
+            if synchronized[row["item_index"]] != nil { continue }
             guard let bookmark: Data = row["bookmark_data"],
                 let identityData: Data = row["identity_data"]
             else {

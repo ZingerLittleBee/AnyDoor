@@ -1,0 +1,185 @@
+import Foundation
+import GRDB
+
+extension ClipboardHistoryModule {
+    /// One transfer/version path serves original files, receiving working copies,
+    /// and explicit associations. Every location keeps its actual edited base.
+    func reconcileLinkedFileVersions(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+        guard let services = syncServices else { return }
+        try await recoverLinkedFileApplications(account: account, control: control, generation: generation)
+        let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
+        for source in sources {
+            try await admitSync(generation, account: account, services: services)
+            guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
+            let inspection = Task.detached(priority: .utility) {
+                try ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
+            }
+            let proof: ClipboardLinkedFileProof
+            do { proof = try await withTaskCancellationHandler { try await inspection.value } onCancel: { inspection.cancel() } }
+            catch is CancellationError { throw CancellationError() }
+            catch { continue }
+            try await admitSync(generation, account: account, services: services)
+            guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
+            if source.state == .conflict { continue }
+            if selection.hasConflict || (proof.digest != source.baseDigest && selection.latest.versionID != source.baseVersionID) {
+                try setLinkedConflict(source, remoteVersion: selection.latest.versionID)
+                continue
+            }
+            if proof.digest != source.baseDigest {
+                let versionID = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
+                    parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
+                try await admitSync(generation, account: account, services: services)
+                guard let frozen = try syncFileSelection(objectID: source.objectID)?.complete,
+                      frozen.descriptor.versionID == versionID, let digest = frozen.descriptor.contentDigest else {
+                    throw ClipboardSyncServiceError.corruptData
+                }
+                let postFreeze = Task.detached(priority: .utility) {
+                    try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
+                }
+                let saved = await postFreeze.value
+                try await admitSync(generation, account: account, services: services)
+                let state: ClipboardHistoryLinkedFileLocationState = saved.map { $0.digest == digest ? .pendingUpload : .localChanges } ?? .unavailable
+                try syncWrite { database in
+                    guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
+                          current.identity == source.identity, current.baseVersionID == source.baseVersionID else { return }
+                    try database.execute(sql: """
+                        UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
+                          state = ?, pending_version_id = ?, observed_digest = ? WHERE id = ?
+                        """, arguments: [versionID.uuidString, digest, state.rawValue, versionID.uuidString, saved?.digest, source.id.uuidString])
+                    try Self.bumpHistoryRevision(in: database)
+                }
+                publishMutation()
+                continue
+            }
+            guard let complete = selection.complete, complete.descriptor.versionID == selection.latest.versionID,
+                  complete.descriptor.versionID != source.baseVersionID else { continue }
+            guard try linkedVersion(complete.descriptor.versionID, descendsFrom: source.baseVersionID,
+                objectID: source.objectID, account: account, control: control) else {
+                try setLinkedConflict(source, remoteVersion: complete.descriptor.versionID)
+                continue
+            }
+            try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
+        }
+    }
+
+    private func linkedSourceIsCurrent(_ source: ClipboardLinkedLocationSource, account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> Bool {
+        try linkedRead { database in
+            guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first else { return false }
+            return current.identity == source.identity && current.baseVersionID == source.baseVersionID
+        }
+    }
+
+    private func setLinkedConflict(_ source: ClipboardLinkedLocationSource, remoteVersion: UUID) throws {
+        try syncWrite { database in
+            try database.execute(sql: "UPDATE clipboard_sync_linked_locations SET state = 'conflict', pending_version_id = ? WHERE id = ?",
+                arguments: [remoteVersion.uuidString, source.id.uuidString])
+            try Self.bumpHistoryRevision(in: database)
+        }
+        publishMutation()
+    }
+
+    private func linkedVersion(_ version: UUID, descendsFrom ancestor: UUID, objectID: UUID,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> Bool {
+        try linkedRead { database in
+            let rows = try Row.fetchAll(database, sql: """
+                SELECT version_id, parents FROM clipboard_sync_file_versions
+                WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [account.identifier, control.epoch.uuidString, objectID.uuidString])
+            var graph: [UUID: [UUID]] = [:]
+            for row in rows {
+                guard let id = UUID(uuidString: row["version_id"]) else { continue }
+                graph[id] = try JSONDecoder().decode([UUID].self, from: row["parents"])
+            }
+            var pending = [version]
+            var visited = Set<UUID>()
+            while let next = pending.popLast() {
+                if next == ancestor { return true }
+                if visited.insert(next).inserted { pending.append(contentsOf: graph[next] ?? []) }
+            }
+            return false
+        }
+    }
+
+    private func applyLinkedFileVersion(_ version: ClipboardSyncVerifiedFileVersion, to source: ClipboardLinkedLocationSource,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+        guard let services = syncServices else { return }
+        let preparation = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.prepareReplacement(version, at: source.url) }
+        let replacement = try await withTaskCancellationHandler { try await preparation.value } onCancel: { preparation.cancel() }
+        var journaled = false
+        defer { if !journaled { try? FileManager.default.removeItem(at: replacement.url) } }
+        try await admitSync(generation, account: account, services: services)
+        guard try linkedSourceIsCurrent(source, account: account, control: control) else { return }
+        try syncWrite { database in
+            try database.execute(sql: """
+                UPDATE clipboard_sync_linked_locations SET applying_version_id = ?, applying_digest = ?,
+                  replacement_path = ?, replacement_identity = ? WHERE id = ?
+                """, arguments: [version.descriptor.versionID.uuidString, replacement.digest,
+                    replacement.url.path, replacement.identity, source.id.uuidString])
+        }
+        journaled = true
+        let application = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.applyReplacement(replacement, to: source) }
+        let proof = try await withTaskCancellationHandler { try await application.value } onCancel: { application.cancel() }
+        try faultInjector.check(.linkedFileAfterReplacement)
+        try await admitSync(generation, account: account, services: services)
+        guard try linkedSourceIsCurrent(source, account: account, control: control) else { return }
+        if let proof {
+            try finishLinkedApplication(source, versionID: version.descriptor.versionID, digest: replacement.digest, proof: proof)
+            try? FileManager.default.removeItem(at: replacement.url)
+        } else {
+            try setLinkedConflict(source, remoteVersion: version.descriptor.versionID)
+            try clearLinkedApplication(source.id)
+            try? FileManager.default.removeItem(at: replacement.url)
+        }
+    }
+
+    private func finishLinkedApplication(_ source: ClipboardLinkedLocationSource, versionID: UUID, digest: Data, proof: ClipboardLinkedFileProof) throws {
+        try syncWrite { database in
+            try database.execute(sql: """
+                UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
+                  bookmark = ?, identity = ?, observed_digest = ?, state = ?, pending_version_id = NULL,
+                  applying_version_id = NULL, applying_digest = NULL, replacement_path = NULL, replacement_identity = NULL
+                WHERE id = ?
+                """, arguments: [versionID.uuidString, digest, proof.bookmark, proof.identity, proof.digest,
+                    proof.digest == digest ? "current" : "localChanges", source.id.uuidString])
+            try Self.bumpHistoryRevision(in: database)
+        }
+        publishMutation()
+    }
+
+    private func clearLinkedApplication(_ id: UUID) throws {
+        try syncWrite { database in
+            try database.execute(sql: """
+                UPDATE clipboard_sync_linked_locations SET applying_version_id = NULL, applying_digest = NULL,
+                  replacement_path = NULL, replacement_identity = NULL WHERE id = ?
+                """, arguments: [id.uuidString])
+        }
+    }
+
+    /// A replaced inode is adopted only through the journal's recorded identity.
+    /// Edits made after the exchange stay dirty against the installed version.
+    private func recoverLinkedFileApplications(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+        guard let services = syncServices else { return }
+        let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
+        for source in sources {
+            guard let row = try linkedRead({ try Row.fetchOne($0, sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ? AND applying_version_id IS NOT NULL", arguments: [source.id.uuidString]) }),
+                  let version = UUID(uuidString: row["applying_version_id"]), let digest: Data = row["applying_digest"],
+                  let identity: Data = row["replacement_identity"], let path: String = row["replacement_path"] else { continue }
+            try await admitSync(generation, account: account, services: services)
+            let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) }
+            let proof = await inspection.value
+            try await admitSync(generation, account: account, services: services)
+            guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
+            if let proof {
+                try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
+                // Only the old, unchanged inode is ours to remove after adoption.
+                let backup = URL(fileURLWithPath: path)
+                let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(backup, expectedIdentity: source.identity) }
+                if let old = await inspection.value, old.digest == source.baseDigest { try? FileManager.default.removeItem(at: backup) }
+            } else {
+                // No exchange occurred. Remove only our verified replacement.
+                if ClipboardSyncFileIO.isAvailable(path: path, identity: identity) { try? FileManager.default.removeItem(atPath: path) }
+                try clearLinkedApplication(source.id)
+            }
+        }
+    }
+}

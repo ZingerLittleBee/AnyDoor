@@ -7,6 +7,120 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testRemoteUpdatePreservesDirtyWorkingFileAndConflictAcrossRestart() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initialLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initialLocations.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        let dirty = Data("unuploaded working file changes".utf8)
+        try dirty.write(to: working.url)
+        let remote = Data("new remote version".utf8)
+        try remote.write(to: fixture.original)
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+
+        try await fixture.receiver.setSyncEnabled(true)
+
+        let conflict = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(conflict.first?.state, .conflict)
+        XCTAssertEqual(conflict.first?.baseVersionID, working.baseVersionID)
+        XCTAssertEqual(try Data(contentsOf: working.url), dirty)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await reopened.resumeSync()
+        let restored = try await reopened.page(.init())
+        XCTAssertEqual(restored.entries.first?.linkedFileLocations.first?.state, .conflict)
+        XCTAssertEqual(try Data(contentsOf: working.url), dirty)
+    }
+
+    @MainActor
+    func testInterruptedReplacementAdoptsInstalledVersionAndPreservesLaterSave() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
+        let initialLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initialLocations.first)
+        let remote = Data("verified replacement before interruption".utf8)
+        try remote.write(to: fixture.original)
+        try await eventually {
+            await fixture.receiver.retrySync()
+            return (try? Data(contentsOf: working.url)) == remote
+        }
+        try await fixture.receiver.closeStoreForTesting()
+        let local = Data("saved after replacement before restart".utf8)
+        try local.write(to: working.url)
+        await fixture.cloud.failCommits(true)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+
+        await reopened.resumeSync()
+
+        let restored = try await reopened.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(restored.first?.id, working.id)
+        XCTAssertNotEqual(restored.first?.baseVersionID, working.baseVersionID)
+        XCTAssertTrue(restored.first?.state == .localChanges || restored.first?.state == .pendingUpload)
+        XCTAssertEqual(try Data(contentsOf: working.url), local)
+    }
+
+    @MainActor
+    func testEditingIndependentExportNeverPublishesAFileVersion() async throws {
+        let fixture = try await makeLinkedFixture()
+        let destination = fixture.root.appendingPathComponent("Independent.txt")
+        _ = try await fixture.receiver.exportFiles(fixture.entryID, to: [destination])
+        let before = await fixture.cloud.uploadCount()
+        try Data("independent changes".utf8).write(to: destination)
+        try await Task.sleep(for: .milliseconds(700))
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let after = await fixture.cloud.uploadCount()
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), Data("initial linked bytes".utf8))
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertFalse(locations.contains { $0.url == destination })
+    }
+
+    @MainActor
+    func testSavedChangesTravelBothDirectionsWithoutRecaptureOrUploadLoops() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        let forward = Data("saved in the original file".utf8)
+        try forward.write(to: fixture.original)
+        try await eventually {
+            await fixture.receiver.retrySync()
+            return (try? Data(contentsOf: working.url)) == forward
+        }
+        let backward = Data("saved in the receiving working copy".utf8)
+        try backward.write(to: working.url)
+        try await eventually {
+            await fixture.sender.retrySync()
+            return (try? Data(contentsOf: fixture.original)) == backward
+        }
+        let count = await fixture.cloud.uploadCount()
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+        try await Task.sleep(for: .milliseconds(700))
+        let settledCount = await fixture.cloud.uploadCount()
+        XCTAssertEqual(settledCount, count, "Applying received bytes must not echo another version")
+        let stable = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(stable.first?.id, working.id)
+        XCTAssertEqual(stable.first?.url, working.url)
+        let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Missing linked file") }
+        XCTAssertEqual(file.currentURL.resolvingSymlinksInPath(), working.url.resolvingSymlinksInPath())
+    }
+
+    @MainActor
+    private func eventually(_ condition: () async throws -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = Date().addingTimeInterval(6)
+        repeat {
+            if try await condition() { return }
+            try await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        XCTFail("Expected linked file update did not arrive", file: file, line: line)
+    }
+
+    @MainActor
     func testDisabledLocationDefersObservationAndReconcilesSavedBytesAfterRestart() async throws {
         let fixture = try await makeLinkedFixture()
         await fixture.cloud.failCommits(true)
@@ -101,7 +215,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
     }
 
     @MainActor
-    private func makeLinkedFixture() async throws -> (
+    private func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         entryID: ClipboardHistoryEntryID, original: URL, root: URL, receiverRoot: URL,
         services: ClipboardSyncServices, cloud: LinkedFileCloud
@@ -115,7 +229,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         let services = ClipboardSyncServices(transport: cloud, keys: LinkedFileKeys(), pollingInterval: nil)
         let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51)
         let receiverRoot = root.appendingPathComponent("Receiver")
-        let receiver = makeLinkedModule(root: receiverRoot, services: services, key: 0x52)
+        let receiver = makeLinkedModule(root: receiverRoot, services: services, key: 0x52, faultInjector: receiverFault)
         let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.linked-files.\(UUID())"))
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString(original.absoluteString, forType: .fileURL)
@@ -129,9 +243,10 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         return (sender, receiver, capture.entryID, original, root, receiverRoot, services, cloud)
     }
 
-    private func makeLinkedModule(root: URL, services: ClipboardSyncServices, key: UInt8) -> ClipboardHistoryModule {
+    private func makeLinkedModule(root: URL, services: ClipboardSyncServices, key: UInt8,
+        faultInjector: ClipboardHistoryFaultInjector = .init()) -> ClipboardHistoryModule {
         trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
-            keyStore: LinkedFileLocalKey(byte: key), syncServices: services))
+            keyStore: LinkedFileLocalKey(byte: key), faultInjector: faultInjector, syncServices: services))
     }
 }
 
@@ -194,6 +309,23 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
         return updated
     }
     func cancel() {}
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        var chunks: [Data] = []
+        var bytes: Int64 = 0
+        for index in 0..<upload.record.chunkCount {
+            let chunk = try ClipboardSyncFileTransfer.readSegment(in: upload.directory, index: index)
+            chunks.append(chunk)
+            bytes += Int64(chunk.count)
+            try await progress(bytes)
+        }
+        return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+        let chunks = try download(record, for: account)
+        guard chunks.indices.contains(index) else { throw ClipboardSyncServiceError.corruptData }
+        return chunks[index]
+    }
     func uploadCount() -> Int { uploads.count }
     private func advanced(_ control: ClipboardSyncControl) -> ClipboardSyncControl {
         .init(accountID: control.accountID, keyID: control.keyID, keyCheck: control.keyCheck,

@@ -248,6 +248,7 @@ extension ClipboardHistoryModule {
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await reconcileLinkedFileVersions(account: account, control: control, generation: generation)
             try refreshLinkedFileObservers(account: account, control: control, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)

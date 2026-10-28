@@ -1151,6 +1151,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v17_clipboard_sync_content",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
+                "v23_clipboard_sync_downloads",
                 "v24_clipboard_linked_locations",
             ]
         )
@@ -1238,6 +1239,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v17_clipboard_sync_content",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
+                "v23_clipboard_sync_downloads",
                 "v24_clipboard_linked_locations",
             ]
         )
