@@ -33,32 +33,47 @@ struct ClipboardSyncSettingsView: View {
                 LocalizedText(.settingsClipboardSyncNoTags)
                     .foregroundStyle(.secondary)
             } else {
-                Picker(
-                    selection: Binding(
-                        get: { model.selectedTagID ?? "" },
-                        set: { id in Task { await model.selectTag(id) } }
-                    )
-                ) {
-                    LocalizedText(.settingsClipboardSyncChooseTag).tag("")
-                    ForEach(model.tags) { tag in
-                        Text(L(
-                            .settingsClipboardSyncTagCount,
-                            tag.displayName,
-                            tag.eligibleEntryCount
-                        ))
-                        .tag(tag.id)
+                ForEach(model.tags) { tag in
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { tag.isSelected },
+                            set: { selected in Task { await model.selectTag(tag.id, selected: selected) } }
+                        )) {
+                            Text(L(.settingsClipboardSyncTagCount, model.tagTitle(tag), tag.eligibleEntryCount))
+                        }
+                        .toggleStyle(.checkbox)
+                        .disabled(!isStoreReady || !model.canSelectTag || (tag.isSelected && !tag.canDeselect))
+                        Spacer()
+                        let candidates = model.tags.filter {
+                            $0.id != tag.id && $0.displayName == tag.displayName && ($0.isSelected || tag.isSelected)
+                        }
+                        if !candidates.isEmpty {
+                            Menu {
+                                ForEach(candidates) { target in
+                                    Button(L(.settingsClipboardSyncMergeWith, model.tagTitle(target))) {
+                                        Task { await model.prepareMerge(sourceID: tag.id, targetID: target.id) }
+                                    }
+                                }
+                            } label: {
+                                LocalizedText(.settingsClipboardSyncMergeTitle)
+                            }
+                            .fixedSize()
+                            .disabled(!isStoreReady || !model.canSelectTag)
+                        }
                     }
-                } label: {
-                    LocalizedText(.settingsClipboardSyncTag)
+                    if tag.requiresLocalAuthorization {
+                        Button(L(.settingsClipboardSyncAuthorizeRetained, model.tagTitle(tag))) {
+                            Task { await model.selectTag(tag.id) }
+                        }
+                        .disabled(!isStoreReady || !model.canSelectTag)
+                    }
                 }
-                .pickerStyle(.menu)
-                .disabled(!isStoreReady || !model.canSelectTag)
 
                 LocalizedText(.settingsClipboardSyncBackfill)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if model.selectedTagID != nil {
+                if model.tags.contains(where: { $0.isSelected && !$0.canDeselect }) {
                     LocalizedText(.settingsClipboardSyncSelectedTagHelp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -182,6 +197,14 @@ struct ClipboardSyncSettingsView: View {
             NotificationCenter.default.publisher(for: .clipboardHistoryV2DidMutate)
         ) { _ in
             Task { await model.refresh() }
+        }
+        .alert(L(.settingsClipboardSyncMergeTitle), isPresented: Binding(
+            get: { model.mergePreview != nil }, set: { if !$0 { model.cancelMerge() } }
+        ), presenting: model.mergePreview) { preview in
+            Button(L(.settingsClipboardSyncMergeConfirm)) { Task { await model.confirmMerge(preview) } }
+            Button(L(.clipboardEditCancel), role: .cancel) { model.cancelMerge() }
+        } message: { preview in
+            Text(L(.settingsClipboardSyncMergeScope, preview.displayName, preview.newlyEligibleEntryCount))
         }
     }
 

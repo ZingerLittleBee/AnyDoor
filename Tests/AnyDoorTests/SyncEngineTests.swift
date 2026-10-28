@@ -52,7 +52,7 @@ final class SyncEngineTests: XCTestCase {
         let engine = SyncEngine(
             config: .init(deviceID: device.id, deviceName: device.id),
             context: context, defaults: device.defaults, transport: transport,
-            stateStore: SyncLocalStateStore(url: stateURL), reconcileRuntime: { _ in },
+            stateStore: SyncLocalStateStore(url: stateURL), reconcileRuntime: {},
             readLocalContent: {
                 if readState.shouldFail { throw ReadFailure.unavailable }
                 return SyncSnapshotMapping.Content(
@@ -140,7 +140,7 @@ final class SyncEngineTests: XCTestCase {
             transport: transport ?? SyncFolderTransport(folderURL: folder),
             stateStore: SyncLocalStateStore(url: stateURL),
             appPathResolver: { _ in nil },
-            reconcileRuntime: { _ in },
+            reconcileRuntime: {},
             wallNow: { wall.now }
         )
         return Device(
@@ -463,7 +463,7 @@ final class SyncEngineTests: XCTestCase {
             transport: SyncFolderTransport(folderURL: folder),
             stateStore: SyncLocalStateStore(url: folder.appendingPathComponent("local-state-device-a.json")),
             appPathResolver: { _ in nil },
-            reconcileRuntime: { _ in },
+            reconcileRuntime: {},
             wallNow: { a.wall.now }
         )
         XCTAssertEqual(relaunched.document.entries, a.engine.document.entries)

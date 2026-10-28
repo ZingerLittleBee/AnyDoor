@@ -1346,6 +1346,11 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(choicesAfterRemoteMerge.first { $0.id == currentTag.id }).requiresLocalAuthorization)
         let local = try await first.page(.init()).entries
         XCTAssertEqual(local.map(\.id), [secret.entryID])
+        let extra = ClipboardHistoryTagDefinition(id: "another-current-tag", displayName: "Work")
+        _ = try await first.replaceTagDefinitions(with: [currentTag, extra])
+        let localMerge = try await first.prepareSyncTagMerge(sourceID: currentTag.id, targetID: extra.id)
+        XCTAssertEqual(localMerge.newlyEligibleEntryCount, 1,
+            "A selected but account-blocked retained entry is newly enrolled by explicit local merge")
         try await first.setSyncTagSelected(currentTag.id, selected: true)
         let afterExplicitConsent = await cloud.currentUploads()
         XCTAssertEqual(afterExplicitConsent.filter { $0.record.kind == .entry }.count, 1)

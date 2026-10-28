@@ -405,6 +405,7 @@ extension ClipboardHistoryModule {
                         displayName: $0["display_name"]
                     )
                 }
+                try Self.markLegacyTagDefinitionsImported(in: database)
                 guard currentDefinitions != normalizedDefinitions else {
                     return TagDefinitionUpdateMutationResult(
                         update: ClipboardHistoryTagDefinitionUpdate(

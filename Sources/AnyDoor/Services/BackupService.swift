@@ -20,12 +20,18 @@ struct ImportSummary: Equatable {
 @MainActor
 final class BackupService {
     private static var reconcileClipboardHistory:
-        @MainActor (Bool) async throws -> Void = { _ in }
+        @MainActor () async throws -> Void = {}
 
     private let context: ModelContext
     private let defaults: UserDefaults
     private let appPathResolver: (String) -> String?
     private let reconcileRuntime: @MainActor () async throws -> Void
+    private let currentClipboardTags: @MainActor () async throws -> [ClipboardHistoryTagDefinition]?
+    private static var readClipboardTags: @MainActor () async throws -> [ClipboardHistoryTagDefinition]? = { nil }
+    private let restoreClipboardTags: @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void
+    private static var writeClipboardTags: @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void = { _ in
+        throw ClipboardHistoryModuleError.operationUnavailable
+    }
 
     /// - Parameter appPathResolver: bundleID → absolute path. Defaults to
     ///   `NSWorkspace`. Injected as `{ _ in nil }` in tests.
@@ -35,6 +41,12 @@ final class BackupService {
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
         },
+        currentClipboardTags: @escaping @MainActor () async throws -> [ClipboardHistoryTagDefinition]? = {
+            try await BackupService.readClipboardTags()
+        },
+        restoreClipboardTags: @escaping @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void = {
+            try await BackupService.writeClipboardTags($0)
+        },
         reconcileRuntime: @escaping @MainActor () async throws -> Void = {
             try await BackupService.reconcileLiveRuntime()
         }
@@ -43,22 +55,35 @@ final class BackupService {
         self.defaults = defaults
         self.appPathResolver = appPathResolver
         self.reconcileRuntime = reconcileRuntime
+        self.currentClipboardTags = currentClipboardTags
+        self.restoreClipboardTags = restoreClipboardTags
     }
 
     static func configureClipboardHistoryRuntime(
         module: ClipboardHistoryModule,
         lifecycle: ClipboardHistoryLifecycle
     ) {
-        reconcileClipboardHistory = { importClipboardTags in
-            try await ClipboardHistoryPortableSettings.reconcile(
-                module: module,
-                importClipboardTags: importClipboardTags
-            )
-            await lifecycle.refreshMonitoringConfiguration()
+        readClipboardTags = {
+            guard lifecycle.state == .ready else { throw ClipboardHistoryModuleError.operationUnavailable }
+            return try await module.tagDefinitions()
         }
+        writeClipboardTags = { definitions in
+            guard lifecycle.state == .ready else { throw ClipboardHistoryModuleError.operationUnavailable }
+            _ = try await module.replaceTagDefinitions(with: definitions)
+        }
+        reconcileClipboardHistory = { await lifecycle.refreshMonitoringConfiguration() }
     }
 
     // MARK: - Export
+
+    func exportCurrentSnapshot() async throws -> BackupSnapshot {
+        guard let definitions = try await currentClipboardTags() else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        var snapshot = try exportSnapshot()
+        snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string(try ClipboardHistoryPortableSettings.encode(definitions))
+        return snapshot
+    }
 
     /// Throws if a store read fails, so a transient fetch error surfaces to the
     /// caller instead of silently producing (and writing) an empty backup that
@@ -111,7 +136,19 @@ final class BackupService {
     /// plugin lifecycle or derived surfaces are still stale.
     @discardableResult
     func restore(_ snapshot: BackupSnapshot) async throws -> ImportSummary {
-        let summary = try apply(snapshot)
+        let importedTags: [ClipboardHistoryTagDefinition]?
+        if let value = snapshot.settings[ClipboardHistoryPortableKeys.customTags] {
+            guard case .string(let json) = value else { throw ClipboardHistoryModuleError.invalidTagName }
+            importedTags = try ClipboardHistoryPortableSettings.definitions(from: json)
+        } else {
+            importedTags = nil
+        }
+        if let importedTags {
+            try await restoreClipboardTags(importedTags)
+            defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+        }
+        var summary = try apply(snapshot)
+        if importedTags != nil { summary.settingsApplied += 1 }
         try await reconcileRuntime()
         // Restored rows are portable config the sync engine (if running)
         // must capture; settings writes already fired the defaults notification.
@@ -232,9 +269,9 @@ final class BackupService {
 
     /// Re-read settings into the modules whose setters carry side effects that
     /// raw UserDefaults writes bypass, then rebuild derived surfaces. Shared
-    /// with `SyncEngine`, whose applies bypass the same setters but explicitly
-    /// skip restoring clipboard tags from the manual-backup mirror.
-    static func reconcileLiveRuntime(importClipboardTags: Bool = true) async throws {
+    /// with `SyncEngine`. Clipboard tags are owned by the encrypted module;
+    /// only an explicit manual backup import can replace their definitions.
+    static func reconcileLiveRuntime() async throws {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
@@ -255,7 +292,7 @@ final class BackupService {
         }
         let clipboardHistoryError: (any Error)?
         do {
-            try await reconcileClipboardHistory(importClipboardTags)
+            try await reconcileClipboardHistory()
             clipboardHistoryError = nil
         } catch {
             clipboardHistoryError = error
