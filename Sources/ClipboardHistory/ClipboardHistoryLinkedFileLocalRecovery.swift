@@ -15,12 +15,14 @@ extension ClipboardHistoryModule {
             """, arguments: [entryID?.value.uuidString.lowercased(), entryID?.value.uuidString.lowercased()]) }
         for row in rows {
             let source = try Self.linkedLocationSource(row)
+            guard !activeApplicationUpdates.contains(source.id) else { continue }
             guard let version: String = row["applying_version_id"], let digest: Data = row["applying_digest"],
                   let identity: Data = row["replacement_identity"] else { continue }
             let work = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) }
             guard let proof = await work.value else { continue }
             try await waitForWriteTurn()
             guard epoch == storeEpoch else { throw ClipboardHistoryModuleError.operationUnavailable }
+            guard !activeApplicationUpdates.contains(source.id) else { continue }
             let changed = try syncWrite { database in
                 guard proof.stamp.matches(source.url),
                       let current = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ?", arguments: [source.id.uuidString]),

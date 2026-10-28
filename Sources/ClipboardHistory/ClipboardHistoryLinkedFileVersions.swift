@@ -27,6 +27,7 @@ extension ClipboardHistoryModule {
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
             try await admitSync(generation, account: account, services: services)
+            guard !activeApplicationUpdates.contains(source.id) else { continue }
             let isApplication = source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url)
             if isApplication, !source.isApplication {
                 try syncWrite { try $0.execute(sql: "UPDATE clipboard_sync_linked_locations SET is_application = 1 WHERE id = ?",
@@ -47,7 +48,8 @@ extension ClipboardHistoryModule {
             catch is CancellationError { throw CancellationError() }
             catch { continue }
             try await admitSync(generation, account: account, services: services)
-            guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
+            guard !activeApplicationUpdates.contains(source.id),
+                  try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
             if source.state == .conflict {
                 guard proof.digest == source.baseDigest, !selection.hasConflict,
                       try linkedVersion(selection.latest.versionID, descendsFrom: source.baseVersionID,
@@ -233,6 +235,7 @@ extension ClipboardHistoryModule {
         guard let services = syncServices else { return }
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
+            guard !activeApplicationUpdates.contains(source.id) else { continue }
             guard let row = try linkedRead({ try Row.fetchOne($0, sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ? AND applying_version_id IS NOT NULL", arguments: [source.id.uuidString]) }),
                   let version = UUID(uuidString: row["applying_version_id"]), let digest: Data = row["applying_digest"],
                   let identity: Data = row["replacement_identity"], let path: String = row["replacement_path"] else { continue }
@@ -240,7 +243,8 @@ extension ClipboardHistoryModule {
             let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) }
             let proof = await inspection.value
             try await admitSync(generation, account: account, services: services)
-            guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
+            guard !activeApplicationUpdates.contains(source.id),
+                  try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
             if let proof {
                 // Only the old, unchanged inode is ours to remove after adoption.
                 let backup = URL(fileURLWithPath: path)

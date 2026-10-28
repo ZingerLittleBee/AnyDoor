@@ -5,6 +5,7 @@ extension ClipboardHistoryModule {
     public func applicationUpdatePlan(_ selection: ClipboardHistoryFileLocationSelection) async throws -> ClipboardHistoryApplicationUpdatePlan {
         let generation = syncGeneration
         try admitSync(generation)
+        guard !activeApplicationUpdates.contains(selection.locationID) else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
         guard let services = syncServices, let context = try linkedRead({ try syncFileContext(in: $0) }) else {
             throw ClipboardHistoryApplicationUpdateError.stalePlan
         }
@@ -55,12 +56,13 @@ extension ClipboardHistoryModule {
                 baseVersionID: source.baseVersionID, baseDigest: source.baseDigest, state: source.state.rawValue,
                 savedDigest: inspected.0?.digest, byteCount: inspected.0?.byteCount),
             versionID: versions.latest.versionID, versionRevision: revision, state: state)
+        guard !activeApplicationUpdates.contains(source.id) else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
         try syncWrite { database in
             let current = try Self.linkedLocationSource(Self.linkedFileActionRow(selection, in: database))
             guard current.identity == source.identity, current.baseVersionID == source.baseVersionID,
-                  try Self.applicationVersionRevision(source.objectID, accountID: snapshot.accountID, epoch: snapshot.epoch, in: database) == revision,
-                  try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_application_plans WHERE location_id = ? AND phase = 'applying')",
-                    arguments: [source.id.uuidString]) != true else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
+                  try Self.applicationVersionRevision(source.objectID, accountID: snapshot.accountID, epoch: snapshot.epoch, in: database) == revision else {
+                throw ClipboardHistoryApplicationUpdateError.stalePlan
+            }
             try database.execute(sql: "DELETE FROM clipboard_sync_application_plans WHERE location_id = ?", arguments: [source.id.uuidString])
             try database.execute(sql: "INSERT INTO clipboard_sync_application_plans VALUES (?, ?, ?, ?, 'ready', ?)",
                 arguments: [snapshot.id.uuidString, snapshot.accountID, snapshot.epoch.uuidString,
@@ -100,7 +102,11 @@ extension ClipboardHistoryModule {
             try database.execute(sql: "UPDATE clipboard_sync_application_plans SET phase = 'applying' WHERE id = ?", arguments: [snapshot.id.uuidString])
             return source
         }
-        defer { try? syncWrite { try $0.execute(sql: "DELETE FROM clipboard_sync_application_plans WHERE id = ?", arguments: [snapshot.id.uuidString]) } }
+        activeApplicationUpdates.insert(source.id)
+        defer {
+            activeApplicationUpdates.remove(source.id)
+            try? syncWrite { try $0.execute(sql: "DELETE FROM clipboard_sync_application_plans WHERE id = ?", arguments: [snapshot.id.uuidString]) }
+        }
         guard let selection = try syncFileSelection(objectID: source.objectID), !selection.hasConflict,
               let version = selection.complete, version.descriptor.versionID == snapshot.versionID else {
             throw ClipboardHistoryApplicationUpdateError.candidateUnavailable

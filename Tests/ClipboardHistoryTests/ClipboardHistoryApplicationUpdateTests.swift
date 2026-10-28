@@ -5,6 +5,96 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testApplicationLaunchedDuringPreparationIsRefusedAtFinalExchange() async throws {
+        let barrier = LinkedReplacementBarrier()
+        let identifier = "dev.bybee.AnyDoor.tests.late-launch.\(UUID())"
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            _ = try ClipboardApplicationTestFixture.create(at: root, bundleIdentifier: identifier, resource: "old package")
+        }, sourceName: "Late Launch.app")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let old = ClipboardApplicationTestFixture(url: working.url)
+        let baseline = try old.contentsSnapshot()
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        let update = try ClipboardApplicationTestFixture.create(at: fixture.root.appendingPathComponent("Update.app"),
+            bundleIdentifier: identifier, resource: "complete update")
+        try FileManager.default.removeItem(at: fixture.original.appendingPathComponent("Contents"))
+        try FileManager.default.copyItem(at: update.url.appendingPathComponent("Contents"), to: fixture.original.appendingPathComponent("Contents"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(displayed.first)
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(plan.state, .ready)
+        let apply = Task { try await fixture.receiver.applyApplicationUpdate(plan) }
+        defer { barrier.release() }
+        try await eventually { barrier.isWaiting }
+        let running = try await old.launch()
+        addTeardownBlock { try await running.stop() }
+        barrier.release()
+        do { try await apply.value; XCTFail("A launch after preparation must revoke replacement") }
+        catch ClipboardHistoryApplicationUpdateError.running { }
+        XCTAssertEqual(try old.contentsSnapshot(), baseline)
+        try old.verifySignature()
+        try await running.stop()
+    }
+
+    @MainActor
+    func testNestedApplicationNeedsExplicitUpdateAndIgnoresIndependentLinkedCopy() async throws {
+        let identifier = "dev.bybee.AnyDoor.tests.nested-application.\(UUID())"
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            _ = try ClipboardApplicationTestFixture.create(at: root.appendingPathComponent("Inner.app"),
+                bundleIdentifier: identifier, resource: "old nested package")
+            let external = root.deletingLastPathComponent().appendingPathComponent("Independent.app")
+            _ = try ClipboardApplicationTestFixture.create(at: external, bundleIdentifier: identifier, resource: "independent package")
+            try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("External.app"), withDestinationURL: external)
+        }, sourceName: "Ordinary Folder")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let old = ClipboardApplicationTestFixture(url: working.url.appendingPathComponent("Inner.app"))
+        let baseline = try old.contentsSnapshot()
+        let independent = ClipboardApplicationTestFixture(url: fixture.root.appendingPathComponent("Independent.app"))
+        let independentSnapshot = try independent.contentsSnapshot()
+        let otherProcess = try await independent.launch()
+        addTeardownBlock { try await otherProcess.stop() }
+        let running = try await old.launch()
+        addTeardownBlock { try await running.stop() }
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        let update = try ClipboardApplicationTestFixture.create(at: fixture.root.appendingPathComponent("Update.app"),
+            bundleIdentifier: identifier, resource: "new nested package")
+        let source = fixture.original.appendingPathComponent("Inner.app/Contents")
+        try FileManager.default.removeItem(at: source)
+        try FileManager.default.copyItem(at: update.url.appendingPathComponent("Contents"), to: source)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        XCTAssertEqual(try old.contentsSnapshot(), baseline, "A folder exchange would also replace its running application")
+        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(displayed.first)
+        XCTAssertNotNil(current.applicationUpdateVersionID)
+        let blocked = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(blocked.state, .running)
+        try await running.stop()
+        let ready = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(ready.state, .ready, "Another copy with the same bundle ID is not the associated application")
+        try await fixture.receiver.applyApplicationUpdate(ready)
+        XCTAssertEqual(try old.contentsSnapshot(), try update.contentsSnapshot())
+        try old.verifySignature()
+        XCTAssertTrue(otherProcess.isRunning)
+        XCTAssertEqual(try independent.contentsSnapshot(), independentSnapshot, "An external symbolic link never grants replacement authority")
+    }
+
+    @MainActor
     func testExplicitApplicationUpdatePreservesItsSignedCompletePackage() async throws {
         let bundleID = "dev.bybee.AnyDoor.tests.application.\(UUID().uuidString)"
         let fixture = try await makeLinkedFixture(prepareSource: { root in
@@ -85,5 +175,11 @@ extension ClipboardHistoryLinkedFileTests {
         let materialized = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
         guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("The linked application remains available") }
         XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("Contents/Resources/value.txt")), Data("previous application resource".utf8))
+        let current = try XCTUnwrap(unchanged.first)
+        let uncertain = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(uncertain.state, .identityUncertain, "An application without an executable identity cannot be applied")
+        do { try await fixture.receiver.applyApplicationUpdate(uncertain); XCTFail("An unknown native identity must retain the existing package") }
+        catch ClipboardHistoryApplicationUpdateError.identityUncertain { }
     }
 }

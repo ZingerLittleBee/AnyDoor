@@ -49,6 +49,9 @@ extension ClipboardHistoryModule {
             arguments: [snapshot.accountID]) == true,
               try String.fetchOne(database, sql: "SELECT phase FROM clipboard_sync_application_plans WHERE id = ?",
                 arguments: [snapshot.id.uuidString]) == phase else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
+        guard let encoded = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [snapshot.accountID]),
+              let control = try JSONDecoder().decode(ClipboardSyncAccountState.self, from: encoded).control,
+              control.keyID == snapshot.keyID else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
         let row = try linkedFileActionRow(.init(entryID: .init(snapshot.entryID), locationID: snapshot.location.id,
             expectedRevision: snapshot.location.revision), in: database)
         let source = try linkedLocationSource(row)
