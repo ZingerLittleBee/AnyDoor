@@ -32,8 +32,9 @@ extension ClipboardHistoryModule {
                 let available = (row["transfer_state"] as String?) == "complete"
                     && (linked.exists ? linked.reference != nil
                         : ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"]))
+                let availableVersion = linked.reference?.versionID ?? completeVersion
                 if available {
-                    state = completeVersion == descriptor.versionID ? .complete : .updateAvailable
+                    state = availableVersion == descriptor.versionID ? .complete : .updateAvailable
                 } else if completeVersion != nil {
                     state = .localUnavailable
                 } else {
@@ -47,7 +48,7 @@ extension ClipboardHistoryModule {
                 let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
-                    availableVersionID: available ? completeVersion : nil, transferredByteCount: transfer.bytes,
+                    availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
                     transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending)
             }
     }
@@ -98,17 +99,18 @@ extension ClipboardHistoryModule {
     }
 
     private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
-        in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data)?) {
+        in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
         let rows = try Row.fetchAll(database, sql: """
-            SELECT path, bookmark, identity, state FROM clipboard_sync_linked_locations
+            SELECT path, bookmark, identity, state, base_version_id FROM clipboard_sync_linked_locations
             WHERE account_id = ? AND epoch = ? AND object_id = ?
             ORDER BY CASE kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, id
             """, arguments: [accountID, epoch, objectID.uuidString])
         for row in rows where !["unavailable", "detached", "identityUncertain"].contains(row["state"] as String) {
             let path: String = row["path"]
             let identity: Data = row["identity"]
-            if ClipboardSyncFileIO.isAvailable(path: path, identity: identity) {
-                return (true, (path, row["bookmark"], identity))
+            if ClipboardSyncFileIO.isAvailable(path: path, identity: identity),
+               let versionID = UUID(uuidString: row["base_version_id"]) {
+                return (true, (path, row["bookmark"], identity, versionID))
             }
         }
         return (!rows.isEmpty, nil)

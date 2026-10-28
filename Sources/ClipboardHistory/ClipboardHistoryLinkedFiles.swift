@@ -125,7 +125,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private static func linkedFileLocation(_ row: Row) throws -> ClipboardHistoryLinkedFileLocation {
+    static func linkedFileLocation(_ row: Row) throws -> ClipboardHistoryLinkedFileLocation {
         guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
               let base = UUID(uuidString: row["base_version_id"]),
               let kind = ClipboardHistoryLinkedFileLocationKind(rawValue: row["kind"]),
