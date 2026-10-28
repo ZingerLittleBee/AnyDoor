@@ -390,6 +390,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private var fileDownloads: [UUID] = []
     func downloadedFileVersions() -> [UUID] { fileDownloads }
     func uploadedRecords() -> [ClipboardSyncUpload] { uploads }
+    func visibleRecords() -> [ClipboardSyncRemoteRecord] { uploads.filter { !purgedRecords.contains($0.record.recordID) }.map(\.record) }
     func moveLastTwoRecordsToFront() {
         guard uploads.count >= 2 else { return }
         let tail = Array(uploads.suffix(2))

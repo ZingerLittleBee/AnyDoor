@@ -244,6 +244,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v26_clipboard_sync_file_conflicts") { database in
             try Self.createSyncFileConflictSchema(in: database)
         }
+        migrator.registerMigration("v29_clipboard_sync_file_lifecycle") { database in
+            try Self.createSyncFileLifecycleSchema(in: database)
+        }
         return migrator
     }
 

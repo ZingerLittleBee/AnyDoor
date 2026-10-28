@@ -74,6 +74,7 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, value.sharedID, value.withdrawn, value.revision.counter,
                 value.revision.operationID, pending, recordID, pending ? "local" : "remote"])
         if value.withdrawn {
+            try Self.rememberSyncFileOwnership(sharedID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
             // Cancel publication, but keep whether each local version was ever
             // acknowledged for later deletion-versus-offline-edit preservation.
             try database.execute(sql: """
