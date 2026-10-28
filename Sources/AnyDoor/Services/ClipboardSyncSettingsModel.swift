@@ -22,6 +22,16 @@ final class ClipboardSyncSettingsModel {
         tags.first(where: \.isSelected)?.id
     }
 
+    var recoveryHelpURL: URL? {
+        guard status.isEnabled else { return nil }
+        switch status.phase {
+        case .waitingForKey, .keyLocked, .accessDenied, .failed(.corruptData), .failed(.recoveryRequired):
+            return URL(string: "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
+        default:
+            return nil
+        }
+    }
+
     var canSelectTag: Bool {
         status.isEnabled && selectedTagID == nil && !isPerformingAction
     }

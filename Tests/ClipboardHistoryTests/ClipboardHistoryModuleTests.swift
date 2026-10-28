@@ -1123,6 +1123,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v13_ocr_facet",
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
+                "v16_clipboard_sync_recovery",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]
@@ -1134,6 +1135,38 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
         XCTAssertTrue(diagnostics.foreignKeyIntegrityOK)
         XCTAssertTrue(diagnostics.cipherIntegrityOK)
+    }
+
+    func testSyncRecoveryUpgradePreservesExistingV14ParticipationAndHistory() async throws {
+        let fixture = try TemporaryDatabase(in: self)
+        let legacy = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url, databaseKey: fixture.key, migrationTarget: "v14_clipboard_sync"
+        )
+        addTeardownBlock { try legacy.close() }
+        let entryID = UUID().uuidString.lowercased()
+        try await legacy.write { database in
+            try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 1 WHERE id = 1")
+            try database.execute(sql: "INSERT INTO clipboard_entries(id, captured_at, last_captured_at, preview_text) VALUES (?, 0, 0, 'retained text')",
+                arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)", arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, text_value) VALUES (?, 0, 0, 'text', 'public.utf8-plain-text', 'retained text')",
+                arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'text')", arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_tag_definitions(id, display_name, display_order) VALUES ('existing-tag', 'Existing', 0)")
+            try database.execute(sql: "INSERT INTO clipboard_entry_tags(entry_id, tag_id) VALUES (?, 'existing-tag')", arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, 0, 1)", arguments: [entryID])
+            try database.execute(sql: "INSERT INTO clipboard_sync_tags(account_id, tag_id, selected) VALUES ('', 'existing-tag', 1)")
+        }
+        try legacy.close()
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(testingDatabaseURL: fixture.url, databaseKey: fixture.key))
+        let status = await module.syncStatus()
+        XCTAssertTrue(status.isEnabled)
+        XCTAssertEqual(status.phase, .connecting)
+        let tags = try await module.syncTags()
+        XCTAssertEqual(tags.filter(\.isSelected).map(\.id), ["existing-tag"])
+        let identity = ClipboardHistoryEntryID(try XCTUnwrap(UUID(uuidString: entryID)))
+        let content = try await module.materialize(.init(entryID: identity, purpose: .plainTextPaste))
+        XCTAssertEqual(content.items.first?.representations, [.text(typeIdentifier: "public.utf8-plain-text", value: "retained text")])
     }
 
     func testExistingFoundationStoreMigratesThroughEveryVersion() async throws {
@@ -1169,6 +1202,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v13_ocr_facet",
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
+                "v16_clipboard_sync_recovery",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]

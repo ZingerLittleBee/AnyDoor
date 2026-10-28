@@ -60,6 +60,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case accountChanged
     case capabilityUnavailable
     case keyLocked
+    case keyUnavailable
     case accessDenied
     case network(retryAfter: TimeInterval?)
     case quota

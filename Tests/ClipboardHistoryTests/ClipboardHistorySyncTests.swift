@@ -508,6 +508,259 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(replayed.count, 2)
     }
 
+    func testLostSuccessfulBootstrapReopensTheSameWinnerAfterPeerProgress() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-bootstrap-receipt-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x61, time: 1_000, root: root)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("original pending text")))
+        let tag = try await first.createTagDefinition(named: "Original tag", assigningTo: entry.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        await cloud.loseNextControlResponse()
+        try await first.setSyncEnabled(true)
+        let interrupted = await first.syncStatus()
+        XCTAssertEqual(interrupted.phase, .failed(.network))
+        let account = try await cloud.account()
+        let winner = try await cloud.control(for: account)
+        try await first.closeStoreForTesting()
+
+        let peer = makeModule(services: services, keyByte: 0x62, time: 2_000)
+        let peerEntry = try await peer.capture(.init(source: .unknown, content: .text("peer progression")))
+        let peerTag = try await peer.createTagDefinition(named: "Peer tag", assigningTo: peerEntry.entryID)
+        try await peer.setSyncTagSelected(peerTag.definition.id, selected: true)
+        try await peer.setSyncEnabled(true)
+        let reopened = makeModule(services: services, keyByte: 0x61, time: 3_000, root: root)
+        await reopened.resumeSync()
+        await reopened.retrySync()
+        await peer.retrySync()
+        let after = try await cloud.control(for: account)
+        XCTAssertEqual(after?.keyID, winner?.keyID)
+        let attempts = await cloud.controlCreationAttempts()
+        XCTAssertEqual(attempts.count, 1)
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let firstPage = try await reopened.page(.init())
+        let peerPage = try await peer.page(.init())
+        XCTAssertEqual(firstPage.entries.count, 2)
+        XCTAssertEqual(peerPage.entries.count, 2)
+    }
+
+    func testAccountChangeDuringKeyDeliveryRejectsTheOldResponse() async throws {
+        let source = try await recoverySource()
+        let held = SyncTestFaultKeys(backing: source.keys, fault: nil)
+        await held.holdNextLoad()
+        let receiver = makeModule(services: .init(transport: source.cloud, keys: held, pollingInterval: nil), keyByte: 0x72, time: 2_000)
+        let activation = Task { try await receiver.setSyncEnabled(true) }
+        await held.waitForHeldLoad()
+        await source.cloud.switchAccount(to: "new-account")
+        await held.releaseLoad()
+        try await activation.value
+        let status = await receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(status.phase, .failed(.accountChanged))
+        let page = try await receiver.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let newAccountUploads = await source.cloud.currentUploads()
+        XCTAssertTrue(newAccountUploads.isEmpty)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
+    func testDisableDuringKeyDeliveryKeepsTheSharedKeyAndPeerWorking() async throws {
+        let source = try await recoverySource()
+        let held = SyncTestFaultKeys(backing: source.keys, fault: nil)
+        await held.holdNextLoad()
+        let receiver = makeModule(services: .init(transport: source.cloud, keys: held, pollingInterval: nil), keyByte: 0x73, time: 2_000)
+        let activation = Task { try await receiver.setSyncEnabled(true) }
+        await held.waitForHeldLoad()
+        let cancellation = await source.cloud.cancellationCount()
+        let disabling = Task { try await receiver.setSyncEnabled(false) }
+        await source.cloud.waitForCancellation(after: cancellation)
+        await held.releaseLoad()
+        try await activation.value
+        try await disabling.value
+        let disabled = await receiver.syncStatus()
+        XCTAssertFalse(disabled.isEnabled)
+        let page = try await receiver.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let fresh = try await source.sender.capture(.init(source: .unknown, content: .text("peer remains enabled")))
+        _ = try await source.sender.apply(.setTags(fresh.entryID, [source.tag]))
+        await source.sender.retrySync()
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertEqual(uploads.filter { $0.record.kind == .entry }.count, 2)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
+    func testLocalResetDuringKeyDeliveryCannotImportIntoTheReplacementStore() async throws {
+        let source = try await recoverySource()
+        let held = SyncTestFaultKeys(backing: source.keys, fault: nil)
+        await held.holdNextLoad()
+        let receiver = makeModule(services: .init(transport: source.cloud, keys: held, pollingInterval: nil), keyByte: 0x74, time: 2_000)
+        let activation = Task { try await receiver.setSyncEnabled(true) }
+        await held.waitForHeldLoad()
+        let beforeReset = await source.cloud.currentUploads()
+        let cancellation = await source.cloud.cancellationCount()
+        let resetting = Task { try await receiver.reset(confirmation: .confirmed) }
+        await source.cloud.waitForCancellation(after: cancellation)
+        await held.releaseLoad()
+        try await activation.value
+        try await resetting.value
+        let status = await receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        let page = try await receiver.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let afterReset = await source.cloud.currentUploads()
+        XCTAssertEqual(afterReset, beforeReset)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
+    func testAccountChangeWhileQuitPersistsTheNeedForNewActivation() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-account-recovery-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x75, time: 1_000, root: root)
+        let local = try await first.capture(.init(source: .unknown, content: .text("retained account A text")))
+        let tag = try await first.createTagDefinition(named: "Account A tag", assigningTo: local.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await first.closeStoreForTesting()
+        await cloud.switchAccount(to: "account-after-relaunch")
+        let reopened = makeModule(services: services, keyByte: 0x75, time: 2_000, root: root)
+        await reopened.resumeSync()
+        try await reopened.closeStoreForTesting()
+        let again = makeModule(services: services, keyByte: 0x75, time: 3_000, root: root)
+        let stopped = await again.syncStatus()
+        XCTAssertFalse(stopped.isEnabled)
+        XCTAssertEqual(stopped.phase, .failed(.accountChanged))
+        await again.resumeSync()
+        let unpublished = await cloud.currentUploads()
+        XCTAssertTrue(unpublished.isEmpty)
+        try await again.setSyncEnabled(true)
+        let afterActivation = await cloud.currentUploads()
+        XCTAssertTrue(afterActivation.isEmpty)
+        let retained = try await again.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+    }
+
+    func testTemporaryAccountLossResumesPendingTextWithoutChangingItsKey() async throws {
+        let source = try await recoverySource()
+        let fresh = try await source.sender.capture(.init(source: .unknown, content: .text("pending through account outage")))
+        _ = try await source.sender.apply(.setTags(fresh.entryID, [source.tag]))
+        await source.cloud.failNextAccountRead(with: .accountUnavailable)
+        await source.sender.retrySync()
+        let waiting = await source.sender.syncStatus()
+        XCTAssertEqual(waiting.phase, .waitingForAccount)
+        let local = try await source.sender.materialize(.init(entryID: fresh.entryID, purpose: .plainTextPaste))
+        XCTAssertFalse(local.items.isEmpty)
+        await source.sender.retrySync()
+        await source.sender.retrySync()
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertEqual(uploads.filter { $0.record.kind == .entry }.count, 2)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
+    private func recoverySource() async throws -> (cloud: SyncTestCloud, keys: SyncTestKeys, sender: ClipboardHistoryModule, tag: String) {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let sender = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x71, time: 1_000)
+        let entry = try await sender.capture(.init(source: .unknown, content: .text("account-bound source")))
+        let tag = try await sender.createTagDefinition(named: "Source tag", assigningTo: entry.entryID)
+        try await sender.setSyncTagSelected(tag.definition.id, selected: true)
+        try await sender.setSyncEnabled(true)
+        return (cloud, keys, sender, tag.definition.id)
+    }
+
+    func testLockedKeySurvivesRestartAndUnlockResumesWithoutReplacingCiphertext() async throws {
+        try await assertKeyRecovery(fault: .keyLocked, expected: .keyLocked)
+    }
+
+    func testDeniedKeyAccessRemainsDistinctAndRecoveryPreservesHistory() async throws {
+        try await assertKeyRecovery(fault: .accessDenied, expected: .accessDenied)
+    }
+
+    func testUnavailableKeyWaitsWithoutDiagnosingSystemSyncSettings() async throws {
+        try await assertKeyRecovery(fault: .keyUnavailable, expected: .waitingForKey)
+    }
+
+    func testWrongSelectedKeyPreservesCiphertextUntilTheCorrectKeyReturns() async throws {
+        try await assertKeyRecovery(fault: nil, expected: .failed(.corruptData), wrongKey: true)
+    }
+
+    private func assertKeyRecovery(fault: ClipboardSyncServiceError?, expected: ClipboardHistorySyncPhase,
+                                   wrongKey: Bool = false) async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let sender = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x31, time: 1_000)
+        let captured = try await sender.capture(.init(source: .unknown, content: .text("encrypted source")))
+        let tag = try await sender.createTagDefinition(named: "Private tag", assigningTo: captured.entryID)
+        try await sender.setSyncTagSelected(tag.definition.id, selected: true)
+        try await sender.setSyncEnabled(true)
+        let originalCiphertext = await cloud.currentUploads()
+        let unavailable = SyncTestFaultKeys(backing: keys, fault: fault, wrongKey: wrongKey)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-key-recovery-\(UUID())")
+        let services = ClipboardSyncServices(transport: cloud, keys: unavailable, pollingInterval: nil)
+        let receiver = makeModule(services: services, keyByte: 0x32, time: 2_000, root: root)
+        let local = try await receiver.capture(.init(source: .unknown, content: .text("still local")))
+        try await receiver.setSyncEnabled(true)
+        let failure = await receiver.syncStatus()
+        XCTAssertEqual(failure.phase, expected)
+        try await receiver.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x32, time: 3_000, root: root)
+        let persisted = await reopened.syncStatus()
+        XCTAssertEqual(persisted.phase, expected)
+        await reopened.resumeSync()
+        let beforeRecovery = try await reopened.page(.init())
+        XCTAssertEqual(beforeRecovery.entries.map(\.id), [local.entryID])
+        let preservedCiphertext = await cloud.currentUploads()
+        XCTAssertEqual(preservedCiphertext, originalCiphertext)
+        await unavailable.recover()
+        await reopened.retrySync()
+        await reopened.retrySync()
+        let afterRecovery = try await reopened.page(.init())
+        XCTAssertEqual(afterRecovery.entries.count, 2)
+        let recovered = await reopened.syncStatus()
+        XCTAssertEqual(recovered.phase, .upToDate)
+        XCTAssertEqual(recovered.receivedEntryCount, 1)
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let finalCiphertext = await cloud.currentUploads()
+        XCTAssertEqual(finalCiphertext, originalCiphertext)
+    }
+
+    func testProviderBackoffAndFailureSurviveRestartWithoutEarlyCloudAccess() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-sync-recovery-\(UUID())")
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x41, time: 1_000, root: root,
+            clock: { clock.withLock { $0 } })
+        try await first.setSyncEnabled(true)
+        await cloud.failNextAccountRead(retryAfter: 120)
+        await first.retrySync()
+        try await first.closeStoreForTesting()
+
+        let reopened = makeModule(services: services, keyByte: 0x41, time: 1_000, root: root,
+            clock: { clock.withLock { $0 } })
+        let restored = await reopened.syncStatus()
+        XCTAssertEqual(restored.phase, .failed(.network))
+        let readsBefore = await cloud.accountReadCount()
+        await reopened.resumeSync()
+        let readsDuringBackoff = await cloud.accountReadCount()
+        XCTAssertEqual(readsDuringBackoff, readsBefore)
+        clock.withLock { $0 = $0.addingTimeInterval(120) }
+        await reopened.retrySync()
+        let recovered = await reopened.syncStatus()
+        XCTAssertEqual(recovered.phase, .upToDate)
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
     func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -1012,15 +1265,23 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var heldCancellation: CheckedContinuation<Void, Never>?
     private var cancellationObserver: CheckedContinuation<Void, Never>?
     private var failsControlCreation = false
+    private var losesControlResponse = false
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
     private var reversesAllChanges = false
     private var reversesDelivery = false
     func reverseDelivery() { reversesDelivery = true }
+    private var accountFault: ClipboardSyncServiceError?
+    private var cancellations = 0
+    private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
 
     func account() throws -> ClipboardSyncAccount {
         reads += 1
+        if let fault = accountFault {
+            accountFault = nil
+            throw fault
+        }
         if let delay = accountFailureDelay {
             accountFailureDelay = nil
             throw ClipboardSyncServiceError.network(retryAfter: delay)
@@ -1028,6 +1289,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return currentAccount
     }
     func failNextAccountRead(retryAfter: TimeInterval) { accountFailureDelay = retryAfter }
+    func failNextAccountRead(with fault: ClipboardSyncServiceError) { accountFault = fault }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
         if rendezvous, descriptors[account.identifier] == nil {
@@ -1051,6 +1313,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         if let descriptor = descriptors[account.identifier] { return descriptor }
         let result = advanced(candidate)
         descriptors[account.identifier] = result
+        if losesControlResponse {
+            losesControlResponse = false
+            throw ClipboardSyncServiceError.network(retryAfter: nil)
+        }
         return result
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncChanges {
@@ -1095,6 +1361,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return result
     }
     func cancel() async {
+        cancellations += 1
+        let waiters = cancellationWaiters
+        cancellationWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
         guard shouldHoldCancellation else { return }
         shouldHoldCancellation = false
         await withCheckedContinuation {
@@ -1104,6 +1374,11 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
     }
     func holdNextCancellation() { shouldHoldCancellation = true }
+    func cancellationCount() -> Int { cancellations }
+    func waitForCancellation(after previous: Int) async {
+        guard cancellations == previous else { return }
+        await withCheckedContinuation { cancellationWaiters.append($0) }
+    }
     func waitForHeldCancellation() async {
         guard heldCancellation == nil else { return }
         await withCheckedContinuation { cancellationObserver = $0 }
@@ -1117,6 +1392,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }
     func failNextControlCreation() { failsControlCreation = true }
+    func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
     func removeControl() { descriptors[currentAccount.identifier] = nil }
@@ -1155,6 +1431,48 @@ private actor SyncTestDelayedKeys: ClipboardSyncKeyStoring {
         guard available else { return nil }
         return await backing.load(account: account, keyID: keyID)
     }
+    func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) async throws -> Data {
+        try await backing.create(account: account, keyID: keyID, key: key)
+    }
+}
+
+private actor SyncTestFaultKeys: ClipboardSyncKeyStoring {
+    let backing: SyncTestKeys
+    var fault: ClipboardSyncServiceError?
+    var wrongKey: Bool
+    private var shouldHoldLoad = false
+    private var heldLoad: CheckedContinuation<Void, Never>?
+    private var loadObserver: CheckedContinuation<Void, Never>?
+
+    init(backing: SyncTestKeys, fault: ClipboardSyncServiceError?, wrongKey: Bool = false) {
+        self.backing = backing
+        self.fault = fault
+        self.wrongKey = wrongKey
+    }
+
+    func recover() { fault = nil; wrongKey = false }
+    func holdNextLoad() { shouldHoldLoad = true }
+    func waitForHeldLoad() async {
+        guard heldLoad == nil else { return }
+        await withCheckedContinuation { loadObserver = $0 }
+    }
+    func releaseLoad() { heldLoad?.resume(); heldLoad = nil }
+
+    func load(account: ClipboardSyncAccount, keyID: UUID) async throws -> Data? {
+        if let fault { throw fault }
+        if wrongKey { return Data(repeating: 0xFA, count: 32) }
+        let value = await backing.load(account: account, keyID: keyID)
+        if shouldHoldLoad {
+            shouldHoldLoad = false
+            await withCheckedContinuation {
+                heldLoad = $0
+                loadObserver?.resume()
+                loadObserver = nil
+            }
+        }
+        return value
+    }
+
     func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) async throws -> Data {
         try await backing.create(account: account, keyID: keyID, key: key)
     }

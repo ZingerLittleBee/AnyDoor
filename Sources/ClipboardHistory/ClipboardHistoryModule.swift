@@ -105,7 +105,6 @@ public actor ClipboardHistoryModule {
     var syncTask: Task<Void, Never>?
     var syncPollTask: Task<Void, Never>?
     var syncSuspended = true
-    var syncRetryNotBefore: Date?
     var syncAccountBindingGeneration: UInt64?
 
     /// The `appBuild` of a build without a `CFBundleVersion` (`swift run`),
