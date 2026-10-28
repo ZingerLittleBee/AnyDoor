@@ -1,6 +1,159 @@
 {
   "sourceLanguage": "en",
   "strings": {
+      "clipboard.linkedFile.reassociate": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Reassociate File…"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "重新关联文件…"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.reassociateMessage": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Choose the file to link. Its current contents will be preserved."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "请选择要关联的文件，其当前内容会保留。"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.pause": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Pause Tracking"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "暂停跟踪"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.resume": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Resume Tracking"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "恢复跟踪"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.retry": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Retry"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "重试"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.paused": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "File tracking paused"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "文件跟踪已暂停"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.detached": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "Linked location detached"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "此位置已解除关联"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.identityUncertain": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "File identity uncertain · Reassociate to continue"
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "文件身份无法确认，请重新关联"
+            }
+          }
+        }
+      },
+      "clipboard.linkedFile.actionChanged": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "This linked location changed. Review its current status and try again."
+            }
+          },
+          "zh-Hans": {
+            "stringUnit": {
+              "state": "translated",
+              "value": "此关联位置的状态已变化，请查看当前状态后重试。"
+            }
+          }
+        }
+      },
     "clipboard.linkedFile.locations": {
       "extractionState": "manual",
       "localizations": {

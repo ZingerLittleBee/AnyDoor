@@ -23,6 +23,8 @@ struct ClipboardWallView: View {
     let onOpenFiles: (ClipboardHistoryEntry) -> Void
     let onSaveFiles: (ClipboardHistoryEntry) -> Void
     let onAssociateFile: (ClipboardHistoryEntry, UUID) -> Void
+    let onReassociateFile: (ClipboardHistoryFileLocationSelection) -> Void
+    let onSetFileLocationPaused: (ClipboardHistoryFileLocationSelection, Bool) -> Void
     let onRevealLinkedLocation: (URL) -> Void
     let onDelete: (ClipboardHistoryEntry) -> Void
     let onToggleTag: (ClipboardHistoryEntry, String) -> Void
@@ -742,6 +744,8 @@ struct ClipboardWallView: View {
                             onOpenFiles: { state.select(item.id); onOpenFiles(item) },
                             onSaveFiles: { state.select(item.id); onSaveFiles(item) },
                             onAssociateFile: { state.select(item.id); onAssociateFile(item, $0) },
+                            onReassociateFile: { state.select(item.id); onReassociateFile($0) },
+                            onSetFileLocationPaused: { state.select(item.id); onSetFileLocationPaused($0, $1) },
                             onRevealLinkedLocation: onRevealLinkedLocation,
                             onToggleTag: { state.select(item.id); onToggleTag(item, $0) },
                             onNewTag: { state.select(item.id); onNewTag(item) },
