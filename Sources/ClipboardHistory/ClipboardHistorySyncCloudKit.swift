@@ -40,6 +40,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             try ClipboardSyncNativeConfiguration.validate(account)
             return account
         } catch {
+            try checkCancellation(generation)
             throw Self.failure(error)
         }
     }
@@ -47,6 +48,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         let generation = cancellationGeneration
         let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
         do {
             let record = try await fetchOptionalRecord(
                 controlID(account), desiredKeys: Self.controlKeys, database: database
@@ -54,6 +56,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             try checkCancellation(generation)
             return try record.map { try decodeControl($0, account: account) }
         } catch {
+            try checkCancellation(generation)
             if Self.hasCode(error, .zoneNotFound) { return nil }
             throw Self.failure(error)
         }
@@ -64,13 +67,17 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     ) async throws -> ClipboardSyncControl {
         let generation = cancellationGeneration
         let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
         guard candidate.accountID == account.identifier, candidate.serverToken == nil,
               candidate.phase == "active", candidate.keyCheck.count == 32
         else { throw ClipboardSyncServiceError.corruptData }
         do {
             try await ensureZone(zoneID(account), database: database)
             try checkCancellation(generation)
-            if let current = try await control(for: account) { return current }
+            if let current = try await control(for: account) {
+                try checkCancellation(generation)
+                return current
+            }
             try checkCancellation(generation)
             let record = try controlRecord(candidate, account: account)
             let saved = try await saveAtomically([record], database: database)
@@ -87,6 +94,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 try checkCancellation(generation)
                 return authoritative
             }
+            try checkCancellation(generation)
             throw Self.failure(error)
         }
     }
@@ -96,6 +104,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     ) async throws -> ClipboardSyncChanges {
         let generation = cancellationGeneration
         let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
         try validateControl(control, account: account)
         let token = try cursor.map(Self.decodeChangeToken)
         let fetched: NativeChanges
@@ -104,17 +113,20 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 zoneID(account), token: token, database: database
             )
         } catch {
+            try checkCancellation(generation)
             guard Self.hasCode(error, .changeTokenExpired) else {
                 throw Self.failure(error)
             }
-            try checkCancellation(generation)
             // The module's durable inbox makes a full replay safe; an expired
             // provider cursor is not a reason to discard locally retained data.
             do {
                 fetched = try await fetchChanges(
                     zoneID(account), token: nil, database: database
                 )
-            } catch { throw Self.failure(error) }
+            } catch {
+                try checkCancellation(generation)
+                throw Self.failure(error)
+            }
         }
         try checkCancellation(generation)
         guard fetched.deletedRecordIDs.isEmpty else {
@@ -157,6 +169,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     ) async throws -> [Data] {
         let generation = cancellationGeneration
         let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
         try validateMetadata(record)
         var chunks: [Data] = []
         var byteCount: Int64 = 0
@@ -170,7 +183,10 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 fetched = try await fetchRecords(
                     ids, desiredKeys: Self.chunkMetadataKeys + ["asset"], database: database
                 )
-            } catch { throw Self.failure(error) }
+            } catch {
+                try checkCancellation(generation)
+                throw Self.failure(error)
+            }
             try checkCancellation(generation)
             for (offset, id) in ids.enumerated() {
                 guard let result = fetched[id] else { throw ClipboardSyncServiceError.corruptData }
@@ -209,6 +225,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     ) async throws -> ClipboardSyncControl {
         let generation = cancellationGeneration
         let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
         try validateControl(control, account: account)
         try validateUpload(upload, control: control)
         do {
@@ -292,11 +309,14 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 try checkCancellation(generation)
                 return completed
             }
+            try checkCancellation(generation)
             throw Self.failure(error)
         }
     }
 
     func cancel() {
+        // Safe before activation: cancelling must not construct a container,
+        // inspect the system account, or touch synchronizable Keychain items.
         cancellationGeneration += 1
         for operation in operations.values { operation.cancel() }
     }
@@ -311,8 +331,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func checkedDatabase(for expected: ClipboardSyncAccount) async throws -> CKDatabase {
+        let generation = cancellationGeneration
         try ClipboardSyncNativeConfiguration.validate(expected)
-        guard try await account() == expected else { throw ClipboardSyncServiceError.accountChanged }
+        let observed = try await account()
+        try checkCancellation(generation)
+        guard observed == expected else { throw ClipboardSyncServiceError.accountChanged }
         return try checkedContainer().privateCloudDatabase
     }
 
@@ -446,9 +469,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         _ content: [CKRecord], control: ClipboardSyncControl,
         account: ClipboardSyncAccount, database: CKDatabase
     ) async throws -> ClipboardSyncControl {
+        let generation = cancellationGeneration
         try validateControl(control, account: account)
         let fence = try controlRecord(control, account: account)
         let saved = try await saveAtomically([fence] + content, database: database)
+        try checkCancellation(generation)
         guard let authoritative = saved[fence.recordID] else {
             throw ClipboardSyncServiceError.corruptData
         }
@@ -458,12 +483,15 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private func completedCommit(
         _ expected: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount, database: CKDatabase
     ) async throws -> ClipboardSyncControl? {
+        let generation = cancellationGeneration
         let id = CKRecord.ID(recordName: expected.recordID, zoneID: zoneID(account))
-        guard let record = try await fetchOptionalRecord(id, desiredKeys: ["metadata"], database: database) else {
-            return nil
-        }
+        let observed = try await fetchOptionalRecord(id, desiredKeys: ["metadata"], database: database)
+        try checkCancellation(generation)
+        guard let record = observed else { return nil }
         guard try decodeMetadata(record) == expected else { throw ClipboardSyncServiceError.corruptData }
-        guard let current = try await control(for: account), current.epoch == expected.epoch,
+        let authoritative = try await control(for: account)
+        try checkCancellation(generation)
+        guard let current = authoritative, current.epoch == expected.epoch,
               current.keyID == expected.keyID, current.phase == "active"
         else { throw ClipboardSyncServiceError.missingRemoteState }
         return current
@@ -490,7 +518,9 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private func fetchOptionalRecord(
         _ id: CKRecord.ID, desiredKeys: [String], database: CKDatabase
     ) async throws -> CKRecord? {
+        let generation = cancellationGeneration
         let results = try await fetchRecords([id], desiredKeys: desiredKeys, database: database)
+        try checkCancellation(generation)
         guard let result = results[id] else { throw ClipboardSyncServiceError.corruptData }
         switch result {
         case .success(let record): return record
@@ -553,6 +583,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func ensureZone(_ id: CKRecordZone.ID, database: CKDatabase) async throws {
+        let generation = cancellationGeneration
         let operation = CKModifyRecordZonesOperation(recordZonesToSave: [CKRecordZone(zoneID: id)])
         let zone = OSAllocatedUnfairLock<Result<CKRecordZone, Error>?>(initialState: nil)
         operation.perRecordZoneSaveBlock = { _, result in zone.withLock { $0 = result } }
@@ -565,6 +596,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 } catch { continuation.resume(throwing: error) }
             }
         }
+        try checkCancellation(generation)
         guard saved.zoneID == id, saved.capabilities.contains(.atomic) else {
             throw ClipboardSyncServiceError.capabilityUnavailable
         }
@@ -639,10 +671,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         configure: (CheckedContinuation<Value, Error>) -> Void
     ) async throws -> Value {
         try Task.checkCancellation()
+        let generation = cancellationGeneration
         let id = UUID()
         operations[id] = operation
         defer { operations.removeValue(forKey: id) }
-        return try await withTaskCancellationHandler {
+        let value: Value = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 configure(continuation)
                 database.add(operation)
@@ -650,6 +683,8 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         } onCancel: {
             operation.cancel()
         }
+        try checkCancellation(generation)
+        return value
     }
 
     private nonisolated static func hasCode(_ error: Error, _ code: CKError.Code) -> Bool {
