@@ -8,6 +8,45 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testScreenshotTransfersOwnedPixelsAndThumbnailWithoutStartingReceiverRecognition() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x83, time: 1_000)
+        let receiverRecognizer = SyncTestRecognizer()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-owned-image-\(UUID())")
+        let second = makeModule(services: services, keyByte: 0x84, time: 2_000, root: root, recognizer: receiverRecognizer)
+        let bitmap = try makeSyncBitmap()
+        let captured = try await first.capture(.init(source: .init(bundleIdentifier: "test.capture", displayName: "Capture"),
+            content: .bitmap(bitmap, provenance: .anyDoorScreenshot)))
+        await first.awaitDerivedJobsForTesting()
+        _ = try await first.apply(.setFavorite(captured.entryID, true))
+        let tag = try await first.createTagDefinition(named: "Screenshots", assigningTo: captured.entryID)
+        let original = try await first.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        let preview = try await first.materialize(.init(entryID: captured.entryID, purpose: .preview))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.awaitDerivedJobsForTesting()
+        let page = try await second.page(.init(facet: .screenshot))
+        let received = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(received.facets, [.image, .screenshot])
+        XCTAssertTrue(received.isFavorite)
+        XCTAssertEqual(received.capturedAt, Date(timeIntervalSince1970: 1_000))
+        let full = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        let thumbnail = try await second.materialize(.init(entryID: received.id, purpose: .preview))
+        XCTAssertEqual(full, original)
+        XCTAssertEqual(thumbnail, preview)
+        let recognitionCalls = await receiverRecognizer.callCount()
+        XCTAssertEqual(recognitionCalls, 0)
+        let payloads = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("payloads"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(payloads.count, 2)
+        for file in payloads {
+            XCTAssertNil(try Data(contentsOf: file).range(of: bitmap))
+        }
+    }
+
+    @MainActor
     func testOrderedRichTextAndLinkRepresentationsTransferAsOneCompleteEntry() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -547,7 +586,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
 
     private func makeModule(
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
-        root: URL? = nil, clock: (@Sendable () -> Date)? = nil
+        root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
+        recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-sync-\(UUID())")
@@ -556,6 +596,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
             testingStoreRoot: root,
             keyStore: SyncTestLocalKeyStore(byte: keyByte),
             now: clock ?? { Date(timeIntervalSince1970: time) },
+            visionRecognizer: recognizer,
             syncServices: services
         ))
     }
@@ -596,6 +637,25 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries.map(\.id), [captured.entryID])
     }
+
+    @MainActor
+    private func makeSyncBitmap() throws -> Data {
+        let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 16,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let color = NSColor(deviceRed: 1, green: 0.4, blue: 0.1, alpha: 1)
+        for y in 0..<16 { for x in 0..<32 { image.setColor(color, atX: x, y: y) } }
+        return try XCTUnwrap(image.representation(using: .png, properties: [:]))
+    }
+}
+
+private actor SyncTestRecognizer: ClipboardHistoryVisionRecognizing {
+    private var calls = 0
+    func recognize(_ kind: ClipboardHistoryDerivedJobKind, in bitmaps: [Data]) -> [String] {
+        calls += 1
+        return []
+    }
+    func callCount() -> Int { calls }
 }
 
 private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {

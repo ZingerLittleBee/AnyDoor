@@ -164,6 +164,13 @@ extension ClipboardHistoryModule {
     func importSyncContent(_ content: ClipboardSyncContent, record: ClipboardSyncRemoteRecord,
                            account: ClipboardSyncAccount) throws {
         let pool = try requiredDatabase()
+        let preparedEntry: ClipboardSyncPreparedEntry?
+        if case .entry(let entry) = content,
+           try pool.read({ try String.fetchOne($0, sql: """
+               SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
+               """, arguments: [account.identifier, record.epoch.uuidString, entry.id.uuidString.lowercased()]) }) == nil {
+            preparedEntry = try prepareSyncEntryContent(entry)
+        } else { preparedEntry = nil }
         let changed = try pool.write { database in
             let exists = try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
@@ -177,7 +184,7 @@ extension ClipboardHistoryModule {
             case .text(let text):
                 try importSyncText(text, account: account, record: record, in: database)
             case .entry(let entry):
-                try importSyncEntryContent(entry, account: account, record: record, in: database)
+                try importSyncEntryContent(entry, account: account, record: record, prepared: preparedEntry, in: database)
             case .tagMembership(let membership):
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
