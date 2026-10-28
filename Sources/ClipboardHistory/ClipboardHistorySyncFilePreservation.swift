@@ -149,24 +149,35 @@ extension ClipboardHistoryModule {
             do {
                 if let data: Data = row["artifact"] {
                     let artifact = try JSONDecoder().decode(ClipboardSyncPreservedFileArtifact.self, from: data)
-                    proof = try await Task.detached {
-                        let verified = try ClipboardLinkedFileIO.inspect(artifact.url, expectedIdentity: artifact.identity)
-                        guard verified.digest == artifact.digest, verified.byteCount == artifact.byteCount else {
-                            throw ClipboardHistoryModuleError.operationUnavailable
-                        }
-                        return verified
-                    }.value
+                    do {
+                        proof = try await Task.detached {
+                            let verified = try ClipboardLinkedFileIO.inspect(artifact.url, expectedIdentity: artifact.identity)
+                            guard verified.digest == artifact.digest, verified.byteCount == artifact.byteCount else {
+                                throw ClipboardHistoryModuleError.operationUnavailable
+                            }
+                            return verified
+                        }.value
+                    } catch {
+                        // The visible artifact may now be the user's independent
+                        // moved/edited file. Recover only the recorded bytes,
+                        // into a new location, without touching that artifact.
+                        let replacement = destination.deletingLastPathComponent()
+                            .appendingPathComponent("Recovery " + UUID().uuidString, isDirectory: true)
+                            .appendingPathComponent(destination.lastPathComponent)
+                        proof = try await preparePreservedSyncFile(source, destination: replacement,
+                            expected: artifact)
+                    }
                 } else {
                     proof = try await preparePreservedSyncFile(source, destination: destination)
-                    if let proof {
-                        let artifact = ClipboardSyncPreservedFileArtifact(url: proof.url, identity: proof.identity,
-                            digest: proof.digest, byteCount: proof.byteCount)
-                        try await waitForWriteTurn()
-                        guard storeEpoch == epoch else { throw ClipboardHistoryModuleError.operationUnavailable }
-                        try syncWrite { database in
-                            try database.execute(sql: "UPDATE clipboard_sync_file_preservations SET artifact = ? WHERE id = ? AND completed = 0",
-                                arguments: [try JSONEncoder().encode(artifact), id])
-                        }
+                }
+                if let proof {
+                    let artifact = ClipboardSyncPreservedFileArtifact(url: proof.url, identity: proof.identity,
+                        digest: proof.digest, byteCount: proof.byteCount)
+                    try await waitForWriteTurn()
+                    guard storeEpoch == epoch else { throw ClipboardHistoryModuleError.operationUnavailable }
+                    try syncWrite { database in
+                        try database.execute(sql: "UPDATE clipboard_sync_file_preservations SET artifact = ? WHERE id = ? AND completed = 0",
+                            arguments: [try JSONEncoder().encode(artifact), id])
                     }
                 }
             }
@@ -193,8 +204,14 @@ extension ClipboardHistoryModule {
         try await reclaimDeletedSyncFileTransfers()
     }
 
-    private func preparePreservedSyncFile(_ source: ClipboardSyncPreservedFileSource, destination: URL) async throws -> ClipboardLinkedFileProof? {
+    private func preparePreservedSyncFile(_ source: ClipboardSyncPreservedFileSource, destination: URL,
+        expected: ClipboardSyncPreservedFileArtifact? = nil) async throws -> ClipboardLinkedFileProof? {
         if let frozen = source.frozen, let account = source.account, let control = source.control {
+            if let expected {
+                guard frozen.descriptor.contentDigest == expected.digest, frozen.descriptor.originalByteCount == expected.byteCount else {
+                    throw ClipboardHistoryModuleError.operationUnavailable
+                }
+            }
             guard let key = try await syncServices?.keys.load(account: account, keyID: control.keyID),
                   key.count == 32, ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
                 throw ClipboardSyncServiceError.keyUnavailable
@@ -211,6 +228,11 @@ extension ClipboardHistoryModule {
         }
         return try await Task.detached(priority: .utility) {
             let proof = try ClipboardLinkedIdentityResolution.inspect(source.location)
+            if let expected {
+                guard proof.digest == expected.digest, proof.byteCount == expected.byteCount else {
+                    throw ClipboardHistoryModuleError.operationUnavailable
+                }
+            }
             guard source.unpublished || proof.digest != source.location.baseDigest else { return nil as ClipboardLinkedFileProof? }
             return try ClipboardLinkedFileIO.preserveIndependent(proof, at: destination)
         }.value

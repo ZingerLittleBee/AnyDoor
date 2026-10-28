@@ -6,6 +6,42 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testInterruptedPreservationRecoversMovedArtifactWithoutChangingUserCopy() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.syncFilePreservationAfterCopy]))
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        let saved = Data("original saved bytes to preserve after a moved artifact".utf8)
+        try saved.write(to: working.url)
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+        try await fixture.receiver.closeStoreForTesting()
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: fixture.receiverRoot, includingPropertiesForKeys: nil))
+        let output = try XCTUnwrap(enumerator.allObjects.compactMap { $0 as? URL }.first {
+            $0.pathComponents.contains("Preserved Files") && $0.lastPathComponent == working.url.lastPathComponent
+        })
+        let moved = fixture.root.appendingPathComponent("User retained and edited copy.txt")
+        try FileManager.default.moveItem(at: output, to: moved)
+        let later = Data("user changes to the moved independently retained artifact".utf8)
+        try later.write(to: moved)
+        try later.write(to: working.url)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        let unavailable = try await reopened.preservedSyncEdits()
+        XCTAssertTrue(unavailable.isEmpty, "Later source bytes cannot impersonate the recorded preservation digest")
+        try saved.write(to: working.url)
+
+        let notices = try await reopened.preservedSyncEdits()
+
+        XCTAssertEqual(notices.count, 1)
+        let value = try await reopened.materialize(.init(entryID: XCTUnwrap(notices.first).id, purpose: .normalPaste))
+        guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing recovered preserved output") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), saved)
+        XCTAssertEqual(try Data(contentsOf: moved), later)
+        XCTAssertNotEqual(file.currentURL.resolvingSymlinksInPath(), output.resolvingSymlinksInPath(), "A failed artifact is not silently replaced at its old user-visible location")
+    }
+
+    @MainActor
     func testFileTransferCleanupCannotFollowParentReplacedBySymlink() async throws {
         let barrier = LinkedReplacementBarrier()
         let bytes = Data(repeating: 0x32, count: 20_000_000)
