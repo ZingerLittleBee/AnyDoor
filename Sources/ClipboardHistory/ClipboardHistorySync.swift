@@ -8,7 +8,9 @@ extension ClipboardHistoryModule {
         do {
             return try database.read { database in
                 let settings = try syncSettings(in: database)
-                guard settings.enabled else { return ClipboardHistorySyncStatus() }
+                guard settings.enabled else {
+                    return ClipboardHistorySyncStatus(phase: syncPhase == .failed(.accountChanged) ? syncPhase : .disabled)
+                }
                 let accountID = settings.accountID ?? ""
                 let uploaded = try Int.fetchOne(database, sql: """
                     SELECT COUNT(*) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
@@ -120,7 +122,6 @@ extension ClipboardHistoryModule {
             var state = try syncWrite { database in
                 let previous = try syncSettings(in: database).accountID
                 if let previous, previous != account.identifier, !allowAccountBinding {
-                    try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
                     throw ClipboardSyncServiceError.accountChanged
                 }
                 if previous == nil {
@@ -225,6 +226,20 @@ extension ClipboardHistoryModule {
             return
         } catch {
             guard generation == syncGeneration, !syncSuspended else { return }
+            if error as? ClipboardSyncServiceError == .accountChanged {
+                do {
+                    try await waitForWriteTurn()
+                    try admitSync(generation)
+                    try syncWrite { database in
+                        try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
+                    }
+                    syncSuspended = true
+                } catch {
+                    syncSuspended = true
+                    setSyncPhase(.failed(.localStorage))
+                    return
+                }
+            }
             setSyncPhase(syncFailurePhase(error))
         }
     }

@@ -6,6 +6,30 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testAccountChangeDisablesDeviceAndRequiresFreshSelectionForNewAccount() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x39, time: 1_000)
+        let entry = try await module.capture(.init(source: .unknown, content: .text("account A only")))
+        let tag = try await module.createTagDefinition(named: "Account A", assigningTo: entry.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        try await module.setSyncEnabled(true)
+        await cloud.switchAccount(to: "second-user")
+        await module.retrySync()
+        let stopped = await module.syncStatus()
+        XCTAssertFalse(stopped.isEnabled)
+        XCTAssertEqual(stopped.phase, .failed(.accountChanged))
+        try await module.setSyncEnabled(true)
+        let afterManualActivation = await module.syncStatus()
+        XCTAssertTrue(afterManualActivation.isEnabled)
+        let choices = try await module.syncTags()
+        XCTAssertTrue(choices.allSatisfy { !$0.isSelected })
+        let cloudRecords = await cloud.currentUploads()
+        XCTAssertTrue(cloudRecords.isEmpty)
+        let local = try await module.page(.init())
+        XCTAssertEqual(local.entries.map(\.id), [entry.entryID])
+    }
+
     @MainActor
     func testSelectedTextArrivesAsHistoryWithOriginalProvenanceAndNoPasteboardWrite() async throws {
         let cloud = SyncTestCloud()
@@ -109,46 +133,59 @@ private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {
 }
 
 private actor SyncTestCloud: ClipboardSyncTransport {
-    private let currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
-    private var descriptor: ClipboardSyncControl?
-    private var uploads: [ClipboardSyncUpload] = []
+    private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
+    private var descriptors: [String: ClipboardSyncControl] = [:]
+    private var records: [String: [ClipboardSyncUpload]] = [:]
     private var revision = 0
 
     func account() -> ClipboardSyncAccount { currentAccount }
-    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? { descriptor }
+    func control(for account: ClipboardSyncAccount) throws -> ClipboardSyncControl? {
+        try checkAccount(account)
+        return descriptors[account.identifier]
+    }
     func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) -> ClipboardSyncControl {
-        if let descriptor { return descriptor }
+        if let descriptor = descriptors[account.identifier] { return descriptor }
         let result = advanced(candidate)
-        descriptor = result
+        descriptors[account.identifier] = result
         return result
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
+        let uploads = records[account.identifier] ?? []
         return ClipboardSyncChanges(records: uploads.dropFirst(offset).map(\.record),
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
-        guard let upload = uploads.first(where: { $0.record == record }) else {
+        try checkAccount(account)
+        guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
         return upload.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount,
                 control: ClipboardSyncControl) throws -> ClipboardSyncControl {
-        guard let descriptor, descriptor.epoch == control.epoch else {
+        try checkAccount(account)
+        guard let descriptor = descriptors[account.identifier], descriptor.epoch == control.epoch else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if let existing = uploads.first(where: { $0.record.recordID == upload.record.recordID }) {
+        if let existing = records[account.identifier]?.first(where: { $0.record.recordID == upload.record.recordID }) {
             guard existing == upload else { throw ClipboardSyncServiceError.corruptData }
             return descriptor
         }
         guard descriptor.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }
-        uploads.append(upload)
+        records[account.identifier, default: []].append(upload)
         let result = advanced(descriptor)
-        self.descriptor = result
+        descriptors[account.identifier] = result
         return result
     }
     func cancel() {}
+    func switchAccount(to owner: String) {
+        currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
+    }
+    func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
+    private func checkAccount(_ account: ClipboardSyncAccount) throws {
+        guard currentAccount == account else { throw ClipboardSyncServiceError.accountChanged }
+    }
     private func advanced(_ value: ClipboardSyncControl) -> ClipboardSyncControl {
         revision += 1
         return ClipboardSyncControl(accountID: value.accountID, keyID: value.keyID,
