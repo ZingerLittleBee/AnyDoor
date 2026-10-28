@@ -396,6 +396,11 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         var seen: Set<String> = []
         return uploads.filter { !purgedRecords.contains($0.record.recordID) && seen.insert($0.record.recordID).inserted }.map(\.record)
     }
+    func replayLateRecords(_ records: [ClipboardSyncUpload]) {
+        for record in records { purgedRecords.remove(record.record.recordID) }
+        uploads.append(contentsOf: records)
+        if let currentControl { self.currentControl = advanced(currentControl) }
+    }
     func moveLastTwoRecordsToFront() {
         guard uploads.count >= 2 else { return }
         let tail = Array(uploads.suffix(2))

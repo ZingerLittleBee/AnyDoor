@@ -187,10 +187,10 @@ extension ClipboardHistoryModule {
             for record in page.records where record.epoch == control.epoch {
                 // A body is discovered without downloading it. Its encrypted
                 // entry descriptor authorizes a separate version download.
-                if record.kind == .fileBody { continue }
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try rememberDiscoveredSyncRecord(record, account: account)
+                if record.kind == .fileBody { continue }
                 guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
                 let chunks: [Data]
                 do { chunks = try await services.transport.download(record, for: account) }
@@ -370,8 +370,11 @@ extension ClipboardHistoryModule {
                                     arguments: [account.identifier, control.epoch.uuidString, upload.record.recordID])
                                 return true
                             }
-                            return try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
-                                arguments: [upload.record.recordID]) ?? false
+                            return try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+                                SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox AS outbox
+                                  WHERE outbox.record_id = \(upload.record.recordID) AND outbox.account_id = \(account.identifier)
+                                    AND outbox.acknowledged = 0 AND (\(Self.syncFileOutboxAuthority(accountID: account.identifier))))
+                                """)) ?? false
                         }) else { continue }
                         let committed: ClipboardSyncControl
                         switch upload {
