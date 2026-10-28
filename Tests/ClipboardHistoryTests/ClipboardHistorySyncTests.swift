@@ -6,6 +6,59 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testInterruptedBootstrapWaitsForItsJournaledCandidateKeyBeforePublishingControl() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-sync-bootstrap-\(UUID())")
+        let first = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x19, time: 1_000, root: root)
+        await cloud.failNextControlCreation()
+        try await first.setSyncEnabled(true)
+        let interrupted = await first.syncStatus()
+        XCTAssertEqual(interrupted.phase, .failed(.network))
+        try await first.closeStoreForTesting()
+
+        let delayedKeys = SyncTestDelayedKeys(backing: keys)
+        let reopened = makeModule(services: .init(transport: cloud, keys: delayedKeys, pollingInterval: nil), keyByte: 0x19, time: 2_000, root: root)
+        await reopened.resumeSync()
+        let waiting = await reopened.syncStatus()
+        let account = await cloud.account()
+        let unpublished = try await cloud.control(for: account)
+        let waitingAttempts = await cloud.controlCreationAttempts()
+        XCTAssertEqual(waiting.phase, .waitingForKey)
+        XCTAssertNil(unpublished)
+        XCTAssertEqual(waitingAttempts.count, 1)
+
+        await delayedKeys.deliver()
+        await reopened.retrySync()
+        let published = try await cloud.control(for: account)
+        let allAttempts = await cloud.controlCreationAttempts()
+        let keyCount = await keys.count()
+        XCTAssertEqual(published?.keyID, waitingAttempts.first)
+        XCTAssertEqual(Set(allAttempts).count, 1)
+        XCTAssertEqual(keyCount, 1)
+        let completed = await reopened.syncStatus()
+        XCTAssertEqual(completed.phase, .upToDate)
+    }
+
+    func testLaterDisableWinsWhenEarlierEnableFinishesCancellationLate() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x18, time: 1_000)
+        await cloud.holdNextCancellation()
+        let enabling = Task { try await module.setSyncEnabled(true) }
+        await cloud.waitForHeldCancellation()
+        try await module.setSyncEnabled(false)
+        await cloud.releaseCancellation()
+        try await enabling.value
+        let status = await module.syncStatus()
+        let accountReads = await cloud.accountReadCount()
+        let keyCount = await keys.count()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(status.phase, .disabled)
+        XCTAssertEqual(accountReads, 0)
+        XCTAssertEqual(keyCount, 0)
+    }
+
     func testDisabledResumeDoesNotConsultCloudOrCreateSyncKeys() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -303,6 +356,11 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var reads = 0
     private var rendezvous = false
     private var initialReadWaiter: CheckedContinuation<ClipboardSyncControl?, Never>?
+    private var shouldHoldCancellation = false
+    private var heldCancellation: CheckedContinuation<Void, Never>?
+    private var cancellationObserver: CheckedContinuation<Void, Never>?
+    private var failsControlCreation = false
+    private var controlAttempts: [UUID] = []
 
     func account() -> ClipboardSyncAccount { reads += 1; return currentAccount }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
@@ -318,13 +376,20 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         return descriptors[account.identifier]
     }
-    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) -> ClipboardSyncControl {
+    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        try checkAccount(account)
+        controlAttempts.append(candidate.keyID)
+        if failsControlCreation {
+            failsControlCreation = false
+            throw ClipboardSyncServiceError.network(retryAfter: nil)
+        }
         if let descriptor = descriptors[account.identifier] { return descriptor }
         let result = advanced(candidate)
         descriptors[account.identifier] = result
         return result
     }
-    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
+    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncChanges {
+        try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
         return ClipboardSyncChanges(records: uploads.dropFirst(offset).map(\.record),
@@ -357,12 +422,28 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         return result
     }
-    func cancel() {}
+    func cancel() async {
+        guard shouldHoldCancellation else { return }
+        shouldHoldCancellation = false
+        await withCheckedContinuation {
+            heldCancellation = $0
+            cancellationObserver?.resume()
+            cancellationObserver = nil
+        }
+    }
+    func holdNextCancellation() { shouldHoldCancellation = true }
+    func waitForHeldCancellation() async {
+        guard heldCancellation == nil else { return }
+        await withCheckedContinuation { cancellationObserver = $0 }
+    }
+    func releaseCancellation() { heldCancellation?.resume(); heldCancellation = nil }
     func switchAccount(to owner: String) {
         currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
     }
     func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
+    func failNextControlCreation() { failsControlCreation = true }
+    func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
     func removeControl() { descriptors[currentAccount.identifier] = nil }
     func accountReadCount() -> Int { reads }

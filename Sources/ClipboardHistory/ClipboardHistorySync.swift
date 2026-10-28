@@ -29,8 +29,10 @@ extension ClipboardHistoryModule {
     }
 
     public func setSyncEnabled(_ enabled: Bool) async throws {
-        await suspendSync()
+        let generation = await stopSyncTasks()
+        guard generation == syncGeneration else { return }
         _ = try await writableDatabase()
+        guard generation == syncGeneration else { return }
         try syncWrite { database in
             try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = ? WHERE id = 1", arguments: [enabled])
         }
@@ -70,8 +72,13 @@ extension ClipboardHistoryModule {
 
     /// Process shutdown/store replacement does not revoke persisted participation.
     public func suspendSync() async {
+        _ = await stopSyncTasks()
+    }
+
+    private func stopSyncTasks() async -> UInt64 {
         syncSuspended = true
         syncGeneration &+= 1
+        let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
         let pending = syncTask
@@ -79,6 +86,7 @@ extension ClipboardHistoryModule {
         pending?.cancel()
         await syncServices?.transport.cancel()
         await pending?.value
+        return generation
     }
 
     public func retrySync() async { await runSync(allowAccountBinding: false) }
@@ -146,6 +154,16 @@ extension ClipboardHistoryModule {
                     try syncWrite { try saveSyncAccount(state, in: $0) }
                 }
                 guard let candidate = state.candidate else { throw ClipboardSyncServiceError.corruptData }
+                let candidateKey = try await services.keys.load(account: account, keyID: candidate.keyID)
+                try await admitSync(generation, account: account, services: services)
+                guard let candidateKey else {
+                    setSyncPhase(.waitingForKey)
+                    return
+                }
+                guard candidateKey.count == 32,
+                      ClipboardSyncCodec.check(key: candidateKey, account: account, keyID: candidate.keyID) == candidate.keyCheck else {
+                    throw ClipboardSyncServiceError.corruptData
+                }
                 control = try await services.transport.createControl(candidate, for: account)
                 try await admitSync(generation, account: account, services: services)
             }
@@ -158,12 +176,12 @@ extension ClipboardHistoryModule {
             }
             state.control = control
             try syncWrite { try saveSyncAccount(state, in: $0) }
-            guard let key = try await services.keys.load(account: account, keyID: control.keyID) else {
-                try admitSync(generation)
+            let loadedKey = try await services.keys.load(account: account, keyID: control.keyID)
+            try await admitSync(generation, account: account, services: services)
+            guard let key = loadedKey else {
                 setSyncPhase(.waitingForKey)
                 return
             }
-            try await admitSync(generation, account: account, services: services)
             guard key.count == 32, ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
                 throw ClipboardSyncServiceError.corruptData
             }
