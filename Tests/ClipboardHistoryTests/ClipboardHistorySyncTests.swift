@@ -182,7 +182,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await source.cloud.switchAccount(to: "account-b")
         let unchangedB = await source.cloud.currentUploads()
         XCTAssertEqual(unchangedB, beforeB)
-        await source.sender.resumeSync()
+        await source.sender.retrySync()
         let completedB = await source.sender.syncStatus()
         XCTAssertEqual(completedB.cloudReset?.stage, .completed)
         let clearedB = await source.cloud.currentUploads()
@@ -289,10 +289,13 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let remaining = await cloud.currentUploads()
         XCTAssertTrue(Set(contentRecords).isDisjoint(with: remaining.map(\.record.recordID)))
         XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        await cloud.redeliverPurgedContent()
         let peer = makeModule(services: services, keyByte: 0x9B, time: 2_000)
         try await peer.setSyncEnabled(true)
         let page = try await peer.page(.init())
         XCTAssertTrue(page.entries.isEmpty)
+        let cleanedAgain = await cloud.currentUploads()
+        XCTAssertTrue(Set(contentRecords).isDisjoint(with: cleanedAgain.map(\.record.recordID)))
     }
 
     func testDeletionWinsWhenAnOfflineUploadLosesItsControlRace() async throws {
@@ -416,6 +419,11 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await second.retrySync()
         let after = try await second.page(.init())
         XCTAssertTrue(after.entries.isEmpty)
+        _ = try await first.renameTagDefinition(id: tag.definition.id, to: "Renamed after deletion")
+        await first.retrySync()
+        await second.retrySync()
+        let status = await second.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
         await cloud.replayAllChangesInReverseOrder()
         let late = makeModule(services: services, keyByte: 0x93, time: 3_000)
         try await late.setSyncEnabled(true)
@@ -2994,6 +3002,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }
+    func redeliverPurgedContent() { purgedRecords.removeAll(); reversesAllChanges = true }
     func failNextControlCreation() { failsControlCreation = true }
     func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
