@@ -1,6 +1,166 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "clipboard.sync.fileLocalUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local working file unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地工作文件不可用" } }
+      }
+    },
+    "clipboard.sync.filesPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files are not available on this Mac yet. The whole entry must be ready before copying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件尚未在这台 Mac 上就绪。整条记录就绪后才能复制。"
+          }
+        }
+      }
+    },
+    "clipboard.fileExport.collision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A file already exists at the chosen location. Choose another name."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选位置已存在文件，请选择其他名称。"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileSourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original file unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原文件不可用"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileUnsupportedKind": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file type is waiting for sync support"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此文件类型尚待同步支持"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForUpload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file upload"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待上传文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForDownload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file download"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待下载文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileAvailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File available on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已在这台 Mac 上就绪"
+          }
+        }
+      }
+    },
+    "clipboard.action.openFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开"
+          }
+        }
+      }
+    },
+    "clipboard.action.saveFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save As…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另存为…"
+          }
+        }
+      }
+    },
     "capture.pinned.disableClickThrough": {
       "extractionState": "manual",
       "localizations": {

@@ -285,6 +285,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                 )
             },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
+            onOpenFiles: { [weak self] item in self?.openFiles(item) },
+            onSaveFiles: { [weak self] item in self?.saveFiles(item) },
             onDelete: { [weak self] item in
                 self?.performMutation(.delete(item.id))
             },
@@ -1019,8 +1021,46 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    /// "Reveal in Finder" from a file card's context menu. Prefers each entry's
-    /// original path; falls back to the stored copy when the original is gone.
+    private func openFiles(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let content = await state.presentation.materialization(for: entry.id, purpose: .hostAction, usesCache: false),
+                  !content.fileURLs.isEmpty else { presentActionFailure(); return }
+            for url in content.fileURLs {
+                if !NSWorkspace.shared.open(url) { ClipboardHistoryActionFailurePresenter.present(.operationUnavailable) }
+            }
+        }
+    }
+
+    private func saveFiles(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let content = await state.presentation.materialization(for: entry.id, purpose: .hostAction, usesCache: false),
+                  !content.fileURLs.isEmpty else { presentActionFailure(); return }
+            let destinations: [URL]
+            if content.fileURLs.count == 1, let source = content.fileURLs.first {
+                let panel = NSSavePanel()
+                panel.title = L(.clipboardActionSaveFiles)
+                panel.nameFieldStringValue = source.lastPathComponent
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                destinations = [url]
+            } else {
+                let panel = NSOpenPanel()
+                panel.title = L(.clipboardActionSaveFiles)
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = false
+                panel.canCreateDirectories = true
+                panel.allowsMultipleSelection = false
+                guard panel.runModal() == .OK, let directory = panel.url else { return }
+                var usedNames = Set<String>()
+                destinations = content.fileURLs.map {
+                    directory.appendingPathComponent(uniqueRestoreName($0.lastPathComponent, usedNames: &usedNames))
+                }
+            }
+            if !(await state.presentation.exportFiles(entry.id, to: destinations)) { presentActionFailure() }
+        }
+    }
+
+    /// "Reveal in Finder" uses the module's complete local references or synced
+    /// working copies. Unavailable members fail the complete entry first.
     /// Activating Finder resigns the wall's key status and dismisses it, which
     /// is fine — the user is leaving for Finder anyway.
     private func revealInFinder(_ entry: ClipboardHistoryEntry) {

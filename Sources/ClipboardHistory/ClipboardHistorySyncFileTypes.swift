@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ClipboardHistorySyncFileSummary: Equatable, Sendable, Identifiable {
+public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable {
     public let id: UUID
     public let versionID: UUID
     public let displayName: String
@@ -21,6 +21,7 @@ public enum ClipboardHistorySyncFileState: String, Sendable {
     case waitingForDownload
     case waitingForUpload
     case sourceUnavailable
+    case localUnavailable
     case unsupportedKind
 }
 

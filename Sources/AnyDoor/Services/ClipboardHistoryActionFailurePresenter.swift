@@ -11,6 +11,12 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
 
     init(_ failure: ClipboardHistoryActionFailure) {
         switch failure {
+        case .syncFilesPending:
+            titleKey = .clipboardSyncFilesPending
+            details = []
+        case .fileExportCollision:
+            titleKey = .clipboardFileExportCollision
+            details = []
         case .fileReferencesUnavailable(_, let count):
             titleKey = .clipboardToastFileMissing
             details = [.unavailable(count: count)]

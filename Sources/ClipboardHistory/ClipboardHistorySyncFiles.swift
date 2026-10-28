@@ -7,7 +7,7 @@ extension ClipboardHistoryModule {
 
     static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
         try Row.fetchAll(database, sql: """
-            SELECT version.descriptor, version.transfer_state
+            SELECT version.descriptor, version.transfer_state, version.local_path, version.local_identity
             FROM clipboard_sync_file_members AS member
             JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
             WHERE member.entry_id = ? ORDER BY member.item_index, member.representation_index
@@ -15,7 +15,8 @@ extension ClipboardHistoryModule {
                 let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
                 let state: ClipboardHistorySyncFileState
                 if (row["transfer_state"] as String) == "complete" {
-                    state = .complete
+                    state = ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"])
+                        ? .complete : .localUnavailable
                 } else {
                     state = switch descriptor.state {
                     case .available: .waitingForDownload

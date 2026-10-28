@@ -27,6 +27,19 @@ struct ClipboardSyncPublishedFile: Sendable {
 }
 
 enum ClipboardSyncFileIO {
+    static func isAvailable(path: String?, identity: Data?) -> Bool {
+        guard let path, let identity else { return false }
+        var status = stat()
+        guard lstat(path, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else { return false }
+        let url = URL(fileURLWithPath: path)
+        guard let values = try? url.resourceValues(forKeys: [.fileResourceIdentifierKey]),
+              let current = values.fileResourceIdentifier as? NSObject,
+              let expected = try? NSKeyedUnarchiver.unarchivedObject(
+                ofClasses: [NSObject.self, NSData.self, NSString.self, NSNumber.self], from: identity
+              ) as? NSObject else { return false }
+        return current.isEqual(expected)
+    }
+
     static func validFilename(_ name: String) -> Bool {
         !name.isEmpty && name != "." && name != ".."
             && !name.contains("/") && !name.contains("\0")

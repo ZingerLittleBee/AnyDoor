@@ -561,6 +561,8 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case payloadUnavailable(ClipboardHistoryEntryID)
     case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
     case syncFilesPending(ClipboardHistoryEntryID, count: Int)
+    case invalidFileExport
+    case fileExportCollision(URL)
     case fileCollectionRequiresRestore(
         ClipboardHistoryEntryID,
         ownedCount: Int,
