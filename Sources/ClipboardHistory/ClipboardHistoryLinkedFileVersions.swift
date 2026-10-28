@@ -91,6 +91,9 @@ extension ClipboardHistoryModule {
                 try setLinkedConflict(source, remoteVersion: complete.descriptor.versionID)
                 continue
             }
+            // Receiving a complete package does not authorize replacing an
+            // application at a linked location. Only Apply Update can do that.
+            guard !ClipboardApplicationPackage.isApplication(source.url) else { continue }
             try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
         }
     }
