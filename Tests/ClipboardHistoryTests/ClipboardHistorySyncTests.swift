@@ -6,6 +6,36 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testRemoteTagInNewAccountDoesNotAuthorizeOldAccountHistory() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x11, time: 1_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("account A private text")))
+        let tag = try await first.createTagDefinition(named: "Retained identity", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+
+        await cloud.switchAccount(to: "account-B")
+        await first.retrySync()
+        let peer = makeModule(services: services, keyByte: 0x12, time: 2_000)
+        _ = try await peer.replaceTagDefinitions(with: [tag.definition])
+        try await peer.setSyncTagSelected(tag.definition.id, selected: true)
+        try await peer.setSyncEnabled(true)
+        try await first.setSyncEnabled(true)
+        let beforeAuthorization = await cloud.currentUploads()
+        XCTAssertTrue(beforeAuthorization.allSatisfy { $0.record.kind == .tag })
+
+        let fresh = try await first.capture(.init(source: .unknown, content: .text("new account B text")))
+        _ = try await first.apply(.setTags(fresh.entryID, [tag.definition.id]))
+        await first.retrySync()
+        let afterFreshCapture = await cloud.currentUploads()
+        XCTAssertEqual(afterFreshCapture.filter { $0.record.kind == .entry }.count, 1)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        let afterExplicitSelection = await cloud.currentUploads()
+        XCTAssertEqual(afterExplicitSelection.filter { $0.record.kind == .entry }.count, 2)
+    }
+
     func testInterruptedBootstrapWaitsForItsJournaledCandidateKeyBeforePublishingControl() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

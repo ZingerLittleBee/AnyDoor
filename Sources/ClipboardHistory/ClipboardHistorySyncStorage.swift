@@ -28,6 +28,7 @@ extension ClipboardHistoryModule {
             CREATE TABLE clipboard_sync_accounts (id TEXT PRIMARY KEY NOT NULL, state BLOB NOT NULL);
             CREATE TABLE clipboard_sync_tags (
                 account_id TEXT NOT NULL, tag_id TEXT NOT NULL, selected INTEGER NOT NULL,
+                locally_authorized INTEGER NOT NULL DEFAULT 0,
                 record_id TEXT, PRIMARY KEY(account_id, tag_id)
             ) WITHOUT ROWID;
             CREATE TABLE clipboard_sync_entries (
@@ -108,7 +109,10 @@ extension ClipboardHistoryModule {
                 WHERE \(Self.syncPlainTextEligibility)
                   AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
                               JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                              WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1)
+                              WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1
+                                AND (selected.locally_authorized = 1 OR NOT EXISTS (
+                                    SELECT 1 FROM clipboard_sync_entries AS former
+                                    WHERE former.local_entry_id = entry.id AND former.account_id != selected.account_id)))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
                                   WHERE shared.account_id = ? AND shared.epoch = ? AND shared.local_entry_id = entry.id)
                 ORDER BY entry.id

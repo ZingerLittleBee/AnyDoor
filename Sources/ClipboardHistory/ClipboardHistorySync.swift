@@ -55,8 +55,8 @@ extension ClipboardHistoryModule {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             try database.execute(sql: """
-                INSERT INTO clipboard_sync_tags(account_id, tag_id, selected) VALUES (?, ?, 1)
-                ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = 1
+                INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, locally_authorized) VALUES (?, ?, 1, 1)
+                ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = 1, locally_authorized = 1
                 """, arguments: [accountID, tagID])
         }
         publishSyncStatus()
