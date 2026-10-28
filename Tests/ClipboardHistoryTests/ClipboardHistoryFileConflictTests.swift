@@ -6,6 +6,39 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testExplicitConflictCandidateDownloadLeavesWorkingSelectionAndDirtyBytesUntouched() async throws {
+        let fixture = try await makeLinkedFixture()
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        let remote = Data(repeating: 0x76, count: 6 * 1_024 * 1_024)
+        let dirty = Data("saved local conflict".utf8)
+        try remote.write(to: fixture.original)
+        try dirty.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let before = try await fixture.receiver.syncFileSelection(objectID: working.objectID)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        let candidate = try XCTUnwrap(plan.candidates.first { if case .version = $0.id { true } else { false } })
+        guard case .version(let versionID) = candidate.id else { return XCTFail("Expected a version candidate") }
+        XCTAssertEqual(candidate.availability, .requiresDownload)
+
+        try await fixture.receiver.requestFileConflictDownload(plan, versionID: versionID)
+
+        let after = try await fixture.receiver.syncFileSelection(objectID: working.objectID)
+        XCTAssertEqual(after?.latest.versionID, before?.latest.versionID)
+        XCTAssertEqual(after?.complete?.descriptor.versionID, before?.complete?.descriptor.versionID)
+        XCTAssertEqual(try Data(contentsOf: working.url), dirty)
+        let downloaded = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        let available = try XCTUnwrap(downloaded.candidates.first { $0.id == candidate.id })
+        XCTAssertEqual(available.availability, .available)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(available.localURL)), remote)
+        _ = try await fixture.receiver.resolveFileConflict(downloaded, choosing: candidate.id)
+        XCTAssertEqual(try Data(contentsOf: working.url), remote)
+    }
+
+    @MainActor
     func testChoosingLocalConflictPublishesOneMergeAndConvergesWithoutRecapture() async throws {
         let fixture = try await makeLinkedFixture()
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

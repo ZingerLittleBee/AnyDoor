@@ -140,14 +140,15 @@ extension ClipboardHistoryModule {
         guard plainBytes == size, encryptedBytes == body.encryptedByteCount,
               Data(plainDigest.finalize()) == descriptor.contentDigest,
               Data(encryptedDigest.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
+        let publicationRoot = try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch)
         let candidate = try await ClipboardSyncFilePublication.construct(descriptor: descriptor,
-            encryptedDirectory: directory, root: syncWorkingRoot, account: account, control: control, key: key)
+            encryptedDirectory: directory, root: publicationRoot, account: account, control: control, key: key)
         defer { ClipboardSyncFilePublication.discard(candidate) }
         try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         try await waitForWriteTurn()
         try admitSync(generation)
         guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { return nil }
-        return try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: syncWorkingRoot,
+        return try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: publicationRoot,
             accountID: account.identifier, faults: faultInjector)
     }
 

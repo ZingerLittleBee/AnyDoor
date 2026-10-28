@@ -310,7 +310,7 @@ extension ClipboardHistoryModule {
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
                 WHERE version.account_id = ? AND version.epoch = ? AND transfer_state != 'complete'
-                  AND version.version_id = choice.current_version_id
+                  AND (version.version_id = choice.current_version_id OR \(Self.pinnedFileConflictDownload))
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
@@ -354,7 +354,7 @@ extension ClipboardHistoryModule {
             try admitSync(generation)
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
             output = try ClipboardSyncFileIO.publish(
-                content.bytes, descriptor: descriptor, root: syncWorkingRoot,
+                content.bytes, descriptor: descriptor, root: try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch),
                 accountID: account.identifier, faultInjector: faultInjector
             )
             }
@@ -367,8 +367,14 @@ extension ClipboardHistoryModule {
                     """, arguments: [output.url.path, output.bookmark, output.identity,
                         account.identifier, control.epoch.uuidString,
                         descriptor.objectID.uuidString, descriptor.versionID.uuidString])
-                try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
-                    epoch: control.epoch, complete: true, in: database)
+                let pinned = try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins WHERE account_id = ? AND epoch = ?
+                      AND object_id = ? AND version_id = ? AND download_requested = 1)
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                if !pinned {
+                    try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
+                        epoch: control.epoch, complete: true, in: database)
+                }
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
@@ -385,13 +391,17 @@ extension ClipboardHistoryModule {
         _ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID
     ) throws -> Bool {
         try requiredDatabase().read { database in
-            try Bool.fetchOne(database, sql: """
+            try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
-                    WHERE member.account_id = ? AND member.epoch = ? AND member.object_id = ? AND choice.current_version_id = ?
-                      AND \(Self.liveSyncFileMember))
-                """, arguments: [account.identifier, epoch.uuidString,
-                    descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                    JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                    WHERE member.account_id = \(account.identifier) AND member.epoch = \(epoch.uuidString) AND member.object_id = \(descriptor.objectID.uuidString)
+                      AND (choice.current_version_id = \(descriptor.versionID.uuidString) OR EXISTS(
+                        SELECT 1 FROM clipboard_sync_file_conflict_pins AS pin WHERE pin.account_id = member.account_id
+                          AND pin.epoch = member.epoch AND pin.object_id = member.object_id
+                          AND pin.version_id = \(descriptor.versionID.uuidString) AND pin.download_requested = 1))
+                      AND \(SQL(sql: Self.liveSyncFileMember)) AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier))))
+                """)) ?? false
         }
     }
 

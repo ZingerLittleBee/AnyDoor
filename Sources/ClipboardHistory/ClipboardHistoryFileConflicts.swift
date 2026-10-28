@@ -36,6 +36,7 @@ extension ClipboardHistoryModule {
             CREATE TABLE clipboard_sync_file_conflict_pins (
                 plan_id TEXT NOT NULL REFERENCES clipboard_sync_file_conflict_plans(id),
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, version_id TEXT NOT NULL,
+                download_requested INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(plan_id, version_id)
             ) WITHOUT ROWID;
             """)
