@@ -146,7 +146,7 @@ enum ClipboardFileTreeDecoding {
             while offset < buffer.count {
                 let amount = Darwin.write(fd, buffer.baseAddress?.advanced(by: offset), buffer.count - offset)
                 if amount < 0, errno == EINTR { continue }
-                guard amount > 0 else { throw ClipboardSyncServiceError.localStorage }
+                guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
                 offset += amount
             }
         }

@@ -50,7 +50,7 @@ extension ClipboardSyncFileTransfer {
         try syncDirectory(directory)
         succeeded = true
         var status = stat()
-        guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+        guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         return .init(upload: .init(record: .init(recordID: "v1-\(versionID.uuidString.lowercased())", operationID: versionID,
             epoch: control.epoch, keyID: control.keyID, kind: .fileBody, chunkCount: chunks,
             encryptedByteCount: encryptedCount, digest: Data(hash.finalize())), directory: directory),

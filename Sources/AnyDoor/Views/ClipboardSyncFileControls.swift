@@ -51,7 +51,7 @@ struct ClipboardSyncFileControls: View {
                                     .disabled(requests.contains(file.versionID))
                                     .accessibilityLabel(L(.clipboardSyncFileDownload) + ": " + file.displayName)
                                 }
-                                if let total = file.originalByteCount, file.downloadRequested || file.uploadPending {
+                                if let total = file.transferTotalByteCount ?? file.originalByteCount, file.downloadRequested || file.uploadPending {
                                     ProgressView(value: Double(min(total, file.transferredByteCount)), total: Double(max(1, total)))
                                         .accessibilityLabel(file.displayName)
                                     Text(L(.clipboardSyncFileProgress,

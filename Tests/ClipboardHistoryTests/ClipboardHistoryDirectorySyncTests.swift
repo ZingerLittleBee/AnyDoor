@@ -6,6 +6,25 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testTreeUploadProgressCountsEncodedPlaintextWithoutAuthenticationOverhead() async throws {
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data("payload".utf8).write(to: root.appendingPathComponent("member"))
+        })
+        let initial = try await fixture.sender.page(.init())
+        let object = try XCTUnwrap(initial.entries.first?.syncFiles.first)
+        await fixture.cloud.failCommits(true)
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: object.id)
+        let page = try await fixture.sender.page(.init())
+        let pending = try XCTUnwrap(page.entries.first?.syncFiles.first)
+        XCTAssertTrue(pending.uploadPending)
+        XCTAssertEqual(pending.originalByteCount, 7)
+        XCTAssertGreaterThan(try XCTUnwrap(pending.transferTotalByteCount), 7)
+        XCTAssertEqual(pending.transferredByteCount, pending.transferTotalByteCount)
+    }
+
+    @MainActor
     func testDirectoryAtAggregateThresholdDownloadsAutomatically() async throws {
         let fixture = try await makeLinkedFixture(prepareSource: { root in
             try FileManager.default.removeItem(at: root)
@@ -16,6 +35,9 @@ extension ClipboardHistoryLinkedFileTests {
         let page = try await fixture.receiver.page(.init())
         let file = try XCTUnwrap(page.entries.first?.syncFiles.first)
         XCTAssertEqual(file.originalByteCount, 5_000_000)
+        XCTAssertGreaterThan(try XCTUnwrap(file.transferTotalByteCount), 5_000_000,
+            "Transfer progress includes tree framing without changing the automatic-download threshold")
+        XCTAssertEqual(file.transferredByteCount, try XCTUnwrap(file.transferTotalByteCount))
         XCTAssertEqual(file.state, .complete)
         XCTAssertFalse(file.downloadRequested)
         let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
@@ -364,4 +386,3 @@ private final class DirectoryRootAttributeRace: @unchecked Sendable {
         }
     }
 }
-

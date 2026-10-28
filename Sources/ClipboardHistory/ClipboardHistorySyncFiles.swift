@@ -50,7 +50,8 @@ extension ClipboardHistoryModule {
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
                     availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
-                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending, hasConflict: conflict)
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending,
+                    hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
             }
     }
 
