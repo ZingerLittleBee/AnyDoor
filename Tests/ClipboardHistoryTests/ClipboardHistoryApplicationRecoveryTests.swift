@@ -5,6 +5,53 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testReplacingApplicationIdentityDuringPreparationPreservesBothCompletePackages() async throws {
+        let barrier = LinkedReplacementBarrier()
+        defer { barrier.release() }
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        }, prepareSource: { url in
+            try FileManager.default.removeItem(at: url)
+            _ = try ClipboardApplicationTestFixture.create(at: url,
+                bundleIdentifier: "dev.bybee.AnyDoor.tests.identity-apply.\(UUID().uuidString)",
+                resource: "previous application root", signed: false)
+        }, sourceName: "Identity Update.app")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let installed = ClipboardApplicationTestFixture(url: working.url)
+        let baseline = try installed.contentsSnapshot()
+        let replacement = try ClipboardApplicationTestFixture.create(at: fixture.root.appendingPathComponent("Unrelated.app"),
+            bundleIdentifier: "dev.bybee.AnyDoor.tests.unrelated.\(UUID().uuidString)", resource: "replacement owner bytes", signed: false)
+        let replacementSnapshot = try replacement.contentsSnapshot()
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("candidate needing explicit admission".utf8).write(to: fixture.original.appendingPathComponent("Contents/Resources/Resource.txt"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(displayed.first)
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(plan.state, .ready)
+        let application = Task { try await fixture.receiver.applyApplicationUpdate(plan) }
+        try await eventually { barrier.isWaiting }
+        let retained = fixture.root.appendingPathComponent("Retained previous root.app")
+
+        try FileManager.default.moveItem(at: working.url, to: retained)
+        try FileManager.default.copyItem(at: replacement.url, to: working.url)
+        barrier.release()
+        do {
+            try await application.value
+            XCTFail("A new root at the displayed path must revoke application consent")
+        } catch {}
+
+        XCTAssertEqual(try installed.contentsSnapshot(), replacementSnapshot)
+        XCTAssertEqual(try ClipboardApplicationTestFixture(url: retained).contentsSnapshot(), baseline)
+        XCTAssertEqual(try replacement.contentsSnapshot(), replacementSnapshot)
+    }
+
+    @MainActor
     func testConcurrentSyncRetryDoesNotRetireAnActiveApplicationReplacement() async throws {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
