@@ -61,6 +61,7 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case syncFileBeforePublication
     case syncFileAfterPublication
     case linkedFileAfterReplacement
+    case linkedFileBeforeReplacement
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {

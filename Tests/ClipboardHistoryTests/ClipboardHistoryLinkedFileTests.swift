@@ -7,6 +7,63 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testDeletionRevokesReplacementAlreadyWaitingAfterFileVerification() async throws {
+        let barrier = LinkedReplacementBarrier()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        })
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try Data("remote update waiting to replace".utf8).write(to: fixture.original)
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+        let receive = Task { await fixture.receiver.retrySync() }
+        try await eventually { barrier.isWaiting }
+        let deletion = Task { try await fixture.receiver.apply(.delete(fixture.entryID)) }
+        try await eventually { try await fixture.receiver.page(.init()).entries.isEmpty }
+        barrier.release()
+        _ = try await deletion.value
+        await receive.value
+
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8),
+            "A persisted deletion must revoke the final filesystem mutation")
+    }
+
+    @MainActor
+    func testDisableRevokesReplacementAlreadyWaitingAfterFileVerification() async throws {
+        let barrier = LinkedReplacementBarrier()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        })
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try Data("remote update waiting to replace".utf8).write(to: fixture.original)
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+        let receive = Task { await fixture.receiver.retrySync() }
+        try await eventually { barrier.isWaiting }
+        let cancelledBefore = await fixture.cloud.cancellationCount()
+        let disable = Task { try await fixture.receiver.setSyncEnabled(false) }
+        try await eventually { await fixture.cloud.cancellationCount() > cancelledBefore }
+        barrier.release()
+        try await disable.value
+        await receive.value
+
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8),
+            "Revoked I/O must not exchange a linked file after verification finishes")
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+    }
+
+    @MainActor
     func testExplicitAssociatedLocationPublishesToOriginalAndStableWorkingCopy() async throws {
         let fixture = try await makeLinkedFixture()
         let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
@@ -322,6 +379,7 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
     private var commitsFail = false
     private var shouldHoldDownload = false
     private var heldDownload: CheckedContinuation<Void, Never>?
+    private var cancellations = 0
     func failCommits(_ fail: Bool) { commitsFail = fail }
     func holdNextDownload() { shouldHoldDownload = true }
     func downloadIsHeld() -> Bool { heldDownload != nil }
@@ -358,7 +416,8 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
         self.currentControl = updated
         return updated
     }
-    func cancel() {}
+    func cancel() { cancellations += 1 }
+    func cancellationCount() -> Int { cancellations }
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
         control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
         var chunks: [Data] = []
@@ -385,4 +444,17 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
         .init(accountID: control.accountID, keyID: control.keyID, keyCheck: control.keyCheck,
             epoch: control.epoch, phase: control.phase, serverToken: Data(UUID().uuidString.utf8))
     }
+}
+
+/// Blocks only the detached filesystem boundary, never the module actor.
+private final class LinkedReplacementBarrier: @unchecked Sendable {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var waiting = false
+    var isWaiting: Bool { lock.withLock { waiting } }
+    func pause() {
+        lock.withLock { waiting = true }
+        _ = semaphore.wait(timeout: .now() + 10)
+    }
+    func release() { semaphore.signal() }
 }

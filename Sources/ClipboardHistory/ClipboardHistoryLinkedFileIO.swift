@@ -8,6 +8,28 @@ struct ClipboardLinkedFileProof: Sendable {
     let identity: Data
     let digest: Data
     let byteCount: Int64
+    let stamp: ClipboardLinkedFileStamp
+}
+
+struct ClipboardLinkedFileStamp: Sendable {
+    let device: dev_t
+    let inode: ino_t
+    let size: off_t
+    let modified: timespec
+    let changed: timespec
+
+    init(_ status: stat) {
+        device = status.st_dev; inode = status.st_ino; size = status.st_size
+        modified = status.st_mtimespec; changed = status.st_ctimespec
+    }
+
+    func matches(_ url: URL, includeMetadata: Bool = true) -> Bool {
+        var current = stat()
+        guard lstat(url.path, &current) == 0,
+              current.st_dev == device, current.st_ino == inode, current.st_size == size,
+              current.st_mtimespec.tv_sec == modified.tv_sec, current.st_mtimespec.tv_nsec == modified.tv_nsec else { return false }
+        return !includeMetadata || (current.st_ctimespec.tv_sec == changed.tv_sec && current.st_ctimespec.tv_nsec == changed.tv_nsec)
+    }
 }
 
 enum ClipboardLinkedFileIO {
@@ -15,7 +37,8 @@ enum ClipboardLinkedFileIO {
     /// an ordinary, visible replacement beside the user's file, never a cache
     /// for unverified download bytes. Hash the bounded copy before publication.
     static func prepareReplacement(_ version: ClipboardSyncVerifiedFileVersion, at destination: URL) throws -> ClipboardLinkedFileProof {
-        guard let digest = version.descriptor.contentDigest else { throw ClipboardSyncServiceError.corruptData }
+        guard let digest = version.descriptor.contentDigest, let expectedBytes = version.descriptor.originalByteCount,
+              expectedBytes >= 0 else { throw ClipboardSyncServiceError.corruptData }
         let source = try inspect(version.url, expectedIdentity: version.identity)
         guard source.digest == digest else { throw ClipboardSyncServiceError.corruptData }
         let url = destination.deletingLastPathComponent().appendingPathComponent(
@@ -29,12 +52,13 @@ enum ClipboardLinkedFileIO {
         guard output >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(output) }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
-        while true {
+        var copied: Int64 = 0
+        while copied < expectedBytes {
             try Task.checkCancellation()
-            let count = buffer.withUnsafeMutableBytes { read(input, $0.baseAddress, $0.count) }
+            let count = buffer.withUnsafeMutableBytes { read(input, $0.baseAddress, Int(min(Int64($0.count), expectedBytes - copied))) }
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-            if count == 0 { break }
+            guard count > 0 else { throw ClipboardSyncServiceError.corruptData }
             var written = 0
             while written < count {
                 let amount = buffer.withUnsafeBytes { write(output, $0.baseAddress?.advanced(by: written), count - written) }
@@ -42,7 +66,10 @@ enum ClipboardLinkedFileIO {
                 guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
                 written += amount
             }
+            copied += Int64(count)
         }
+        var extra: UInt8 = 0
+        guard read(input, &extra, 1) == 0 else { throw ClipboardSyncServiceError.corruptData }
         guard fsync(output) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         let proof = try inspect(url)
         guard proof.digest == digest, proof.byteCount == version.descriptor.originalByteCount else {
@@ -55,26 +82,38 @@ enum ClipboardLinkedFileIO {
     /// Exchange names atomically so the previous bytes survive until checked.
     /// A conflicting save is restored rather than discarded. The durable journal
     /// identifies both inodes if the process stops between exchange and commit.
-    static func applyReplacement(_ replacement: ClipboardLinkedFileProof, to source: ClipboardLinkedLocationSource) throws -> ClipboardLinkedFileProof? {
+    static func applyReplacement(_ replacement: ClipboardLinkedFileProof, to source: ClipboardLinkedLocationSource,
+        faultInjector: ClipboardHistoryFaultInjector,
+        authorize: @Sendable (_ mutation: () throws -> Bool) throws -> Bool) throws -> ClipboardLinkedFileProof? {
         var error: NSError?
         var result: Result<ClipboardLinkedFileProof?, any Error>?
         NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: source.url, options: [], error: &error) { destination in
             result = Result {
+                guard destination.resolvingSymlinksInPath() == source.url.resolvingSymlinksInPath() else {
+                    throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+                }
                 let before = try inspectCoordinated(destination, expectedIdentity: source.identity)
                 guard before.digest == source.baseDigest else { return nil }
                 let prepared = try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity)
                 guard prepared.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
                 try Task.checkCancellation()
-                guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
-                    throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-                }
-                let previous = try inspectCoordinated(replacement.url, expectedIdentity: source.identity)
-                guard previous.digest == source.baseDigest else {
+                try faultInjector.check(.linkedFileBeforeReplacement)
+                let exchanged = try authorize {
+                    guard before.stamp.matches(destination), prepared.stamp.matches(replacement.url) else { return false }
                     guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                     }
-                    return nil
+                    // The exchange can change ctime. Saved content changes alter
+                    // the inode/size/mtime stamp and require immediate rollback.
+                    guard before.stamp.matches(replacement.url, includeMetadata: false) else {
+                        guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
+                            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+                        }
+                        return false
+                    }
+                    return true
                 }
+                guard exchanged else { return nil }
                 return try inspectCoordinated(destination, expectedIdentity: replacement.identity)
             }
         }
@@ -146,6 +185,6 @@ enum ClipboardLinkedFileIO {
         return ClipboardLinkedFileProof(url: url,
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
-            digest: Data(hasher.finalize()), byteCount: offset)
+            digest: Data(hasher.finalize()), byteCount: offset, stamp: ClipboardLinkedFileStamp(after))
     }
 }

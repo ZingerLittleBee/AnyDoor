@@ -214,6 +214,10 @@ replacement files beside a linked location are ordinary working output, not a
 plaintext download cache. History exposes Linked Locations and Associate File;
 normal materialization prefers the stable linked location after completeness checks.
 Move/replacement identity reconciliation and conflict resolution remain separate slices.
+The final exchange uses a revocable generation gate and a serialized database
+authority check after file hashing. Off revokes the gate before waiting for work
+to exit; deletion/withdrawal/reset transactions cannot race the last eligibility
+read. No long file hashing or provider I/O holds that final mutation gate.
 
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.

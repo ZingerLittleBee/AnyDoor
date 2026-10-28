@@ -21,6 +21,8 @@ extension ClipboardHistoryModule {
     /// and explicit associations. Every location keeps its actual edited base.
     func reconcileLinkedFileVersions(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64, canPublish: Bool = true) async throws {
         guard let services = syncServices else { return }
+        try admitSync(generation)
+        linkedFileMutationGate.activate(generation)
         try await recoverLinkedFileApplications(account: account, control: control, generation: generation)
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
@@ -135,7 +137,26 @@ extension ClipboardHistoryModule {
                     replacement.url.path, replacement.identity, source.id.uuidString])
         }
         journaled = true
-        let application = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.applyReplacement(replacement, to: source) }
+        let faults = faultInjector
+        let gate = linkedFileMutationGate
+        let database = try requiredDatabase()
+        let application = Task.detached(priority: .utility) {
+            try ClipboardLinkedFileIO.applyReplacement(replacement, to: source, faultInjector: faults) { mutation in
+                try gate.perform(generation: generation) {
+                    // Serialize the last authority read with deletion, withdrawal,
+                    // and reset writes. No hashing or network I/O holds this turn.
+                    try database.write { database in
+                        guard try Bool.fetchOne(database, sql: "SELECT enabled = 1 AND account_id = ? FROM clipboard_sync_settings WHERE id = 1",
+                            arguments: [account.identifier]) == true,
+                              let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
+                              current.baseVersionID == source.baseVersionID, current.identity == source.identity else {
+                            throw CancellationError()
+                        }
+                        return try mutation()
+                    }
+                }
+            }
+        }
         let proof = try await withTaskCancellationHandler { try await application.value } onCancel: { application.cancel() }
         try faultInjector.check(.linkedFileAfterReplacement)
         try await admitSync(generation, account: account, services: services)

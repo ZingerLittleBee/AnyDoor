@@ -46,6 +46,7 @@ struct ClipboardLinkedLocationSource: Sendable {
 
 extension ClipboardHistoryModule {
     func stopLinkedFileObservers() {
+        linkedFileMutationGate.revoke()
         for observer in linkedFileObservers.values { observer.cancel() }
         linkedFileObservers.removeAll()
         for task in linkedFileObservationTasks.values { task.cancel() }
