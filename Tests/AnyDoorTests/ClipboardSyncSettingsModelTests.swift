@@ -7,6 +7,26 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
+    func testDeniedKeyAccessOffersSystemRecoveryWithoutEnablingASecondAccount() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: directory, keyStore: SettingsSyncLocalKeyStore(),
+            syncServices: .init(transport: HeldSettingsSyncTransport(immediatelyAvailable: true),
+                keys: UnavailableSettingsSyncKeys(), pollingInterval: nil)
+        ))
+        let local = try await module.capture(.init(source: .unknown, content: .text("local history stays available")))
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        XCTAssertEqual(model.status.phase, .accessDenied)
+        XCTAssertEqual(model.recoveryHelpURL?.absoluteString,
+            "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [local.entryID])
+        await model.setEnabled(false)
+        XCTAssertNil(model.recoveryHelpURL)
+    }
+
     func testTagChoiceRequiresActivationAndSurvivesDisablingThisMac()
         async throws
     {
@@ -177,15 +197,22 @@ private struct UnavailableSettingsSyncKeys: ClipboardSyncKeyStoring {
 
 private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
     private var accountRequest: CheckedContinuation<ClipboardSyncAccount, any Error>?
+    private let immediatelyAvailable: Bool
+
+    init(immediatelyAvailable: Bool = false) { self.immediatelyAvailable = immediatelyAvailable }
 
     var hasPendingAccount: Bool { accountRequest != nil }
 
     func account() async throws -> ClipboardSyncAccount {
         try Task.checkCancellation()
+        if immediatelyAvailable {
+            return ClipboardSyncAccount(container: "test", environment: "test", owner: "recovery-test")
+        }
         return try await withCheckedThrowingContinuation { accountRequest = $0 }
     }
 
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
+        if immediatelyAvailable { return nil }
         throw ClipboardSyncServiceError.capabilityUnavailable
     }
 

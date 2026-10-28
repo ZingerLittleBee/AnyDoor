@@ -101,3 +101,30 @@ Successful local SecItem insertion does not prove remote Keychain delivery.
 Do not report a queued CloudKit operation as delivered or promise a fixed
 delivery deadline. The full [Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md)
 defines the subsequent file, conflict, withdrawal, and reset acceptance cases.
+
+## Account and key recovery evidence
+
+The deterministic [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
+drive public module behavior with real temporary encrypted stores and external
+account/key fault adapters. They cover missing/locked/denied/unavailable/wrong
+keys, delayed candidate delivery, successful bootstrap with a lost response,
+account changes during a key callback or while quit, disabling and local reset
+during delivery, and retry deadlines across restart. The
+[Settings tests](../../Tests/AnyDoorTests/ClipboardSyncSettingsModelTests.swift)
+verify that denial leaves local history usable and offers Apple's system
+recovery help. These checks do not inspect personal Keychain items or perform a
+live iCloud transfer.
+
+For a separately authorized signed test session, record the observable native
+error and public phase for account loss, key interaction restrictions, access
+denial, and restored access. Repeat restart and disable while work is pending;
+verify the unchanged KeyID and preserved synthetic ciphertext, then confirm a
+peer still reads the same content. A missing local item is not evidence that
+system Keychain sync is disabled, and elapsed time cannot prove irreversible
+key loss. Do not remove real keys or cloud data to manufacture a recovery case.
+
+The 2026-10-28 implementation lane records signed account/Keychain transitions
+as **NOT RUN**, and signed two-Mac acceptance as **SKIPPED (user request)**.
+Developer-profile and backend-schema validation remains configuration evidence
+only. Unlock and system recovery must not be reported as natively demonstrated
+merely because the injected fault adapter becomes available.

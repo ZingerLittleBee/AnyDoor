@@ -373,6 +373,7 @@ enum L10n {
         case settingsClipboardSyncStorageFailure = "settings.clipboard.sync.failure.storage"
         case settingsClipboardSyncCorruptData = "settings.clipboard.sync.failure.corruptData"
         case settingsClipboardSyncRecoveryRequired = "settings.clipboard.sync.failure.recoveryRequired"
+        case settingsClipboardSyncRecoveryHelp = "settings.clipboard.sync.recoveryHelp"
         case settingsClipboardSyncAccountChanged = "settings.clipboard.sync.failure.accountChanged"
         case settingsClipboardSyncUnsupportedVersion = "settings.clipboard.sync.failure.unsupportedVersion"
         case settingsClipboardClearProtected = "settings.clipboard.clear.protected"
