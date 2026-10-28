@@ -1252,7 +1252,7 @@ extension ClipboardHistoryModule {
     }
 
     @discardableResult
-    private func recomputeProtection(
+    func recomputeProtection(
         for entryID: String,
         in database: Database
     ) throws -> Bool {

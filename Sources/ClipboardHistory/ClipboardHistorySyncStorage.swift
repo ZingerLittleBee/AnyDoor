@@ -88,18 +88,9 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
         let pool = try requiredDatabase()
         try pool.write { database in
+            try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
+            try stageSyncMemberships(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
-            for tag in tags {
-                let existing = try String.fetchOne(database, sql: """
-                    SELECT record_id FROM clipboard_sync_tags WHERE account_id = ? AND tag_id = ?
-                    """, arguments: [account.identifier, tag.id])
-                if existing == nil {
-                    let upload = try ClipboardSyncCodec.seal(.tag(tag), account: account, control: control, key: key)
-                    try storeSyncUpload(upload, subjectID: tag.id, account: account, in: database)
-                    try database.execute(sql: "UPDATE clipboard_sync_tags SET record_id = ? WHERE account_id = ? AND tag_id = ?",
-                        arguments: [upload.record.recordID, account.identifier, tag.id])
-                }
-            }
             guard !tags.isEmpty else { return }
             let rows = try Row.fetchCursor(database, sql: """
                 SELECT entry.id
@@ -127,11 +118,13 @@ extension ClipboardHistoryModule {
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
+                try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
+                    account: account, epoch: control.epoch, in: database)
             }
         }
     }
 
-    private func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
+    func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
                                  account: ClipboardSyncAccount, in database: Database) throws {
         try database.execute(sql: """
             INSERT INTO clipboard_sync_outbox(record_id, account_id, epoch, subject_id, kind, metadata)
@@ -176,6 +169,8 @@ extension ClipboardHistoryModule {
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID]) ?? false
             guard !exists else { return false }
+            try recordLocalSyncTags(accountID: account.identifier, in: database)
+            try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
             switch content {
             case .tag(let tag):
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
@@ -183,6 +178,10 @@ extension ClipboardHistoryModule {
                 try importSyncText(text, account: account, record: record, in: database)
             case .entry(let entry):
                 try importSyncEntryContent(entry, account: account, record: record, in: database)
+            case .tagMembership(let membership):
+                try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
+            case .tagState(let state):
+                try importSyncTagState(state, account: account, record: record, in: database)
             }
             try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])
@@ -199,6 +198,8 @@ extension ClipboardHistoryModule {
         guard !tag.id.isEmpty, !tag.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ClipboardSyncServiceError.corruptData
         }
+        // An initial snapshot cannot undo a later rename or selection change.
+        if try syncTagState(id: tag.id, accountID: account.identifier, in: database) != nil { return }
         // Names never establish identity. Do not replace the whole local tag list.
         try database.execute(sql: """
             INSERT INTO clipboard_tag_definitions(id, display_name, display_order)
@@ -209,6 +210,8 @@ extension ClipboardHistoryModule {
             INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, record_id) VALUES (?, ?, 1, ?)
             ON CONFLICT(account_id, tag_id) DO UPDATE SET record_id = COALESCE(clipboard_sync_tags.record_id, excluded.record_id)
             """, arguments: [account.identifier, tag.id, recordID])
+        try saveSyncTagState(.init(id: tag.id, name: tag.name, selected: true, revision: .initial),
+            accountID: account.identifier, pending: false, in: database)
     }
 
     private func importSyncText(_ text: ClipboardSyncTextContent, account: ClipboardSyncAccount,
@@ -257,5 +260,7 @@ extension ClipboardHistoryModule {
             INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
             VALUES (?, ?, ?, ?, ?, 'remote')
             """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
+        try seedSyncMemberships(text.tags, sharedID: sharedID, localID: localID,
+            account: account, epoch: record.epoch, in: database)
     }
 }

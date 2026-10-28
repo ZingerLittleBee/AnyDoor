@@ -96,6 +96,8 @@ extension ClipboardHistoryModule {
             INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
             VALUES (?, ?, ?, ?, ?, 'remote')
             """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
+        try seedSyncMemberships(content.tags, sharedID: sharedID, localID: localID,
+            account: account, epoch: record.epoch, in: database)
     }
 
     func validatedSyncSnapshot(_ content: ClipboardSyncEntryContent) throws -> PasteboardSnapshot {
