@@ -10,6 +10,7 @@ struct ClipboardLinkedFileProof: Sendable {
     let byteCount: Int64
     let stamp: ClipboardLinkedFileStamp
     let nativeIdentity: ClipboardLinkedNativeIdentity?
+    var treeWitness: ClipboardFileTree? = nil
 }
 
 struct ClipboardLinkedFileStamp: Sendable {
@@ -108,20 +109,21 @@ enum ClipboardLinkedFileIO {
                 try faultInjector.check(.linkedFileBeforeReplacement)
                 let exchanged = try authorize {
                     guard before.stamp.matches(destination), prepared.stamp.matches(replacement.url) else { return false }
-                    if try ClipboardFileTree.needsEncoding(destination) {
-                        guard try inspectCoordinated(destination, expectedIdentity: source.identity).digest == before.digest,
-                              try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity).digest == prepared.digest else { return false }
-                    }
+                    do { try before.treeWitness?.verify(); try prepared.treeWitness?.verify() }
+                    catch { return false }
                     guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                     }
                     // The exchange can change ctime. Saved content changes alter
                     // the inode/size/mtime stamp and require immediate rollback.
-                    let oldIsTree = try ClipboardFileTree.needsEncoding(replacement.url)
-                    let oldTreeDigest = oldIsTree ? try? inspectCoordinated(replacement.url, expectedIdentity: source.identity).digest : nil
-                    let oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
-                        && (!oldIsTree || oldTreeDigest == before.digest)
+                    var oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
+                    do { try before.treeWitness?.verify(at: replacement.url, afterExchange: true) }
+                    catch { oldUnchanged = false }
                     guard oldUnchanged else {
+                        // A late save to the newly installed tree must also be
+                        // preserved. Throwing leaves both journal-owned roots.
+                        guard prepared.stamp.matches(destination, includeMetadata: false) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                        try prepared.treeWitness?.verify(at: destination, afterExchange: true)
                         guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                         }
@@ -178,7 +180,8 @@ enum ClipboardLinkedFileIO {
         }
         var hasher = SHA256()
         var offset: Int64 = 0
-        let tree = try ClipboardFileTree.needsEncoding(url) ? ClipboardFileTree(url).stream { _ in } : nil
+        let treeWitness = try ClipboardFileTree.needsEncoding(url) ? ClipboardFileTree(url) : nil
+        let tree = try treeWitness?.stream { _ in }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while tree == nil && offset < before.st_size {
             try Task.checkCancellation()
@@ -204,6 +207,7 @@ enum ClipboardLinkedFileIO {
         return ClipboardLinkedFileProof(url: url,
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
-            digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after), nativeIdentity: nativeIdentity)
+            digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after),
+            nativeIdentity: nativeIdentity, treeWitness: treeWitness)
     }
 }

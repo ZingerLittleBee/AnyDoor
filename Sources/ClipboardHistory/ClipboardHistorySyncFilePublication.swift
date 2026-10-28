@@ -38,11 +38,12 @@ enum ClipboardSyncFilePublication {
     /// Plaintext construction is confined to the visible working-copy directory.
     @concurrent
     static func construct(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
-        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data
+        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        faults: ClipboardHistoryFaultInjector = .init()
     ) async throws -> ClipboardSyncFileCandidate {
         if descriptor.bodyFormat == .treeSegmentsV1 {
             return try constructTree(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
-                root: root, account: account, control: control, key: key)
+                root: root, account: account, control: control, key: key, faults: faults)
         }
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
         defer { close(directory) }

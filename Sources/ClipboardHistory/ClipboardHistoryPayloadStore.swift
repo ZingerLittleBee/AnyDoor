@@ -62,6 +62,7 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case storeRelocationBeforeAdoption
     case storeRelocationAfterAdoption
     case syncFileBeforePublication
+    case syncFileTreeBeforeMetadata
     case syncFileAfterPublication
     case linkedFileAfterReplacement
     case linkedFileBeforeReplacement

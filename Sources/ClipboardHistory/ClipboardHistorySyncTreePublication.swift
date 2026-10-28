@@ -3,7 +3,8 @@ import Foundation
 
 extension ClipboardSyncFilePublication {
     static func constructTree(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
-        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws -> ClipboardSyncFileCandidate {
+        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        faults: ClipboardHistoryFaultInjector) throws -> ClipboardSyncFileCandidate {
         try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
             account: account, control: control, key: key, destination: nil)
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
@@ -23,12 +24,14 @@ extension ClipboardSyncFilePublication {
         let pending = url.appendingPathComponent(name)
         var succeeded = false
         defer { if !succeeded { try? FileManager.default.removeItem(at: pending) } }
-        try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
-            account: account, control: control, key: key, destination: pending)
+        let created = try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
+            account: account, control: control, key: key, destination: pending, faults: faults, destinationParent: directory)
         let measurement = try ClipboardFileTree(pending).stream { _ in }
         guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
               measurement.encoded == descriptor.encodedByteCount,
-              fstatat(directory, name, &status, AT_SYMLINK_NOFOLLOW) == 0, fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
+              fstatat(directory, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
+              status.st_dev == created?.device, status.st_ino == created?.inode,
+              fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
         succeeded = true
         return .init(directory: url, name: descriptor.displayName, pendingName: name,
             parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(status))
