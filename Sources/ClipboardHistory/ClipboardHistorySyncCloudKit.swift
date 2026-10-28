@@ -325,6 +325,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         guard upload.record.epoch == control.epoch, upload.record.keyID == control.keyID else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
+        try await progress(0)
         do {
             if let completed = try await completedCommit(upload.record, account: account, database: database) {
                 try checkCancellation(generation)
@@ -408,15 +409,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             guard let result = results[id] else { throw ClipboardSyncServiceError.corruptData }
             let chunk = try result.get()
             try validateChunk(chunk, remote: record, index: index)
-            guard let url = (chunk["asset"] as? CKAsset)?.fileURL,
-                  let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-                  size >= 28, size <= ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes else {
+            guard let url = (chunk["asset"] as? CKAsset)?.fileURL else {
                 throw ClipboardSyncServiceError.corruptData
             }
-            let bytes: Data
-            do { bytes = try Data(contentsOf: url) }
-            catch { throw ClipboardSyncServiceError.localStorage }
-            guard bytes.count == size, chunk["chunkDigest"] as? Data == Data(SHA256.hash(data: bytes)) else {
+            let bytes = try ClipboardSyncFileTransfer.readAsset(at: url)
+            guard chunk["chunkDigest"] as? Data == Data(SHA256.hash(data: bytes)) else {
                 throw ClipboardSyncServiceError.corruptData
             }
             try checkCancellation(generation)

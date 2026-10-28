@@ -33,6 +33,8 @@ struct ClipboardCardView: View {
             Divider()
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ClipboardSyncFileControls(entry: entry, presentation: presentation)
+                .padding(.horizontal, 8)
             if let status = entry.syncFileStatusText {
                 Text(status)
                     .font(.caption)
@@ -54,7 +56,7 @@ struct ClipboardCardView: View {
         .overlay {
             RightClickMenu(makeMenu: makeContextMenu)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.presentationTitle)
         .task(id: entry.filePresentationIdentity) {
             async let preview = presentation.materialization(

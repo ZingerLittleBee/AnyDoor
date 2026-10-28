@@ -142,6 +142,8 @@ extension ClipboardHistoryModule {
             let sampled = await Task.detached(priority: .utility) {
                 ClipboardSyncFileIO.sample(source)
             }.value
+            try admitSync(generation)
+            guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let objectID = UUID()
             let versionID = UUID()
             let frozen: ClipboardSyncFrozenFile?
@@ -185,6 +187,29 @@ extension ClipboardHistoryModule {
                         source.itemIndex, source.representationIndex, objectID.uuidString, versionID.uuidString])
                 return true
             }
+        }
+        // The previous file protocol advertised large files without a body.
+        // Publish a new immutable version instead of rewriting its descriptor.
+        let legacy = try syncFileRead { database in
+            try Row.fetchAll(database, SQLRequest<Row>(literal: """
+                SELECT DISTINCT version.object_id, version.version_id, version.local_bookmark, version.local_identity
+                FROM clipboard_sync_file_versions AS version
+                JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                JOIN clipboard_sync_file_members AS member USING(account_id, epoch, object_id)
+                JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                WHERE version.account_id = \(account.identifier) AND version.epoch = \(control.epoch.uuidString)
+                  AND choice.current_version_id = version.version_id AND version.transfer_state = 'pendingUpload'
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+                """)).compactMap { row -> (UUID, UUID, Data, Data)? in
+                guard let objectID = UUID(uuidString: row["object_id"]), let versionID = UUID(uuidString: row["version_id"]),
+                      let bookmark: Data = row["local_bookmark"], let identity: Data = row["local_identity"] else { return nil }
+                return (objectID, versionID, bookmark, identity)
+            }
+        }
+        for (objectID, parent, bookmark, identity) in legacy {
+            try admitSync(generation)
+            let source = try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity)
+            _ = try await publishFileVersion(sourceURL: source, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
         }
     }
 

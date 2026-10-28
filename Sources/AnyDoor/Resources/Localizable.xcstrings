@@ -1,6 +1,57 @@
 {
   "sourceLanguage": "en",
   "strings": {
+  "clipboard.sync.fileDownload": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Download"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "下载"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileUpdateAvailable": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Update available; the previous version is ready to use"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "有可用更新，仍可使用上一个完整版本"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileProgress": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ of %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ / %@"
+        }
+      }
+    }
+  },
     "clipboard.sync.fileLocalUnavailable": {
       "extractionState": "manual",
       "localizations": {

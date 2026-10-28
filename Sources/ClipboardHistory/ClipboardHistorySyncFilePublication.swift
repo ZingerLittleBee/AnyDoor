@@ -88,8 +88,10 @@ enum ClipboardSyncFilePublication {
                 }
             }
         }
-        guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest,
-              fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardSyncServiceError.corruptData }
+        guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
         var final = stat()
         guard fstat(output, &final) == 0 else { throw ClipboardSyncServiceError.localStorage }
         succeeded = true
@@ -130,8 +132,11 @@ enum ClipboardSyncFilePublication {
         guard values.isSymbolicLink != true, let identity = values.fileResourceIdentifier as? NSObject else {
             throw ClipboardSyncServiceError.localStorage
         }
-        return .init(url: destination,
-            bookmark: try destination.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
+        let bookmark = try destination.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil)
+        var verified = stat()
+        guard fstatat(directory, candidate.name, &verified, AT_SYMLINK_NOFOLLOW) == 0,
+              ClipboardSyncFileSnapshot(verified) == ClipboardSyncFileSnapshot(atPath) else { throw ClipboardSyncServiceError.localStorage }
+        return .init(url: destination, bookmark: bookmark,
             identity: try NSKeyedArchiver.archivedData(withRootObject: identity, requiringSecureCoding: true))
     }
 
