@@ -55,6 +55,52 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "leave the current clipboard alone")
     }
 
+    @MainActor
+    func testOrderedRichTextAndLinkRepresentationsTransferAsOneCompleteEntry() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x81, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x82, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-rich.\(UUID())"))
+        pasteboard.clearContents()
+        let rich = NSPasteboardItem()
+        let rtf = Data(#"{\rtf1\ansi Shared rich words}"#.utf8)
+        let html = Data("<p>Shared rich words</p>".utf8)
+        rich.setString(" Shared exact words\r\n", forType: .string)
+        rich.setData(rtf, forType: .rtf)
+        rich.setData(html, forType: .html)
+        let link = NSPasteboardItem()
+        link.setString("Example link", forType: .string)
+        link.setString("https://example.com/shared", forType: .URL)
+        XCTAssertTrue(pasteboard.writeObjects([rich, link]))
+        let captured = try await first.capture(.init(pasteboard: pasteboard), source: .unknown)
+        guard case .captured(let outcome) = captured else { return XCTFail("Expected a complete captured entry") }
+        let tag = try await first.createTagDefinition(named: "Rich", assigningTo: outcome.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        pasteboard.clearContents()
+        pasteboard.setString("receiver sentinel", forType: .string)
+        let generation = pasteboard.changeCount
+        try await second.setSyncEnabled(true)
+        let page = try await second.page(.init(tagID: tag.definition.id))
+        let received = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(page.entries.count, 1)
+        let normal = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        XCTAssertEqual(normal.items, [
+            .init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: " Shared exact words\r\n"),
+                .data(typeIdentifier: "public.rtf", rtf), .data(typeIdentifier: "public.html", html)]),
+            .init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "Example link"),
+                .text(typeIdentifier: "public.url", value: "https://example.com/shared")]),
+        ])
+        let plain = try await second.materialize(.init(entryID: received.id, purpose: .plainTextPaste))
+        XCTAssertEqual(plain.items.count, 2)
+        let search = try await second.page(.init(text: "Shared rich words"))
+        XCTAssertEqual(search.entries.map(\.id), [received.id])
+        XCTAssertEqual(pasteboard.changeCount, generation)
+        XCTAssertEqual(pasteboard.string(forType: .string), "receiver sentinel")
+    }
+
     func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
