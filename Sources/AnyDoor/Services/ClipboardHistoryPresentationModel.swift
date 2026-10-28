@@ -681,7 +681,8 @@ final class ClipboardHistoryPresentationModel {
             guard generation == applicationUpdateGeneration else { return }
             await loadApplicationUpdate(generation: generation)
             guard generation == applicationUpdateGeneration else { return }
-            applicationUpdateNotice = (error as? ClipboardHistoryApplicationUpdateError) == .stalePlan ? .changed : .downloadFailed
+            applicationUpdateNotice = (error as? ClipboardHistoryApplicationUpdateError) == .stalePlan
+                || (error as? ClipboardHistoryModuleError) == .operationUnavailable ? .changed : .downloadFailed
         }
         isPerformingApplicationUpdateAction = false
     }
@@ -707,6 +708,8 @@ final class ClipboardHistoryPresentationModel {
             case .running: applicationUpdateNotice = .blocked(.running)
             case .identityUncertain: applicationUpdateNotice = .blocked(.identityUncertain)
             case .localChanges: applicationUpdateNotice = .blocked(.localChanges)
+            case nil where (error as? ClipboardHistoryModuleError) == .operationUnavailable:
+                applicationUpdateNotice = .changed
             default: applicationUpdateNotice = .applyFailed
             }
         }

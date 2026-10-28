@@ -61,6 +61,95 @@ final class ClipboardApplicationUpdatePresentationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fixture.workingResource), fixture.update)
     }
 
+    func testClosingDuringDownloadDoesNotReopenOrApplyTheUpdate() async throws {
+        let fixture = try await makeApplicationFixture(update: Data(repeating: 0x72, count: 5_000_001))
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await model.beginApplicationUpdate(fixture.selection)
+        await fixture.cloud.holdNextDownload()
+        let download = Task { await model.downloadApplicationUpdate() }
+        for _ in 0..<1_000 {
+            if await fixture.cloud.downloadIsHeld() { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let held = await fixture.cloud.downloadIsHeld()
+        XCTAssertTrue(held)
+        model.dismissApplicationUpdate()
+        await fixture.cloud.releaseDownload()
+        await download.value
+
+        XCTAssertNil(model.applicationUpdateSelection)
+        XCTAssertNil(model.applicationUpdatePlan)
+        XCTAssertNil(model.applicationUpdateNotice)
+        XCTAssertFalse(model.isPerformingApplicationUpdateAction)
+        XCTAssertFalse(model.hasFileActionSheet)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), Data("previous resource".utf8))
+    }
+
+    func testFailedDownloadCanRetryWithoutApplyingTheApplication() async throws {
+        let fixture = try await makeApplicationFixture(update: Data(repeating: 0x73, count: 5_000_001))
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await model.beginApplicationUpdate(fixture.selection)
+        await fixture.cloud.failDownloads(true)
+        await model.downloadApplicationUpdate()
+        XCTAssertEqual(model.applicationUpdateNotice, .downloadPending)
+        XCTAssertEqual(model.applicationUpdatePlan?.state, .requiresDownload)
+        await fixture.cloud.failDownloads(false)
+
+        await model.downloadApplicationUpdate()
+
+        XCTAssertEqual(model.applicationUpdatePlan?.state, .ready)
+        XCTAssertNil(model.applicationUpdateNotice)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), Data("previous resource".utf8))
+    }
+
+    func testChangedLocationRevisionRefreshesWithoutApplyingAnOldToken() async throws {
+        let fixture = try await makeApplicationFixture()
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await model.beginApplicationUpdate(fixture.selection)
+        let displayed = try XCTUnwrap(model.applicationUpdatePlan)
+        try await fixture.receiver.setFileLocationPaused(fixture.selection, paused: true)
+
+        await model.applyApplicationUpdate()
+
+        XCTAssertEqual(model.applicationUpdateNotice, .changed)
+        XCTAssertNotEqual(model.applicationUpdatePlan?.id, displayed.id)
+        XCTAssertEqual(model.applicationUpdatePlan?.state, .unavailable)
+        XCTAssertNotEqual(model.applicationUpdatePlan?.locationRevision, displayed.locationRevision)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), Data("previous resource".utf8))
+    }
+
+    func testNestedApplicationUsesTheParentLocationUpdatePlan() async throws {
+        let fixture = try await makeApplicationFixture(nested: true)
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await model.beginApplicationUpdate(fixture.selection)
+        XCTAssertEqual(model.applicationUpdatePlan?.displayName, "Collection")
+        XCTAssertEqual(model.applicationUpdatePlan?.state, .ready)
+
+        await model.applyApplicationUpdate()
+
+        XCTAssertEqual(model.applicationUpdateNotice, .applied)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), fixture.update)
+    }
+
+    func testUnprovenReplacementExplainsReassociationAndCannotApply() async throws {
+        let fixture = try await makeApplicationFixture()
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.selection.entryID)
+        let location = try XCTUnwrap(locations.first)
+        let moved = location.url.appendingPathExtension("moved")
+        try FileManager.default.moveItem(at: location.url, to: moved)
+        try FileManager.default.copyItem(at: moved, to: location.url)
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+
+        await model.beginApplicationUpdate(fixture.selection)
+        let plan = try XCTUnwrap(model.applicationUpdatePlan)
+        XCTAssertEqual(plan.state, .identityUncertain)
+        XCTAssertEqual(plan.state.applicationUpdateMessageKey, .clipboardApplicationUpdateIdentityUncertain)
+        await model.applyApplicationUpdate()
+
+        XCTAssertNil(model.applicationUpdateNotice)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), Data("previous resource".utf8))
+    }
+
     private func makeApplicationFixture(update: Data = Data("updated resource".utf8), nested: Bool = false) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         selection: ClipboardHistoryFileLocationSelection, workingResource: URL,
