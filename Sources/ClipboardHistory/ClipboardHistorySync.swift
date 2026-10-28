@@ -186,6 +186,8 @@ extension ClipboardHistoryModule {
                 // A body is discovered without downloading it. Its encrypted
                 // entry descriptor authorizes a separate version download.
                 if record.kind == .fileBody { continue }
+                try await waitForWriteTurn()
+                try admitSync(generation)
                 try rememberDiscoveredSyncRecord(record, account: account)
                 guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
                 let chunks: [Data]

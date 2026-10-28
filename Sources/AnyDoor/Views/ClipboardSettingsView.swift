@@ -292,10 +292,6 @@ struct ClipboardSettingsView: View {
                         confirmation.preview.affectedCount
                     )
                 )
-                if confirmation.preview.sharedAffectedCount > 0 {
-                    Text(L(.settingsClipboardClearShared, confirmation.preview.sharedAffectedCount))
-                        .foregroundStyle(.secondary)
-                }
             }
             HStack {
                 Spacer()
