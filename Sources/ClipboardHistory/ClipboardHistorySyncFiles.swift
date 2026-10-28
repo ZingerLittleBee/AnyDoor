@@ -314,6 +314,7 @@ extension ClipboardHistoryModule {
                 }
         }
         for descriptor in descriptors {
+            try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }

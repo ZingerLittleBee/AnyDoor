@@ -50,6 +50,7 @@ extension ClipboardHistoryModule {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+            try validateSyncFileDescriptor(descriptor, epoch: context.control.epoch, keyID: context.control.keyID)
             guard descriptor.state == .available else { throw ClipboardHistoryModuleError.operationUnavailable }
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_file_downloads(account_id, epoch, object_id, version_id, authorized)
