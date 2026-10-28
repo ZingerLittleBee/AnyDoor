@@ -82,7 +82,7 @@ extension ClipboardHistoryModule {
                 guard let body = file.descriptor.body,
                       try syncFileRead({ try Self.syncFileRestorationHasMember(file.descriptor, row: row, in: $0) }) else { continue }
                 var recovered = file
-                if file.descriptor.bodyFormat == .segmentsV1 {
+                if file.descriptor.bodyFormat != nil {
                     let uploaded = try syncFileRead { try String.fetchOne($0,
                         sql: "SELECT directory FROM clipboard_sync_file_uploads WHERE record_id = ?", arguments: [body.recordID]) }
                     let downloaded = storeRoot.appendingPathComponent("SyncTransfers/Downloads/\(account.identifier)/\(control.epoch.uuidString)/\(file.descriptor.versionID.uuidString)")
@@ -105,7 +105,10 @@ extension ClipboardHistoryModule {
                     }
                 }
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-                guard recovered.directory != nil || recovered.inline != nil else { continue }
+                guard recovered.directory != nil || recovered.inline != nil else {
+                    try await replaceUnrecoverableSyncFile(file, row: row, account: account, control: control, generation: generation)
+                    continue
+                }
                 let prepared = recovered
                 try syncWrite { database in
                     guard let active = try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
@@ -120,6 +123,30 @@ extension ClipboardHistoryModule {
                 }
             }
         }
+    }
+
+    /// Missing random ciphertext cannot be regenerated under its old identity.
+    /// A readable current working copy can instead publish a child on its real
+    /// base. The ordinary atomic version/outbox transaction makes retry safe:
+    /// once stored, that child is current and this condition no longer matches.
+    private func replaceUnrecoverableSyncFile(_ file: ClipboardSyncFileRestoration, row: Row,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+        guard try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID,
+              let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier,
+                epoch: control.epoch, in: $0).first { $0.objectID == file.descriptor.objectID
+                    && $0.baseVersionID == file.descriptor.versionID && !$0.hasPendingApplication } }) else { return }
+        let inspection = Task.detached(priority: .utility) {
+            try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
+        }
+        guard await inspection.value != nil else { return }
+        try admitSync(generation)
+        guard try syncFileRead({ database in
+            try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
+                .contains { ($0["shared_id"] as String) == (row["shared_id"] as String)
+                    && ($0["activation_id"] as String) == (row["activation_id"] as String) }
+        }), try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID else { return }
+        _ = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
+            parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
     }
 
     func nextSyncFileRestoration(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {
@@ -211,7 +238,7 @@ extension ClipboardHistoryModule {
             plain.update(data: data); encrypted.update(data: bytes)
             count += Int64(data.count); cipherCount += Int64(bytes.count)
         }
-        guard count == descriptor.originalByteCount, Data(plain.finalize()) == descriptor.contentDigest,
+        guard count == descriptor.streamByteCount, Data(plain.finalize()) == descriptor.contentDigest,
               cipherCount == body.encryptedByteCount, Data(encrypted.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
     }
 }
