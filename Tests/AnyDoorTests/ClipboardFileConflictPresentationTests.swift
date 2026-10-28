@@ -207,6 +207,7 @@ actor FileConflictUICloud: ClipboardSyncTransport {
     private var downloadsFail = false
     func failDownloads(_ fail: Bool) { downloadsFail = fail }
     func downloadCount() -> Int { downloads }
+    func uploadCount() -> Int { uploads.count }
     func failCommits(_ fail: Bool) { commitsFail = fail }
     func holdNextDownload() { shouldHoldDownload = true }
     func downloadIsHeld() -> Bool { heldDownload != nil }
