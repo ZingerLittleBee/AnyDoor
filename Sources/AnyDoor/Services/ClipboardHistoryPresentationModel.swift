@@ -322,6 +322,8 @@ enum ClipboardHistoryActionFailure: Equatable {
         case .invalidTextEdit:
             self = .invalidTextEdit
         case .resetFailed,
+             .invalidFileAssociation,
+             .fileLocationAlreadyAssociated,
              .invalidFileExport,
              .invalidConfirmation,
              .unsupportedLegacyTransferVersion,

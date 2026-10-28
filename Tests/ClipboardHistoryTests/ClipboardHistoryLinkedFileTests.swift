@@ -7,6 +7,35 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testExplicitAssociationPreservesChosenContentsAndIndependentExportsStayUnlinked() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        let destination = fixture.root.appendingPathComponent("Independent saved copy.txt")
+        _ = try await fixture.receiver.exportFiles(fixture.entryID, to: [destination])
+        let afterExport = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(afterExport, initial)
+        let chosenBytes = Data("keep the chosen file contents".utf8)
+        try chosenBytes.write(to: destination)
+        try await fixture.receiver.setSyncEnabled(false)
+
+        let associated = try await fixture.receiver.associateFileLocation(.init(
+            entryID: fixture.entryID, objectID: working.objectID, url: destination))
+
+        XCTAssertEqual(associated.kind, .associated)
+        XCTAssertEqual(associated.state, .localChanges)
+        XCTAssertEqual(associated.baseVersionID, working.baseVersionID)
+        XCTAssertEqual(try Data(contentsOf: destination), chosenBytes)
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(locations.count, 2)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        let restored = try await reopened.linkedFileLocations(for: fixture.entryID)
+        XCTAssertTrue(restored.contains(associated))
+    }
+
+    @MainActor
     func testOriginalAndManagedWorkingLocationsKeepTheirIdentityAfterRestart() async throws {
         let fixture = try await makeLinkedFixture()
         let originals = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
