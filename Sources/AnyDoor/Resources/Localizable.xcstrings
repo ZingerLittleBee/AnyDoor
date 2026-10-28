@@ -154,6 +154,11 @@
           }
         }
       },
+    "settings.clipboard.sync.rejoinAction": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Resume Sharing"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "恢复共享"}}}},
+    "settings.clipboard.sync.withdrawalScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Turning off withdraws %lld entries on this Mac from iCloud. Downloaded local copies remain."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "关闭后将从 iCloud 撤回本机的 %lld 条历史，已下载的本地副本仍会保留。"}}}},
+    "settings.clipboard.sync.rejoinScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Selecting this tag restores %lld retained entries with their original shared identities."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "选择此标签将恢复 %lld 条保留历史的同步，并沿用原来的共享身份。"}}}},
+    "settings.clipboard.sync.sharingScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tag selection is shared across participating Macs, which may contain additional matching history. Another selected tag keeps an entry shared."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "标签选择会同步到参与的 Mac，其他设备可能还有更多匹配历史。记录仍匹配其他已选标签时会继续同步。"}}}},
+    "settings.clipboard.sync.withdrawnStatus": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld entries are withdrawn from sharing. Local copies remain; explicitly select their tag again to rejoin."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 条历史已撤回共享，本地副本仍保留。重新选择相应标签可恢复同步。"}}}},
     "clipboard.linkedFile.locations": {
       "extractionState": "manual",
       "localizations": {
@@ -15413,23 +15418,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "先在剪贴板历史中为记录添加标签，再返回这里。"
-          }
-        }
-      }
-    },
-    "settings.clipboard.sync.selectedTagHelp": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Removing the final matching Sync Tag is not available yet. Turn off Clipboard Sync on this Mac to pause its syncing."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂不支持移除最后一个匹配的同步标签。关闭本机的剪贴板同步可暂停本机同步。"
           }
         }
       }

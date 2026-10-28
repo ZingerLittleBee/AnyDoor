@@ -70,16 +70,15 @@ extension ClipboardHistoryModule {
     }
 
     func stageSyncMetadata(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        let rows = try Row.fetchAll(database, sql: """
+        let rows = try Row.fetchAll(database, SQLRequest<Row>(literal: """
             SELECT metadata.value FROM clipboard_sync_metadata AS metadata
             JOIN clipboard_sync_entries AS shared ON shared.account_id = metadata.account_id
                 AND shared.epoch = metadata.epoch AND shared.shared_id = metadata.shared_id
-            WHERE metadata.account_id = ? AND metadata.epoch = ? AND metadata.pending = 1
-              AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                  JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                  WHERE membership.entry_id = shared.local_entry_id AND selected.account_id = metadata.account_id AND selected.selected = 1)
+            JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+            WHERE metadata.account_id = \(account.identifier) AND metadata.epoch = \(control.epoch.uuidString) AND metadata.pending = 1
+              AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
             ORDER BY metadata.shared_id, metadata.field
-            """, arguments: [account.identifier, control.epoch.uuidString])
+            """))
         for row in rows {
             let value: Data = row["value"]
             let operation = try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: value)
@@ -94,9 +93,12 @@ extension ClipboardHistoryModule {
 
     func seedSyncEntryMetadata(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,
                                record: ClipboardSyncRemoteRecord, in database: Database) throws {
+        let basis = try String.fetchOne(database, sql: """
+            SELECT record_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
+            """, arguments: [account.identifier, record.epoch.uuidString, content.id.uuidString.lowercased()]) ?? record.recordID
         var values: [ClipboardSyncMetadataValue] = [.favorite(content.favorite)]
-        if let ocr = content.recognition.ocr { values.append(.recognition(kind: .ocr, values: ocr, basisRecordID: record.recordID)) }
-        if let qr = content.recognition.qr { values.append(.recognition(kind: .qr, values: qr, basisRecordID: record.recordID)) }
+        if let ocr = content.recognition.ocr { values.append(.recognition(kind: .ocr, values: ocr, basisRecordID: basis)) }
+        if let qr = content.recognition.qr { values.append(.recognition(kind: .qr, values: qr, basisRecordID: basis)) }
         for value in values {
             try validateSyncMetadataValue(value)
             let initial = ClipboardSyncMetadataContent(id: content.id, revision: .initial, value: value)
@@ -144,9 +146,14 @@ extension ClipboardHistoryModule {
     }
 
     func importSyncMetadata(_ operation: ClipboardSyncMetadataContent, account: ClipboardSyncAccount,
-                            record: ClipboardSyncRemoteRecord, in database: Database) throws {
-        guard operation.revision.counter > 0, operation.revision.counter < Int64.max - 1,
-              UUID(uuidString: operation.revision.operationID) == record.operationID else { throw ClipboardSyncServiceError.corruptData }
+                            record: ClipboardSyncRemoteRecord, fromCheckpoint: Bool = false, in database: Database) throws {
+        let revision = operation.revision
+        let validRevision = revision.counter > 0 && revision.counter < Int64.max - 1
+            && UUID(uuidString: revision.operationID) != nil
+        guard fromCheckpoint ? (revision == .initial || validRevision)
+                : (validRevision && UUID(uuidString: revision.operationID) == record.operationID) else {
+            throw ClipboardSyncServiceError.corruptData
+        }
         try validateSyncMetadataValue(operation.value)
         try database.execute(sql: "UPDATE clipboard_sync_metadata_clock SET counter = MAX(counter, ?) WHERE id = 1",
             arguments: [operation.revision.counter])

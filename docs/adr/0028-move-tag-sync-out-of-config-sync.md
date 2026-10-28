@@ -10,7 +10,9 @@ Config Sync tag channel; unselected tags remain local. This decision was
 accepted in the [design interview](../prds/2026-10-28-clipboard-icloud-sync.md)
 and the automatic Config Sync tag channel is now retired. Native Clipboard Sync
 now handles shared selection, names, and selected memberships through encrypted
-operations; the remaining content and withdrawal workflows are in progress.
+operations. Losing the final selected tag withdraws cloud content while retaining
+local copies; explicit selection or reassignment rejoins the original identity.
+Further tracked-file lifecycle workflows remain in progress.
 
 Keeping both channels was rejected: Config Sync previously serialized the
 complete tag list as a plaintext setting, which would bypass the selected-tag

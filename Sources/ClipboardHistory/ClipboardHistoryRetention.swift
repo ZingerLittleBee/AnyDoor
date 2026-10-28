@@ -325,6 +325,7 @@ extension ClipboardHistoryModule {
                         arguments: [timestamp, entryID]
                     )
                 }
+                try recordSyncWithdrawals(in: database)
                 if definitionExists || removedMembershipCount > 0 {
                     try Self.bumpHistoryRevision(in: database)
                     try Self.bumpSearchIndexGeneration(in: database)
@@ -525,6 +526,7 @@ extension ClipboardHistoryModule {
                         arguments: [timestamp, entryID]
                     )
                 }
+                try recordSyncWithdrawals(in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 return TagDefinitionUpdateMutationResult(
@@ -892,6 +894,14 @@ extension ClipboardHistoryModule {
                             """,
                         arguments: [storedID, tagID]
                     )
+                }
+                try recordSyncWithdrawals(in: database)
+                if let accountID = try syncSettings(in: database).accountID {
+                    let selected = Set(try selectedSyncTags(accountID: accountID, in: database).map(\.id))
+                    for tagID in tagIDs.subtracting(currentTagIDs).intersection(selected) {
+                        try authorizeSyncRejoin(tagID: tagID, revision: nextSyncTagRevision(in: database),
+                            localEntryID: storedID, in: database)
+                    }
                 }
                 let isProtected = try recomputeProtection(
                     for: storedID,

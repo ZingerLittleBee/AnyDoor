@@ -27,7 +27,8 @@ extension ClipboardHistoryModule {
                     arguments: [accountID]) ?? 0
                 return ClipboardHistorySyncStatus(isEnabled: true,
                     phase: phase,
-                    uploadedEntryCount: uploaded, receivedEntryCount: received, lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
+                    uploadedEntryCount: uploaded, receivedEntryCount: received,
+                    withdrawnEntryCount: try syncWithdrawnCount(accountID: accountID, in: database), lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
             }
         } catch {
             return ClipboardHistorySyncStatus(isEnabled: true, phase: .failed(.localStorage))
@@ -68,11 +69,6 @@ extension ClipboardHistoryModule {
             guard try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_tag_definitions WHERE id = ?)",
                                     arguments: [tagID]) == true else { throw ClipboardHistoryModuleError.tagDefinitionNotFound }
             let accountID = try syncSettings(in: database).accountID ?? ""
-            // Final-tag withdrawal has its own lifecycle. Additional selected
-            // collections already share the same any-tag eligibility query.
-            guard try selected || canDeselectSyncTag(tagID, accountID: accountID, in: database) else {
-                throw ClipboardHistoryModuleError.operationUnavailable
-            }
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, locally_authorized) VALUES (?, ?, ?, 1)
                 ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = excluded.selected, locally_authorized = 1
@@ -87,6 +83,10 @@ extension ClipboardHistoryModule {
                       AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
                     """, arguments: [accountID, tagID])
             }
+            if selected, let activation = try recordExplicitSyncTagActivation(tagID, in: database) {
+                try authorizeSyncRejoin(tagID: tagID, revision: activation, in: database)
+            }
+            try recordSyncWithdrawals(in: database)
             try Self.bumpHistoryRevision(in: database)
         }
         publishSyncStatus()
@@ -342,88 +342,99 @@ extension ClipboardHistoryModule {
             try refreshLinkedFileObservers(account: account, control: control, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
-            try stageSyncBackfill(account: account, control: control, key: key)
             var conflicts = 0
-            while let upload = try nextSyncUpload(account: account, control: control) {
-                do {
-                    try await admitSync(generation, account: account, services: services)
-                    guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
-                        arguments: [upload.record.recordID]) ?? false }) else { continue }
-                    let committed: ClipboardSyncControl
-                    switch upload {
-                    case .inline(let value):
-                        committed = try await services.transport.commit(value, for: account, control: control)
-                    case .file(let value):
-                        committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
-                            try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
-                        }
-                    }
-                    try await admitSync(generation, account: account, services: services)
-                    guard committed.epoch == control.epoch, committed.keyID == control.keyID else {
-                        throw ClipboardSyncServiceError.missingRemoteState
-                    }
-                    control = committed
-                    state.control = committed
-                    _ = try await writableDatabase()
-                    try admitSync(generation)
-                    try syncWrite { database in
-                        try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
-                            arguments: [upload.record.recordID])
-                        try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
-                        try saveSyncAccount(state, in: database)
-                        if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
-                    }
-                    if upload.record.kind == .fileBody { publishMutation() }
-                    conflicts = 0
-                } catch ClipboardSyncServiceError.conflict {
-                    conflicts += 1
-                    guard conflicts < 4 else { throw ClipboardSyncServiceError.network(retryAfter: nil) }
-                    guard let refreshed = try await services.transport.control(for: account),
-                          refreshed.epoch == control.epoch, refreshed.keyID == control.keyID, refreshed.phase == "active" else {
-                        throw ClipboardSyncServiceError.missingRemoteState
-                    }
-                    try await admitSync(generation, account: account, services: services)
-                    control = refreshed
-                    state.control = refreshed
-                    // A new control token may authorize a deletion or withdrawal.
-                    // Import that authority before deciding whether the old outbox still exists.
-                    state = try await receiveSyncChanges(account: account, control: control, key: key,
-                        state: state, services: services, generation: generation)
-                } catch {
-                    try recordSyncFileUploadFailure(error, record: upload.record, generation: generation)
-                    throw error
+            var stagedRevision: Int64?
+            while true {
+                // Drain mutations made while a provider request was suspended,
+                // including rejoining during cleanup. An unchanged history does
+                // not need another full backfill scan for every uploaded record.
+                let revision = try syncWrite { try Self.historyRevision(in: $0) }
+                if stagedRevision != revision {
+                    try stageSyncBackfill(account: account, control: control, key: key)
+                    stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
                 }
-            }
-            while let retired = try nextDeletedSyncContent(account: account, control: control) {
-                do {
-                    try await admitSync(generation, account: account, services: services)
-                    let cleaned = try await services.transport.purge(retired, for: account, control: control)
-                    try await admitSync(generation, account: account, services: services)
-                    guard cleaned.epoch == control.epoch, cleaned.keyID == control.keyID, cleaned.phase == "active" else {
-                        throw ClipboardSyncServiceError.missingRemoteState
+                if let upload = try nextSyncUpload(account: account, control: control) {
+                    do {
+                        try await admitSync(generation, account: account, services: services)
+                        guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
+                            arguments: [upload.record.recordID]) ?? false }) else { continue }
+                        let committed: ClipboardSyncControl
+                        switch upload {
+                        case .inline(let value):
+                            committed = try await services.transport.commit(value, for: account, control: control)
+                        case .file(let value):
+                            committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
+                                try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                            }
+                        }
+                        try await admitSync(generation, account: account, services: services)
+                        guard committed.epoch == control.epoch, committed.keyID == control.keyID else {
+                            throw ClipboardSyncServiceError.missingRemoteState
+                        }
+                        control = committed
+                        state.control = committed
+                        _ = try await writableDatabase()
+                        try admitSync(generation)
+                        try syncWrite { database in
+                            try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
+                                arguments: [upload.record.recordID])
+                            try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                            try saveSyncAccount(state, in: database)
+                            if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
+                        }
+                        if upload.record.kind == .fileBody { publishMutation() }
+                        conflicts = 0
+                    } catch ClipboardSyncServiceError.conflict {
+                        conflicts += 1
+                        guard conflicts < 4 else { throw ClipboardSyncServiceError.network(retryAfter: nil) }
+                        guard let refreshed = try await services.transport.control(for: account),
+                              refreshed.epoch == control.epoch, refreshed.keyID == control.keyID, refreshed.phase == "active" else {
+                            throw ClipboardSyncServiceError.missingRemoteState
+                        }
+                        try await admitSync(generation, account: account, services: services)
+                        control = refreshed
+                        state.control = refreshed
+                        // A new control token may authorize a deletion or withdrawal.
+                        // Import that authority before deciding whether the old outbox still exists.
+                        state = try await receiveSyncChanges(account: account, control: control, key: key,
+                            state: state, services: services, generation: generation)
+                    } catch {
+                        try recordSyncFileUploadFailure(error, record: upload.record, generation: generation)
+                        throw error
                     }
-                    control = cleaned
-                    state.control = cleaned
-                    _ = try await writableDatabase()
-                    try admitSync(generation)
-                    try syncWrite { database in
-                        try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 1 WHERE account_id = ? AND epoch = ? AND record_id = ?",
-                            arguments: [account.identifier, control.epoch.uuidString, retired.recordID])
-                        try saveSyncAccount(state, in: database)
+                } else if let retired = try nextDeletedSyncContent(account: account, control: control) {
+                    do {
+                        try await admitSync(generation, account: account, services: services)
+                        let cleaned = try await services.transport.purge(retired, for: account, control: control)
+                        try await admitSync(generation, account: account, services: services)
+                        guard cleaned.epoch == control.epoch, cleaned.keyID == control.keyID, cleaned.phase == "active" else {
+                            throw ClipboardSyncServiceError.missingRemoteState
+                        }
+                        control = cleaned
+                        state.control = cleaned
+                        _ = try await writableDatabase()
+                        try admitSync(generation)
+                        try syncWrite { database in
+                            try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 1 WHERE account_id = ? AND epoch = ? AND record_id = ?",
+                                arguments: [account.identifier, control.epoch.uuidString, retired.recordID])
+                            try saveSyncAccount(state, in: database)
+                        }
+                        conflicts = 0
+                    } catch ClipboardSyncServiceError.conflict {
+                        conflicts += 1
+                        guard conflicts < 4 else { throw ClipboardSyncServiceError.network(retryAfter: nil) }
+                        guard let refreshed = try await services.transport.control(for: account),
+                              refreshed.epoch == control.epoch, refreshed.keyID == control.keyID, refreshed.phase == "active" else {
+                            throw ClipboardSyncServiceError.missingRemoteState
+                        }
+                        try await admitSync(generation, account: account, services: services)
+                        control = refreshed
+                        state.control = refreshed
+                        state = try await receiveSyncChanges(account: account, control: control, key: key,
+                            state: state, services: services, generation: generation)
                     }
-                    conflicts = 0
-                } catch ClipboardSyncServiceError.conflict {
-                    conflicts += 1
-                    guard conflicts < 4 else { throw ClipboardSyncServiceError.network(retryAfter: nil) }
-                    guard let refreshed = try await services.transport.control(for: account),
-                          refreshed.epoch == control.epoch, refreshed.keyID == control.keyID, refreshed.phase == "active" else {
-                        throw ClipboardSyncServiceError.missingRemoteState
-                    }
-                    try await admitSync(generation, account: account, services: services)
-                    control = refreshed
-                    state.control = refreshed
-                    state = try await receiveSyncChanges(account: account, control: control, key: key,
-                        state: state, services: services, generation: generation)
+                } else {
+                    break
                 }
             }
             state.lastCompletedAt = now()

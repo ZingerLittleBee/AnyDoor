@@ -45,6 +45,10 @@ extension ClipboardHistoryModule {
             let merge = ClipboardSyncTagMerge(firstID: preview.sourceID, secondID: preview.targetID,
                 name: preview.displayName, revision: try nextSyncTagRevision(in: database))
             try applySyncTagMerge(merge, accountID: preview.accountID, locallyConfirmed: true, in: database)
+            let canonical = try canonicalSyncTagID(preview.sourceID, accountID: preview.accountID, in: database)
+            if let activation = try recordExplicitSyncTagActivation(canonical, in: database) {
+                try authorizeSyncRejoin(tagID: canonical, revision: activation, in: database)
+            }
             try database.execute(sql: "INSERT INTO clipboard_sync_tag_merge_outbox(operation_id, account_id, content) VALUES (?, ?, ?)",
                 arguments: [merge.revision.operationID, preview.accountID, try JSONEncoder().encode(merge)])
             try Self.bumpHistoryRevision(in: database)

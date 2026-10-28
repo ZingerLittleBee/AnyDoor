@@ -203,12 +203,13 @@ extension ClipboardHistoryModule {
 extension ClipboardSyncContent {
     var entrySubjectID: String? {
         switch self {
+        case .rejoin(let value): value.state.sharedID
         case .text(let value): value.id.uuidString.lowercased()
         case .textEdit(let value): value.id.uuidString.lowercased()
         case .entry(let value): value.id.uuidString.lowercased()
         case .tagMembership(let value): value.sharedID
         case .metadata(let value): value.id.uuidString.lowercased()
-        case .deletion, .tag, .tagState, .tagMerge, .fileBody, .fileVersion: nil
+        case .deletion, .withdrawal, .tag, .tagState, .tagMerge, .fileBody, .fileVersion: nil
         }
     }
 }

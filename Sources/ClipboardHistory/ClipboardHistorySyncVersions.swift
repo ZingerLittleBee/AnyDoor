@@ -326,11 +326,16 @@ extension ClipboardHistoryModule {
     }
 
     func stageSyncTextEdits(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        let rows = try Row.fetchAll(database, sql: """
-            SELECT subject_id, version_id, content FROM clipboard_sync_versions
-            WHERE account_id = ? AND epoch = ? AND origin = 'local' AND record_id IS NULL
-            ORDER BY created_at, version_id
-            """, arguments: [account.identifier, control.epoch.uuidString])
+        let rows = try Row.fetchAll(database, SQLRequest<Row>(literal: """
+            SELECT version.subject_id, version.version_id, version.content FROM clipboard_sync_versions AS version
+            JOIN clipboard_sync_entries AS shared ON shared.account_id = version.account_id
+                AND shared.epoch = version.epoch AND shared.shared_id = version.subject_id
+            JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+            WHERE version.account_id = \(account.identifier) AND version.epoch = \(control.epoch.uuidString)
+              AND version.origin = 'local' AND version.record_id IS NULL
+              AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+            ORDER BY version.created_at, version.version_id
+            """))
         for row in rows {
             guard try !Self.isSyncDeleted(row["subject_id"], accountID: account.identifier, epoch: control.epoch.uuidString, in: database) else { continue }
             let encoded: Data = row["content"]
