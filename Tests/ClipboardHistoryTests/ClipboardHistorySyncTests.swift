@@ -7,6 +7,162 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testConcurrentMembershipRemovalsStartANewLocalRetentionWindow() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let first = makeModule(services: services, keyByte: 0x69, time: 1_000, clock: { clock.withLock { $0 } })
+        let second = makeModule(services: services, keyByte: 0x6a, time: 1_000, clock: { clock.withLock { $0 } })
+        let entry = try await first.capture(.init(source: .unknown, content: .text("old protected history")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        clock.withLock { $0 = $0.addingTimeInterval(100 * 86_400) }
+        _ = try await first.apply(.setTags(entry.entryID, [work.id]))
+        _ = try await second.apply(.setTags(entry.entryID, [other.id]))
+        await first.retrySync()
+        await second.retrySync()
+        await first.retrySync()
+        let firstPage = try await first.page(.init()).entries
+        let secondPage = try await second.page(.init()).entries
+        XCTAssertEqual(firstPage.map(\.id), [entry.entryID])
+        XCTAssertEqual(secondPage.map(\.id), [entry.entryID])
+        XCTAssertEqual(secondPage.first?.capturedAt, Date(timeIntervalSince1970: 1_000))
+    }
+
+    func testRemoteMergeCannotAuthorizeHistoryFromAnotherAccount() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x66, time: 1_000)
+        let secret = try await first.capture(.init(source: .unknown, content: .text("previous account history")))
+        let oldTag = ClipboardHistoryTagDefinition(id: "z-old-account", displayName: "Work")
+        let currentTag = ClipboardHistoryTagDefinition(id: "a-current-account", displayName: "Work")
+        _ = try await first.replaceTagDefinitions(with: [oldTag])
+        _ = try await first.apply(.setTags(secret.entryID, [oldTag.id]))
+        try await first.setSyncTagSelected(oldTag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        await cloud.switchAccount(to: "account-B")
+        await first.retrySync()
+        let peer = makeModule(services: services, keyByte: 0x68, time: 2_000)
+        _ = try await peer.replaceTagDefinitions(with: [oldTag, currentTag])
+        try await peer.setSyncTagSelected(currentTag.id, selected: true)
+        try await peer.setSyncEnabled(true)
+        try await first.setSyncEnabled(true)
+        try await first.setSyncTagSelected(currentTag.id, selected: true)
+        let preview = try await peer.prepareSyncTagMerge(sourceID: oldTag.id, targetID: currentTag.id)
+        try await peer.mergeSyncTags(preview)
+        await first.retrySync()
+        let afterRemoteMerge = await cloud.currentUploads()
+        XCTAssertEqual(afterRemoteMerge.filter { $0.record.kind == .entry }.count, 0)
+        let choicesAfterRemoteMerge = try await first.syncTags()
+        XCTAssertTrue(try XCTUnwrap(choicesAfterRemoteMerge.first { $0.id == currentTag.id }).requiresLocalAuthorization)
+        let local = try await first.page(.init()).entries
+        XCTAssertEqual(local.map(\.id), [secret.entryID])
+        try await first.setSyncTagSelected(currentTag.id, selected: true)
+        let afterExplicitConsent = await cloud.currentUploads()
+        XCTAssertEqual(afterExplicitConsent.filter { $0.record.kind == .entry }.count, 1)
+        let choicesAfterConsent = try await first.syncTags()
+        XCTAssertFalse(try XCTUnwrap(choicesAfterConsent.first { $0.id == currentTag.id }).requiresLocalAuthorization)
+    }
+
+    func testOverlappingTagCanBeDeselectedAcrossDevicesWithoutWithdrawingEntry() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x64, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x65, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("still shared")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncTagSelected(work.id, selected: false)
+        await second.retrySync()
+        let tags = try await second.syncTags()
+        XCTAssertEqual(Set(tags.filter(\.isSelected).map(\.id)), [other.id])
+        let entries = try await second.page(.init()).entries
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.tagIDs, [work.id, other.id])
+        try await first.setSyncTagSelected(work.id, selected: true)
+        await second.retrySync()
+        let reselected = try await second.syncTags()
+        XCTAssertEqual(Set(reselected.filter(\.isSelected).map(\.id)), [work.id, other.id])
+    }
+
+    func testExplicitMergeDisclosesEnrollmentAndSurvivesOldSnapshotReplay() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x61, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x62, time: 2_000)
+        let source = try await first.capture(.init(source: .unknown, content: .text("shared before merge")))
+        let local = try await second.capture(.init(source: .unknown, content: .text("enrolled by explicit merge")))
+        let sharedTag = try await first.createTagDefinition(named: "Work", assigningTo: source.entryID).definition
+        let localTag = try await second.createTagDefinition(named: "Work", assigningTo: local.entryID).definition
+        try await first.setSyncTagSelected(sharedTag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let preview = try await second.prepareSyncTagMerge(sourceID: localTag.id, targetID: sharedTag.id)
+        XCTAssertEqual(preview.newlyEligibleEntryCount, 1)
+        let beforeConfirmation = try await first.page(.init()).entries
+        XCTAssertEqual(beforeConfirmation.count, 1)
+        _ = try await second.capture(.init(source: .unknown, content: .text("changes invalidate consent preview")))
+        do {
+            try await second.mergeSyncTags(preview)
+            XCTFail("Changed history must require a fresh enrollment preview")
+        } catch {
+            XCTAssertEqual(error as? ClipboardHistoryModuleError, .invalidConfirmation)
+        }
+        let current = try await second.prepareSyncTagMerge(sourceID: localTag.id, targetID: sharedTag.id)
+        try await second.mergeSyncTags(current)
+        await first.retrySync()
+        let merged = try await first.page(.init()).entries
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertTrue(merged.allSatisfy { $0.tagIDs == [current.canonicalTagID] })
+        await cloud.reverseDelivery()
+        let third = makeModule(services: services, keyByte: 0x63, time: 3_000)
+        try await third.setSyncEnabled(true)
+        let replayedTags = try await third.syncTags()
+        let replayed = try await third.page(.init()).entries
+        XCTAssertEqual(replayedTags.map(\.id), [current.canonicalTagID])
+        XCTAssertEqual(replayed.count, 2)
+        XCTAssertTrue(replayed.allSatisfy { $0.tagIDs == [current.canonicalTagID] })
+    }
+
+    func testSameNameTagsStayIndependentAndNameOnlyAssignmentIsRejected() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x78, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x79, time: 2_000)
+        let firstEntry = try await first.capture(.init(source: .unknown, content: .text("first collection")))
+        let secondEntry = try await second.capture(.init(source: .unknown, content: .text("unselected local collection")))
+        let firstTag = try await first.createTagDefinition(named: "Work", assigningTo: firstEntry.entryID).definition
+        let secondTag = try await second.createTagDefinition(named: "Work", assigningTo: secondEntry.entryID).definition
+        XCTAssertNotEqual(firstTag.id, secondTag.id)
+        try await first.setSyncTagSelected(firstTag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let tags = try await second.syncTags()
+        XCTAssertEqual(Set(tags.map(\.id)), [firstTag.id, secondTag.id])
+        XCTAssertFalse(try XCTUnwrap(tags.first { $0.id == secondTag.id }).isSelected)
+        let unselected = try await first.page(.init()).entries
+        XCTAssertEqual(unselected.count, 1)
+        let fresh = try await second.capture(.init(source: .unknown, content: .text("explicit identity required")))
+        do {
+            _ = try await second.createTagDefinition(named: "Work", assigningTo: fresh.entryID)
+            XCTFail("A name collision must require an identity choice")
+        } catch {
+            XCTAssertEqual(error as? ClipboardHistoryModuleError, .duplicateTagName)
+        }
+        let freshEntry = try await second.page(.init()).entries.first { $0.id == fresh.entryID }
+        XCTAssertEqual(freshEntry?.tagIDs, [])
+        try await second.setSyncTagSelected(secondTag.id, selected: true)
+        await first.retrySync()
+        let independentlySelected = try await first.page(.init()).entries
+        XCTAssertEqual(independentlySelected.count, 2)
+        XCTAssertEqual(independentlySelected.first { $0.id == secondEntry.entryID }?.tagIDs, [secondTag.id])
+    }
+
     func testIndependentTagRenamesConvergeAcrossReversedDeliveryAndRestart() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)

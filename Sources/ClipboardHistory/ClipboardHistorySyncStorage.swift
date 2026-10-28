@@ -88,6 +88,7 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
         let pool = try requiredDatabase()
         try pool.write { database in
+            try stageSyncTagMerges(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
@@ -98,6 +99,8 @@ extension ClipboardHistoryModule {
                 FROM clipboard_entries AS entry
                 JOIN clipboard_representations AS representation ON representation.entry_id = entry.id
                 WHERE \(Self.syncPlainTextEligibility)
+                  AND NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
+                                  WHERE blocked.account_id = ? AND blocked.local_entry_id = entry.id)
                   AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
                               JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
                               WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1
@@ -107,7 +110,7 @@ extension ClipboardHistoryModule {
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
                                   WHERE shared.account_id = ? AND shared.epoch = ? AND shared.local_entry_id = entry.id)
                 ORDER BY entry.id
-                """, arguments: [account.identifier, account.identifier, control.epoch.uuidString])
+                """, arguments: [account.identifier, account.identifier, account.identifier, control.epoch.uuidString])
             while let row = try rows.next() {
                 let localID: String = row["id"]
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
@@ -186,6 +189,9 @@ extension ClipboardHistoryModule {
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
                 try importSyncTagState(state, account: account, record: record, in: database)
+            case .tagMerge(let merge):
+                try applySyncTagMerge(merge, accountID: account.identifier, locallyConfirmed: false, in: database)
+                try applyAllSyncMemberships(account: account, epoch: record.epoch, in: database)
             }
             try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])
@@ -203,6 +209,7 @@ extension ClipboardHistoryModule {
             throw ClipboardSyncServiceError.corruptData
         }
         // An initial snapshot cannot undo a later rename or selection change.
+        guard try canonicalSyncTagID(tag.id, accountID: account.identifier, in: database) == tag.id else { return }
         if try syncTagState(id: tag.id, accountID: account.identifier, in: database) != nil { return }
         // Names never establish identity. Do not replace the whole local tag list.
         try database.execute(sql: """
@@ -247,9 +254,6 @@ extension ClipboardHistoryModule {
             VALUES (?, 0, 0, 'text', 'public.utf8-plain-text', ?)
             """, arguments: [localID, text.text])
         try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'text')", arguments: [localID])
-        for tag in text.tags {
-            try database.execute(sql: "INSERT INTO clipboard_entry_tags(entry_id, tag_id) VALUES (?, ?)", arguments: [localID, tag.id])
-        }
         try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, ?, 1)",
             arguments: [localID, text.capturedAt.timeIntervalSince1970])
         try Self.insertSearchField(value: text.text, kind: "exactText", index: 0,

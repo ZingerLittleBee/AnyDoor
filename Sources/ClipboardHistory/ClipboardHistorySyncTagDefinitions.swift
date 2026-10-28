@@ -17,6 +17,7 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID])
         for row in rows {
             let id: String = row["tag_id"]
+            guard try canonicalSyncTagID(id, accountID: accountID, in: database) == id else { continue }
             let name: String? = row["display_name"]
             let selected = (row["selected"] as Bool) && name != nil
             let previous = try syncTagState(id: id, accountID: accountID, in: database)
@@ -49,6 +50,7 @@ extension ClipboardHistoryModule {
         guard !state.id.isEmpty, !state.selected || !(state.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
               state.selected || state.name == nil else { throw ClipboardSyncServiceError.corruptData }
         try observeSyncTagRevision(state.revision, in: database)
+        guard try canonicalSyncTagID(state.id, accountID: account.identifier, in: database) == state.id else { return }
         if let previous = try syncTagState(id: state.id, accountID: account.identifier, in: database),
            previous.revision >= state.revision { return }
         try saveSyncTagState(state, accountID: account.identifier, pending: false, in: database)
