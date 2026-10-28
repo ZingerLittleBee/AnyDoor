@@ -173,6 +173,21 @@ extension ClipboardHistoryModule {
     }
 
     static func registerSyncTextRoot(
+        _ entry: ClipboardSyncEntryContent, record: ClipboardSyncRemoteRecord,
+        account: ClipboardSyncAccount, in database: Database
+    ) throws {
+        guard entry.items.count == 1,
+              let text = entry.items[0].representations.compactMap({ representation -> String? in
+                  if case .text("public.utf8-plain-text", let value) = representation { return value }
+                  return nil
+              }).first else { return }
+        try registerSyncTextRoot(ClipboardSyncTextContent(id: entry.id, text: text,
+            capturedAt: entry.capturedAt, sourceBundleID: entry.sourceBundleID,
+            sourceDisplayName: entry.sourceDisplayName, sourceProvenance: entry.sourceProvenance,
+            favorite: entry.favorite, tags: entry.tags), record: record, account: account, in: database)
+    }
+
+    static func registerSyncTextRoot(
         _ text: ClipboardSyncTextContent, record: ClipboardSyncRemoteRecord,
         account: ClipboardSyncAccount, in database: Database
     ) throws {

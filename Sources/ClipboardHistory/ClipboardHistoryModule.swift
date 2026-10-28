@@ -61,6 +61,8 @@ public actor ClipboardHistoryModule {
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
+    /// Ordinary editable files are deliberately separate from encrypted storage.
+    let syncWorkingRoot: URL
     /// Moves a store out of the pre-v2 folder before every open. Nil only
     /// for test modules that do not model the legacy folder.
     let relocation: ClipboardHistoryStoreRelocation?
@@ -154,6 +156,8 @@ public actor ClipboardHistoryModule {
             maintenanceDate: Date()
         )
         storeRoot = root
+        syncWorkingRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/AnyDoor/Clipboard", isDirectory: true)
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
@@ -206,6 +210,8 @@ public actor ClipboardHistoryModule {
             suppression: suppression
         )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
+        syncWorkingRoot = testingDatabaseURL.deletingLastPathComponent()
+            .appendingPathComponent("Linked Working Copies", isDirectory: true)
         relocation = nil
         keyStore = nil
         self.faultInjector = faultInjector
@@ -267,7 +273,8 @@ public actor ClipboardHistoryModule {
         notificationCenter: NotificationCenter = .default,
         captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil,
         appBuild: String = unversionedAppBuild,
-        syncServices: ClipboardSyncServices? = nil
+        syncServices: ClipboardSyncServices? = nil,
+        testingSyncWorkingRoot: URL? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -291,6 +298,8 @@ public actor ClipboardHistoryModule {
             maintenanceDate: now()
         )
         storeRoot = testingStoreRoot
+        syncWorkingRoot = testingSyncWorkingRoot
+            ?? testingStoreRoot.appendingPathComponent("Linked Working Copies", isDirectory: true)
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector

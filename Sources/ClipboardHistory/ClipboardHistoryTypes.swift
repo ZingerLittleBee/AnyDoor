@@ -23,6 +23,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let tagIDs: Set<String>
     public let source: ClipboardHistoryCaptureSource
     public let hasTextConflict: Bool
+    public let syncFiles: [ClipboardHistorySyncFileSummary]
 
     public init(
         id: ClipboardHistoryEntryID,
@@ -32,7 +33,8 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         isFavorite: Bool,
         tagIDs: Set<String> = [],
         source: ClipboardHistoryCaptureSource,
-        hasTextConflict: Bool = false
+        hasTextConflict: Bool = false,
+        syncFiles: [ClipboardHistorySyncFileSummary] = []
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -42,6 +44,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         self.tagIDs = tagIDs
         self.source = source
         self.hasTextConflict = hasTextConflict
+        self.syncFiles = syncFiles
     }
 }
 
@@ -560,6 +563,7 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case payloadAuthenticationFailed(ClipboardHistoryEntryID)
     case payloadUnavailable(ClipboardHistoryEntryID)
     case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
+    case syncFilesPending(ClipboardHistoryEntryID, count: Int)
     case fileCollectionRequiresRestore(
         ClipboardHistoryEntryID,
         ownedCount: Int,

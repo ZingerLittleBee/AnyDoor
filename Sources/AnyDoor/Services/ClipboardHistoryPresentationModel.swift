@@ -256,6 +256,7 @@ enum ClipboardHistoryActionFailure: Equatable {
         entryID: ClipboardHistoryEntryID,
         count: Int
     )
+    case syncFilesPending(entryID: ClipboardHistoryEntryID, count: Int)
     case fileCollectionRequiresRestore(
         entryID: ClipboardHistoryEntryID,
         ownedCount: Int,
@@ -289,6 +290,8 @@ enum ClipboardHistoryActionFailure: Equatable {
                 entryID: entryID,
                 count: count
             )
+        case .syncFilesPending(let entryID, let count):
+            self = .syncFilesPending(entryID: entryID, count: count)
         case .fileCollectionRequiresRestore(
             let entryID,
             let ownedCount,
