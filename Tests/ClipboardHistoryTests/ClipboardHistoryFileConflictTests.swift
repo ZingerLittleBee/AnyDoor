@@ -7,6 +7,63 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testDeletedEntryCannotResumeAnInterruptedResolutionOrBlockOtherSync() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]))
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("remote competing version".utf8).write(to: fixture.original)
+        let dirty = Data("local content retained after deletion".utf8)
+        try dirty.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        do { _ = try await fixture.receiver.resolveFileConflict(plan, choosing: .localLocation(working.id)); XCTFail("Expected interruption") }
+        catch ClipboardHistoryStorageError.injected(.fileConflictAfterBranchFreeze) {}
+        _ = try await fixture.receiver.apply(.delete(fixture.entryID))
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await reopened.resumeSync()
+        let status = await reopened.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let page = try await reopened.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: working.url), dirty)
+    }
+
+    @MainActor
+    func testDownloadingAnEditedCompleteHeadKeepsNormalPasteAvailable() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(initial.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("first published branch".utf8).write(to: fixture.original)
+        try await fixture.sender.setSyncEnabled(true)
+        let afterPublish = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let head = try XCTUnwrap(afterPublish.first)
+        try await fixture.sender.setSyncEnabled(false)
+        let dirty = Data("later saved original bytes".utf8)
+        try dirty.write(to: fixture.original)
+        _ = try await commitConflictRemoteFile(bytes: Data("independent remote branch".utf8), versionID: UUID(),
+            parents: [original.baseVersionID], objectID: original.objectID,
+            root: fixture.root, services: fixture.services, cloud: fixture.cloud)
+        try await fixture.sender.setSyncEnabled(true)
+        let plan = try await fixture.sender.fileConflictPlan(entryID: fixture.entryID, objectID: original.objectID)
+        XCTAssertEqual(plan.candidates.first { $0.id == .version(head.baseVersionID) }?.availability, .requiresDownload)
+        await fixture.cloud.holdNextDownload()
+        let downloading = Task { try await fixture.sender.requestFileConflictDownload(plan, versionID: head.baseVersionID) }
+        try await eventually { await fixture.cloud.downloadIsHeld() }
+        let materialized = try? await fixture.sender.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        XCTAssertNotNil(materialized, "A conflict candidate transfer must not revoke the existing working file")
+        XCTAssertEqual(try Data(contentsOf: fixture.original), dirty)
+        await fixture.cloud.releaseDownload()
+        try await downloading.value
+        XCTAssertEqual(try Data(contentsOf: fixture.original), dirty)
+    }
+
+    @MainActor
     func testInterruptedFrozenChoiceRemainsRecoverableAfterAnotherLocalSave() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]))
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

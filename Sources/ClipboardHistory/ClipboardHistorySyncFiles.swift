@@ -337,8 +337,8 @@ extension ClipboardHistoryModule {
             try Data.fetchAll(database, sql: """
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
-                WHERE version.account_id = ? AND version.epoch = ? AND transfer_state != 'complete'
-                  AND (version.version_id = choice.current_version_id OR \(Self.pinnedFileConflictDownload))
+                WHERE version.account_id = ? AND version.epoch = ?
+                  AND ((transfer_state != 'complete' AND version.version_id = choice.current_version_id) OR \(Self.pinnedFileConflictDownload))
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
@@ -412,6 +412,10 @@ extension ClipboardHistoryModule {
                     try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
                         epoch: control.epoch, complete: true, in: database)
                 }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_conflict_pins SET download_completed = 1
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND download_requested = 1
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)

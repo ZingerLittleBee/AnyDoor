@@ -33,18 +33,14 @@ extension ClipboardHistoryModule {
                   version.descriptor.state == .available else { throw ClipboardHistoryFileConflictError.candidateUnavailable }
             try validateSyncFileDescriptor(version.descriptor, epoch: snapshot.epoch, keyID: snapshot.keyID)
             try Self.pinFileConflictVersion(versionID, planID: plan.id, snapshot: snapshot, in: database)
-            try database.execute(sql: "UPDATE clipboard_sync_file_conflict_pins SET download_requested = 1 WHERE plan_id = ? AND version_id = ?",
+            try database.execute(sql: "UPDATE clipboard_sync_file_conflict_pins SET download_requested = 1, download_completed = 0 WHERE plan_id = ? AND version_id = ?",
                 arguments: [plan.id.uuidString, versionID.uuidString])
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_file_downloads(account_id, epoch, object_id, version_id, authorized)
                 VALUES (?, ?, ?, ?, 1) ON CONFLICT(account_id, epoch, object_id, version_id) DO UPDATE SET authorized = 1, failure = NULL
                 """, arguments: [snapshot.accountID, snapshot.epoch.uuidString, snapshot.objectID.uuidString, versionID.uuidString])
-            // A previously complete URL may now be a dirty linked working file.
-            // The explicitly requested immutable version is reconstructed apart.
-            try database.execute(sql: """
-                UPDATE clipboard_sync_file_versions SET transfer_state = 'pending'
-                WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
-                """, arguments: [snapshot.accountID, snapshot.epoch.uuidString, snapshot.objectID.uuidString, versionID.uuidString])
+            // The version's existing completion and linked file stay usable.
+            // A separate candidate cursor requests reconstruction apart from it.
         }
         await retrySync()
     }
@@ -84,7 +80,8 @@ extension ClipboardHistoryModule {
     static let pinnedFileConflictDownload = """
         EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins AS pin
           WHERE pin.account_id = version.account_id AND pin.epoch = version.epoch
-            AND pin.object_id = version.object_id AND pin.version_id = version.version_id AND pin.download_requested = 1)
+            AND pin.object_id = version.object_id AND pin.version_id = version.version_id
+            AND pin.download_requested = 1 AND pin.download_completed = 0)
         """
 
     func isFileConflictDownload(_ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID) throws -> Bool {

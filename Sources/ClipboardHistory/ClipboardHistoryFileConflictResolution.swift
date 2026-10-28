@@ -237,6 +237,15 @@ extension ClipboardHistoryModule {
         for (id, journal) in pending where !activeFileConflictResolutions.contains(id) {
             do { _ = try await executeFileConflictResolution(planID: id, choice: journal.choice) }
             catch is ClipboardHistoryFileConflictError { continue }
+            catch ClipboardHistoryModuleError.operationUnavailable {
+                // Deletion or withdrawal can revoke a recorded choice while
+                // its encrypted inputs still require retention accounting.
+                // Do not revive it or fail unrelated synchronization work.
+                try syncWrite { database in
+                    try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET phase = 'needsReview' WHERE plan_id = ? AND phase = 'preparing'",
+                        arguments: [id.uuidString])
+                }
+            }
         }
     }
 

@@ -382,6 +382,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
+    private var purgedRecords: Set<String> = []
     private var commitsFail = false
     private var shouldHoldDownload = false
     private var heldDownload: CheckedContinuation<Void, Never>?
@@ -410,10 +411,10 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
-        return .init(records: uploads.dropFirst(offset).map(\.record), cursor: Data(String(uploads.count).utf8), hasMore: false)
+        return .init(records: uploads.dropFirst(offset).filter { !purgedRecords.contains($0.record.recordID) }.map(\.record), cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
-        guard let content = uploads.first(where: { $0.record == record }) else { throw ClipboardSyncServiceError.missingRemoteState }
+        guard !purgedRecords.contains(record.recordID), let content = uploads.first(where: { $0.record == record }) else { throw ClipboardSyncServiceError.recordUnavailable }
         return content.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
@@ -432,6 +433,15 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         return updated
     }
     func cancel() { cancellations += 1 }
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        guard let currentControl, account == identity, currentControl.epoch == control.epoch else { throw ClipboardSyncServiceError.accountChanged }
+        guard currentControl.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }
+        purgedRecords.insert(record.recordID)
+        let updated = advanced(currentControl)
+        self.currentControl = updated
+        return updated
+    }
     func cancellationCount() -> Int { cancellations }
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
         control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
