@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clear Notifications and other panel actions no longer stop responding after
+  the command palette opens. Loading icons for apps that macOS had not yet
+  registered, such as the tools embedded in Parallels Toolbox, could stall
+  every background task in AnyDoor until it was relaunched.
+
 ## [4.2.9] - 2026-10-27
 
 ### Added
