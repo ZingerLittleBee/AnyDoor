@@ -6,6 +6,64 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testRootAttributeSavedDuringExchangePreservesTheEditedCompleteTree() async throws {
+        let race = DirectoryRootAttributeRace()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileAfterNameExchange { race.saveAttributeToOldRoot() }
+            return false
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("deep"), withIntermediateDirectories: true)
+            try Data("old complete tree".utf8).write(to: root.appendingPathComponent("deep/member"))
+            let value = Data("first".utf8)
+            XCTAssertEqual(value.withUnsafeBytes { setxattr(root.path, "com.example.AnyDoor.root", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW) }, 0)
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        race.arm(working.url)
+        try Data("remote tree".utf8).write(to: fixture.original.appendingPathComponent("deep/member"))
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        await fixture.receiver.retrySync()
+        XCTAssertTrue(race.triggered)
+        var value = Data(count: 5)
+        XCTAssertEqual(value.withUnsafeMutableBytes { getxattr(working.url.path, "com.example.AnyDoor.root", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW) }, 5)
+        XCTAssertEqual(value, Data("other".utf8))
+        XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent("deep/member")), Data("old complete tree".utf8))
+        let final = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(final.first?.state, .conflict)
+    }
+
+    @MainActor
+    func testChangingNestedSourceRejectsTheFrozenVersionAndKeepsCompleteHistory() async throws {
+        let race = DirectoryFreezeRace()
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("deep"), withIntermediateDirectories: true)
+            try Data("complete before edit".utf8).write(to: root.appendingPathComponent("deep/member"))
+        }, senderFault: .init { point in
+            if point == .syncFileTreeBeforeFreezeVerification { race.pauseIfArmed() }
+            return false
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        await fixture.cloud.failCommits(true)
+        race.arm()
+        let freeze = Task {
+            do { try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID); return false }
+            catch { return true }
+        }
+        try await eventually { race.barrier.isWaiting }
+        let edited = Data("saved while the source was being frozen".utf8)
+        try edited.write(to: fixture.original.appendingPathComponent("deep/member"))
+        race.barrier.release()
+        let rejected = await freeze.value
+        XCTAssertTrue(rejected)
+        await fixture.receiver.retrySync()
+        XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent("deep/member")), Data("complete before edit".utf8))
+        XCTAssertEqual(try Data(contentsOf: fixture.original.appendingPathComponent("deep/member")), edited)
+    }
+
+    @MainActor
     func testCandidateDirectoryReplacementCannotRedirectMetadataOutsideTheTree() async throws {
         let race = DirectoryMetadataRace()
         let fixture = try await makeLinkedFixture(receiverFault: .init { point in
@@ -224,6 +282,34 @@ private final class DirectoryMetadataRace: @unchecked Sendable {
                     return
                 } catch { continue }
             }
+        }
+    }
+}
+
+private final class DirectoryFreezeRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = false
+    let barrier = LinkedReplacementBarrier()
+    func arm() { lock.withLock { armed = true } }
+    func pauseIfArmed() {
+        let shouldPause = lock.withLock { if armed { armed = false; return true }; return false }
+        if shouldPause { barrier.pause() }
+    }
+}
+
+private final class DirectoryRootAttributeRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var working: URL?
+    private var didTrigger = false
+    var triggered: Bool { lock.withLock { didTrigger } }
+    func arm(_ url: URL) { lock.withLock { working = url } }
+    func saveAttributeToOldRoot() {
+        lock.withLock {
+            guard !didTrigger, let working,
+                  let siblings = try? FileManager.default.contentsOfDirectory(at: working.deletingLastPathComponent(), includingPropertiesForKeys: nil),
+                  let old = siblings.first(where: { $0.lastPathComponent.hasPrefix(working.lastPathComponent + " (AnyDoor update ") }) else { return }
+            let value = Data("other".utf8)
+            didTrigger = value.withUnsafeBytes { setxattr(old.path, "com.example.AnyDoor.root", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW) } == 0
         }
     }
 }

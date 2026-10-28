@@ -20,7 +20,7 @@ extension ClipboardHistoryModule {
         let bookmark = try sourceURL.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil)
         let frozen = try await ClipboardSyncFileTransfer.freeze(url: sourceURL, bookmark: bookmark, identity: expectedSourceIdentity,
             directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
-            account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+            account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
         let descriptor = ClipboardSyncFileDescriptor(objectID: objectID, versionID: versionID,
             displayName: displayName, originalByteCount: frozen.originalByteCount,
             contentDigest: frozen.contentDigest, body: frozen.upload.record, state: .available, bodyFormat: frozen.bodyFormat, kind: frozen.kind, encodedByteCount: frozen.encodedByteCount)

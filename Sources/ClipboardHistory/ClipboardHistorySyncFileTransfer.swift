@@ -55,14 +55,14 @@ enum ClipboardSyncFileTransfer {
     @concurrent
     static func freeze(url: URL, bookmark: Data, identity: Data, directory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        objectID: UUID, versionID: UUID) async throws -> ClipboardSyncFrozenFile {
+        objectID: UUID, versionID: UUID, faults: ClipboardHistoryFaultInjector = .init()) async throws -> ClipboardSyncFrozenFile {
         var result: Result<ClipboardSyncFrozenFile, Error>?
         var coordinationError: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &coordinationError) { coordinated in
             result = Result {
                 try freezeCoordinated(url: coordinated, bookmark: bookmark, identity: identity,
                     directory: directory, account: account, control: control, key: key,
-                    objectID: objectID, versionID: versionID)
+                    objectID: objectID, versionID: versionID, faults: faults)
             }
         }
         if let coordinationError { throw coordinationError }
@@ -72,10 +72,10 @@ enum ClipboardSyncFileTransfer {
 
     private static func freezeCoordinated(url: URL, bookmark: Data, identity: Data, directory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        objectID: UUID, versionID: UUID) throws -> ClipboardSyncFrozenFile {
+        objectID: UUID, versionID: UUID, faults: ClipboardHistoryFaultInjector) throws -> ClipboardSyncFrozenFile {
         if try ClipboardFileTree.needsEncoding(url) {
             return try freezeTree(url: url, bookmark: bookmark, identity: identity, directory: directory,
-                account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+                account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faults)
         }
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }

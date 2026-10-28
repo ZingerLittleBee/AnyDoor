@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -29,7 +30,7 @@ enum ClipboardFileMetadata {
         }
         return try names.split(separator: 0).map { bytes in
             guard let name = String(bytes: bytes, encoding: .utf8), name.utf8.count <= 127 else {
-                throw ClipboardSyncServiceError.accessDenied
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
             return name
         }.filter(portable).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }.map { name in
@@ -43,6 +44,7 @@ enum ClipboardFileMetadata {
         guard attribute.size >= 0, attribute.size <= maximumAttributeBytes else { throw ClipboardSyncServiceError.corruptData }
         var value = try allocate(Int(attribute.size))
         let count = value.withUnsafeMutableBytes { fgetxattr(fd, attribute.name, $0.baseAddress, $0.count, 0, 0) }
+        guard count >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         guard count == attribute.size else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
         return value
     }
@@ -70,10 +72,36 @@ enum ClipboardFileMetadata {
     }
 
     static func forkSize(fd: Int32) throws -> Int64 {
+        var file = stat()
+        guard fstat(fd, &file) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        // Compressed backing forks are storage, not the logical resource fork.
+        if file.st_flags & UInt32(UF_COMPRESSED) != 0 { return 0 }
         guard let fork = try fork(fd: fd) else { return 0 }
         defer { close(fork) }
         var status = stat()
         guard fstat(fork, &status) == 0, status.st_size >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         return status.st_size
+    }
+
+    static func fingerprint(fd: Int32) throws -> Data {
+        var hash = SHA256()
+        func number(_ value: Int64) { var big = value.bigEndian; withUnsafeBytes(of: &big) { hash.update(bufferPointer: $0) } }
+        let values = try attributes(fd: fd)
+        number(Int64(values.count))
+        for attribute in values {
+            try Task.checkCancellation()
+            hash.update(data: Data(attribute.name.utf8)); hash.update(data: Data([0]))
+            number(attribute.size)
+            hash.update(data: try read(attribute, fd: fd))
+        }
+        var status = stat()
+        guard fstat(fd, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        let size = status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) ? try forkSize(fd: fd) : 0
+        number(size)
+        if size > 0, let fork = try fork(fd: fd) {
+            defer { close(fork) }
+            try ClipboardFileTree.read(fork, size: size) { hash.update(data: $0) }
+        }
+        return Data(hash.finalize())
     }
 }

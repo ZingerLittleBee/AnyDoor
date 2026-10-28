@@ -318,7 +318,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
 
     @MainActor
     func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init(), initialBytes: Data = Data("initial linked bytes".utf8),
-        prepareSource: ((URL) throws -> Void)? = nil) async throws -> (
+        prepareSource: ((URL) throws -> Void)? = nil, senderFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         entryID: ClipboardHistoryEntryID, original: URL, root: URL, receiverRoot: URL,
         services: ClipboardSyncServices, cloud: LinkedFileCloud
@@ -331,7 +331,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         try prepareSource?(original)
         let cloud = LinkedFileCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: LinkedFileKeys(), pollingInterval: nil)
-        let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51)
+        let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51, faultInjector: senderFault)
         let receiverRoot = root.appendingPathComponent("Receiver")
         let receiver = makeLinkedModule(root: receiverRoot, services: services, key: 0x52, faultInjector: receiverFault)
         let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.linked-files.\(UUID())"))

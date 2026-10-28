@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.clipboard.sync.failure.sourceChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The source changed while it was being read. Your previous complete version is still available. Retry after saving finishes." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "读取期间源内容发生了变化。之前的完整版本仍然可用，请在保存完成后重试。" } }
+      }
+    },
     "settings.clipboard.sync.failure.fileAccess": {
       "extractionState": "manual",
       "localizations": {

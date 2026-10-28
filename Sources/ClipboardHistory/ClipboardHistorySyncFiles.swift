@@ -185,7 +185,7 @@ extension ClipboardHistoryModule {
                let bookmark = sampled.bookmark, let identity = source.identity {
                 frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
                     directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
-                    account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+                    account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
             } else { frozen = nil }
             var stored = false
             defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }

@@ -2,6 +2,11 @@ import Darwin
 import Foundation
 
 enum ClipboardSyncFileErrors {
+    static func isSourceChanged(_ error: Error) -> Bool {
+        if case .fileOperationFailed(let code) = error as? ClipboardHistoryStorageError { return code == ESTALE }
+        return false
+    }
+
     static func isAccessDenied(_ error: Error) -> Bool {
         if case .fileOperationFailed(let code) = error as? ClipboardHistoryStorageError {
             return code == EACCES || code == EPERM

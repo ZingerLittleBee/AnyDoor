@@ -32,6 +32,11 @@ struct ClipboardLinkedFileStamp: Sendable {
               current.st_mtimespec.tv_sec == modified.tv_sec, current.st_mtimespec.tv_nsec == modified.tv_nsec else { return false }
         return !includeMetadata || (current.st_ctimespec.tv_sec == changed.tv_sec && current.st_ctimespec.tv_nsec == changed.tv_nsec)
     }
+
+    func identifies(_ url: URL) -> Bool {
+        var current = stat()
+        return lstat(url.path, &current) == 0 && current.st_dev == device && current.st_ino == inode
+    }
 }
 
 enum ClipboardLinkedFileIO {
@@ -107,31 +112,44 @@ enum ClipboardLinkedFileIO {
                 guard prepared.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
                 try Task.checkCancellation()
                 try faultInjector.check(.linkedFileBeforeReplacement)
+                // The durable journal owns both roots before this call. Long
+                // tree/attribute reads never hold the mutation gate or main DB.
+                do { try before.treeWitness?.verify(); try prepared.treeWitness?.verify() }
+                catch { return nil }
                 let exchanged = try authorize {
                     guard before.stamp.matches(destination), prepared.stamp.matches(replacement.url) else { return false }
-                    do { try before.treeWitness?.verify(); try prepared.treeWitness?.verify() }
-                    catch { return false }
                     guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-                    }
-                    // The exchange can change ctime. Saved content changes alter
-                    // the inode/size/mtime stamp and require immediate rollback.
-                    var oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
-                    do { try before.treeWitness?.verify(at: replacement.url, afterExchange: true) }
-                    catch { oldUnchanged = false }
-                    guard oldUnchanged else {
-                        // A late save to the newly installed tree must also be
-                        // preserved. Throwing leaves both journal-owned roots.
-                        guard prepared.stamp.matches(destination, includeMetadata: false) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
-                        try prepared.treeWitness?.verify(at: destination, afterExchange: true)
-                        guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
-                            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-                        }
-                        return false
                     }
                     return true
                 }
                 guard exchanged else { return nil }
+                try faultInjector.check(.linkedFileAfterNameExchange)
+                var oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
+                do { try before.treeWitness?.verify(at: replacement.url, afterExchange: true) }
+                catch { oldUnchanged = false }
+                if !oldUnchanged {
+                    // If either side changed, cancellation/revocation or a failed
+                    // rollback leaves the journal and both visible roots intact.
+                    guard prepared.stamp.matches(destination, includeMetadata: false) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                    let candidateStamp = try prepared.treeWitness?.verify(at: destination, afterExchange: true)
+                    let rolledBack = try authorize {
+                        guard before.stamp.identifies(replacement.url),
+                              prepared.stamp.matches(destination, includeMetadata: false) else { return false }
+                        if let candidateStamp {
+                            var current = stat()
+                            guard lstat(destination.path, &current) == 0,
+                                  ClipboardSyncFileSnapshot(current) == candidateStamp else { return false }
+                        }
+                        guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
+                            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+                        }
+                        return true
+                    }
+                    guard rolledBack else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                    try prepared.treeWitness?.verify(at: replacement.url, afterExchange: true)
+                    return nil
+                }
                 return try inspectCoordinated(destination, expectedIdentity: replacement.identity)
             }
         }

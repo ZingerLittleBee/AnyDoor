@@ -7,6 +7,7 @@ extension ClipboardHistorySyncFileFailure {
         case .quota: .settingsClipboardSyncQuotaFailure
         case .localStorage: .settingsClipboardSyncStorageFailure
         case .localFileAccessDenied: .settingsClipboardSyncFileAccessDenied
+        case .sourceChanged: .settingsClipboardSyncSourceChanged
         case .corruptData: .settingsClipboardSyncCorruptData
         case .accessDenied: .settingsClipboardSyncAccessDenied
         case .accountChanged: .settingsClipboardSyncAccountChanged
@@ -34,6 +35,7 @@ extension ClipboardHistorySyncPhase {
             case .quota: .settingsClipboardSyncQuotaFailure
             case .localStorage: .settingsClipboardSyncStorageFailure
             case .localFileAccessDenied: .settingsClipboardSyncFileAccessDenied
+            case .sourceChanged: .settingsClipboardSyncSourceChanged
             case .corruptData: .settingsClipboardSyncCorruptData
             case .recoveryRequired: .settingsClipboardSyncRecoveryRequired
             case .accountChanged: .settingsClipboardSyncAccountChanged
