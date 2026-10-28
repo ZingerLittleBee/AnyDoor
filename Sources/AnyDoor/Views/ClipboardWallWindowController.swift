@@ -13,6 +13,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     static let shared = ClipboardWallWindowController()
 
     private var configuredState: ClipboardWallState?
+    private var clipboardModule: ClipboardHistoryModule?
     private var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
     private var state: ClipboardWallState {
         guard let configuredState else {
@@ -94,6 +95,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         lifecycle: ClipboardHistoryLifecycle
     ) {
         guard configuredState == nil else { return }
+        clipboardModule = module
         configuredState = ClipboardWallState(
             presentation: ClipboardHistoryPresentationModel(module: module)
         )
@@ -734,27 +736,38 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// wall stays open behind it (windowDidResignKey exempts the text panel);
     /// key status returns to the wall when the editor closes.
     private func beginEdit(_ entry: ClipboardHistoryEntry) {
+        guard let module = clipboardModule else { return }
         Task { [self] in
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .hostAction
-                ),
-                let text = materialization.editableText
-            else {
-                presentActionFailure()
-                return
-            }
-            ClipboardTextWindow.shared.showEditor(
-                entry: entry,
-                text: text,
-                onSave: { [weak self] text in
-                    self?.performMutation(.editText(entry.id, text))
-                },
-                onClose: { [weak self] in
-                    self?.window?.makeKey()
+            do {
+                var plan = try await module.textEditPlan(for: entry.id)
+                if plan.hasConflict {
+                    ClipboardTextWindow.shared.showConflict(
+                        entry: entry,
+                        plan: plan,
+                        onResolve: { versionID in
+                            _ = try await module.resolveTextConflict(.init(plan: plan, versionID: versionID))
+                        },
+                        reload: {
+                            plan = try await module.textEditPlan(for: entry.id)
+                            return plan.versions
+                        },
+                        onClose: { [weak self] in self?.window?.makeKey() }
+                    )
+                } else {
+                    let editPlan = plan
+                    ClipboardTextWindow.shared.showEditor(
+                        entry: entry,
+                        text: plan.text,
+                        onSave: { text in
+                            let outcome = try await module.saveTextEdit(text, using: editPlan)
+                            if case .notFound = outcome { throw ClipboardHistoryModuleError.entryNotFound }
+                        },
+                        onClose: { [weak self] in self?.window?.makeKey() }
+                    )
                 }
-            )
+            } catch {
+                ClipboardHistoryActionFailurePresenter.present(ClipboardHistoryActionFailure(error))
+            }
         }
     }
 

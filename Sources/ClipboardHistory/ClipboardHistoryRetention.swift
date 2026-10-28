@@ -910,13 +910,45 @@ extension ClipboardHistoryModule {
     func editText(
         _ text: String,
         for entryID: ClipboardHistoryEntryID,
-        in database: DatabasePool
+        in database: DatabasePool,
+        plan: ClipboardHistoryTextEditPlan? = nil
     ) async throws -> MutationApplyResult {
+        let date = now()
+        let result: TextEditResult
+        do {
+            result = try await database.write { database in
+                let current = try Self.syncTextEditBasis(for: entryID, in: database)
+                if let plan, let basis = plan.basis {
+                    guard current?.accountID == basis.accountID, current?.epoch == basis.epoch,
+                          current?.subjectID == basis.subjectID else { throw ClipboardHistoryModuleError.operationUnavailable }
+                }
+                let basis = plan?.basis ?? current
+                let result = try replaceText(text, for: entryID, at: date, in: database)
+                if result.outcome.didMutate, let basis {
+                    try Self.recordSyncTextEdit(text, basis: basis, at: date, in: database)
+                }
+                return try refreshingTextEditResult(result, entryID: entryID, in: database)
+            }
+        } catch let error as ClipboardHistoryModuleError {
+            throw error
+        } catch {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        cancelDerivedJobs(for: [entryID.value.uuidString.lowercased()])
+        await enqueueReclamation(for: result.payloadPaths)
+        return result.outcome
+    }
+
+    nonisolated func replaceText(
+        _ text: String,
+        for entryID: ClipboardHistoryEntryID,
+        at date: Date,
+        in database: Database
+    ) throws -> TextEditResult {
         guard !text.isEmpty else {
             throw ClipboardHistoryModuleError.invalidTextEdit
         }
         let storedID = entryID.value.uuidString.lowercased()
-        let date = now()
         let snapshot = PasteboardSnapshot(
             items: [
                 PasteboardSnapshot.Item(
@@ -938,235 +970,232 @@ extension ClipboardHistoryModule {
         let facets = Set([ClipboardHistoryFacet.text]).union(
             Self.inferredFacets(forExactText: text)
         )
-        let result: TextEditResult
-        do {
-            result = try await database.write { database in
-                guard try isLiveEntry(storedID, at: date, in: database) else {
-                    return TextEditResult(
-                        outcome: MutationApplyResult(
-                            outcome: .notFound,
-                            didMutate: false
-                        ),
-                        payloadPaths: []
-                    )
-                }
-                let itemCount =
-                    try Int.fetchOne(
-                        database,
-                        sql: """
-                            SELECT COUNT(*)
-                            FROM clipboard_items
-                            WHERE entry_id = ?
-                            """,
-                        arguments: [storedID]
-                    ) ?? 0
-                let exactTextCount =
-                    try Int.fetchOne(
-                        database,
-                        sql: """
-                            SELECT COUNT(*)
-                            FROM clipboard_representations
-                            WHERE entry_id = ?
-                              AND type_identifier = 'public.utf8-plain-text'
-                              AND text_value IS NOT NULL
-                            """,
-                        arguments: [storedID]
-                    ) ?? 0
-                guard itemCount == 1, exactTextCount >= 1 else {
-                    throw ClipboardHistoryModuleError.invalidTextEdit
-                }
-
-                let payloads = try Row.fetchAll(
-                    database,
-                    sql: """
-                        SELECT DISTINCT payload.id, payload.relative_path
-                        FROM clipboard_payloads AS payload
-                        WHERE payload.id IN (
-                            SELECT payload_id
-                            FROM clipboard_representations
-                            WHERE entry_id = ?
-                              AND payload_id IS NOT NULL
-                            UNION
-                            SELECT thumbnail_payload_id
-                            FROM clipboard_entries
-                            WHERE id = ?
-                              AND thumbnail_payload_id IS NOT NULL
-                            UNION
-                            SELECT payload_id
-                            FROM clipboard_file_members
-                            WHERE entry_id = ?
-                              AND payload_id IS NOT NULL
-                        )
-                        ORDER BY payload.id
-                        """,
-                    arguments: [storedID, storedID, storedID]
-                )
-
-                try Self.deleteSearchFields(
-                    forEntryID: storedID,
-                    from: database,
-                    faultInjector: faultInjector
-                )
-                try faultInjector.check(.logicalDeletionAfterSearchIndexes)
-                try database.execute(
-                    sql: """
-                        UPDATE clipboard_entries
-                        SET preview_text = ?, edited_at = ?,
-                            thumbnail_payload_id = NULL
-                        WHERE id = ?
-                        """,
-                    arguments: [
-                        Self.boundedPreviewText(text),
-                        date.timeIntervalSince1970,
-                        storedID,
-                    ]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_representations
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_file_members
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_entry_facets
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_duplicate_candidates
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_derived_jobs
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try faultInjector.check(.logicalDeletionAfterEntries)
-                try database.execute(
-                    sql: """
-                        INSERT INTO clipboard_representations(
-                            entry_id, item_index, representation_index,
-                            kind, type_identifier, text_value
-                        ) VALUES (?, 0, 0, 'text',
-                                  'public.utf8-plain-text', ?)
-                        """,
-                    arguments: [storedID, text]
-                )
-                for facet in facets {
-                    try database.execute(
-                        sql: """
-                            INSERT INTO clipboard_entry_facets(entry_id, facet)
-                            VALUES (?, ?)
-                            """,
-                        arguments: [storedID, facet.rawValue]
-                    )
-                }
-                try Self.insertSearchField(
-                    value: text,
-                    kind: "exactText",
-                    index: 0,
-                    rankingGroup: Self.searchRankingGroup(for: "exactText"),
-                    entryID: storedID,
-                    into: database,
-                    faultInjector: faultInjector
-                )
-                try database.execute(
-                    sql: """
-                        INSERT INTO clipboard_duplicate_candidates(
-                            fingerprint, entry_id, canonical_byte_count,
-                            created_at
-                        ) VALUES (?, ?, ?, ?)
-                        """,
-                    arguments: [
-                        identity.fingerprint,
-                        storedID,
-                        identity.canonicalByteCount,
-                        date.timeIntervalSince1970,
-                    ]
-                )
-                try database.execute(
-                    sql: """
-                        UPDATE clipboard_retention_state
-                        SET retention_started_at = ?
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [date.timeIntervalSince1970, storedID]
-                )
-
-                var payloadPaths: [String] = []
-                for payload in payloads {
-                    let payloadID: String = payload["id"]
-                    try database.execute(
-                        sql: """
-                            DELETE FROM clipboard_payloads
-                            WHERE id = ?
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_representations
-                                  WHERE payload_id = ?
-                              )
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_entries
-                                  WHERE thumbnail_payload_id = ?
-                              )
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_file_members
-                                  WHERE payload_id = ?
-                              )
-                            """,
-                        arguments: [
-                            payloadID,
-                            payloadID,
-                            payloadID,
-                            payloadID,
-                        ]
-                    )
-                    if database.changesCount == 1 {
-                        payloadPaths.append(payload["relative_path"])
-                    }
-                }
-                try faultInjector.check(.logicalDeletionAfterPayloadRows)
-                try Self.bumpHistoryRevision(in: database)
-                try Self.bumpSearchIndexGeneration(in: database)
-                try faultInjector.check(.databaseTransaction)
-                return TextEditResult(
-                    outcome: MutationApplyResult(
-                        outcome: .updated(
-                            try Self.entry(
-                                from: try requiredEntryRow(
-                                    storedID,
-                                    in: database
-                                ),
-                                in: database
-                            )
-                        ),
-                        didMutate: true
-                    ),
-                    payloadPaths: payloadPaths
-                )
-            }
-        } catch let error as ClipboardHistoryModuleError {
-            throw error
-        } catch {
-            throw ClipboardHistoryModuleError.storageFailure
+        guard try isLiveEntry(storedID, at: date, in: database) else {
+            return TextEditResult(
+                outcome: MutationApplyResult(
+                    outcome: .notFound,
+                    didMutate: false
+                ),
+                payloadPaths: []
+            )
         }
-        cancelDerivedJobs(for: [storedID])
-        await enqueueReclamation(for: result.payloadPaths)
-        return result.outcome
+        let itemCount =
+            try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM clipboard_items
+                    WHERE entry_id = ?
+                    """,
+                arguments: [storedID]
+            ) ?? 0
+        let exactTextCount =
+            try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM clipboard_representations
+                    WHERE entry_id = ?
+                      AND type_identifier = 'public.utf8-plain-text'
+                      AND text_value IS NOT NULL
+                    """,
+                arguments: [storedID]
+            ) ?? 0
+        guard itemCount == 1, exactTextCount >= 1 else {
+            throw ClipboardHistoryModuleError.invalidTextEdit
+        }
+
+        let payloads = try Row.fetchAll(
+            database,
+            sql: """
+                SELECT DISTINCT payload.id, payload.relative_path
+                FROM clipboard_payloads AS payload
+                WHERE payload.id IN (
+                    SELECT payload_id
+                    FROM clipboard_representations
+                    WHERE entry_id = ?
+                      AND payload_id IS NOT NULL
+                    UNION
+                    SELECT thumbnail_payload_id
+                    FROM clipboard_entries
+                    WHERE id = ?
+                      AND thumbnail_payload_id IS NOT NULL
+                    UNION
+                    SELECT payload_id
+                    FROM clipboard_file_members
+                    WHERE entry_id = ?
+                      AND payload_id IS NOT NULL
+                )
+                ORDER BY payload.id
+                """,
+            arguments: [storedID, storedID, storedID]
+        )
+
+        try Self.deleteSearchFields(
+            forEntryID: storedID,
+            from: database,
+            faultInjector: faultInjector
+        )
+        try faultInjector.check(.logicalDeletionAfterSearchIndexes)
+        try database.execute(
+            sql: """
+                UPDATE clipboard_entries
+                SET preview_text = ?, edited_at = ?,
+                    thumbnail_payload_id = NULL
+                WHERE id = ?
+                """,
+            arguments: [
+                Self.boundedPreviewText(text),
+                date.timeIntervalSince1970,
+                storedID,
+            ]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_representations
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_file_members
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_entry_facets
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_duplicate_candidates
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_derived_jobs
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try faultInjector.check(.logicalDeletionAfterEntries)
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_representations(
+                    entry_id, item_index, representation_index,
+                    kind, type_identifier, text_value
+                ) VALUES (?, 0, 0, 'text',
+                          'public.utf8-plain-text', ?)
+                """,
+            arguments: [storedID, text]
+        )
+        for facet in facets {
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_entry_facets(entry_id, facet)
+                    VALUES (?, ?)
+                    """,
+                arguments: [storedID, facet.rawValue]
+            )
+        }
+        try Self.insertSearchField(
+            value: text,
+            kind: "exactText",
+            index: 0,
+            rankingGroup: Self.searchRankingGroup(for: "exactText"),
+            entryID: storedID,
+            into: database,
+            faultInjector: faultInjector
+        )
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_duplicate_candidates(
+                    fingerprint, entry_id, canonical_byte_count,
+                    created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+            arguments: [
+                identity.fingerprint,
+                storedID,
+                identity.canonicalByteCount,
+                date.timeIntervalSince1970,
+            ]
+        )
+        try database.execute(
+            sql: """
+                UPDATE clipboard_retention_state
+                SET retention_started_at = ?
+                WHERE entry_id = ?
+                """,
+            arguments: [date.timeIntervalSince1970, storedID]
+        )
+
+        var payloadPaths: [String] = []
+        for payload in payloads {
+            let payloadID: String = payload["id"]
+            try database.execute(
+                sql: """
+                    DELETE FROM clipboard_payloads
+                    WHERE id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_representations
+                          WHERE payload_id = ?
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_entries
+                          WHERE thumbnail_payload_id = ?
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_file_members
+                          WHERE payload_id = ?
+                      )
+                    """,
+                arguments: [
+                    payloadID,
+                    payloadID,
+                    payloadID,
+                    payloadID,
+                ]
+            )
+            if database.changesCount == 1 {
+                payloadPaths.append(payload["relative_path"])
+            }
+        }
+        try faultInjector.check(.logicalDeletionAfterPayloadRows)
+        try Self.bumpHistoryRevision(in: database)
+        try Self.bumpSearchIndexGeneration(in: database)
+        try faultInjector.check(.databaseTransaction)
+        return TextEditResult(
+            outcome: MutationApplyResult(
+                outcome: .updated(
+                    try Self.entry(
+                        from: try requiredEntryRow(
+                            storedID,
+                            in: database
+                        ),
+                        in: database
+                    )
+                ),
+                didMutate: true
+            ),
+            payloadPaths: payloadPaths
+        )
+    }
+
+    nonisolated func refreshingTextEditResult(
+        _ result: TextEditResult, entryID: ClipboardHistoryEntryID, in database: Database
+    ) throws -> TextEditResult {
+        guard result.outcome.didMutate else { return result }
+        let row = try requiredEntryRow(entryID.value.uuidString.lowercased(), in: database)
+        return TextEditResult(outcome: MutationApplyResult(
+            outcome: .updated(try Self.entry(from: row, in: database)), didMutate: true), payloadPaths: result.payloadPaths)
     }
 
     nonisolated func isLiveEntry(
@@ -1628,7 +1657,7 @@ private struct ConfirmationApplyResult {
     let didMutate: Bool
 }
 
-private struct TextEditResult {
+struct TextEditResult {
     let outcome: ClipboardHistoryModule.MutationApplyResult
     let payloadPaths: [String]
 }

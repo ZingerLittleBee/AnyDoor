@@ -133,11 +133,13 @@ extension ClipboardHistoryModule {
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
+                try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
             }
+            try stageSyncTextEdits(account: account, control: control, key: key, in: database)
         }
     }
 
-    private func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
+    func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
                                  account: ClipboardSyncAccount, in database: Database) throws {
         try database.execute(sql: """
             INSERT INTO clipboard_sync_outbox(record_id, account_id, epoch, subject_id, kind, metadata)
@@ -167,7 +169,9 @@ extension ClipboardHistoryModule {
 
     func hasReceivedSyncRecord(_ record: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount) throws -> Bool {
         try requiredDatabase().read { database in
-            try Bool.fetchOne(database, sql: """
+            if try Self.needsSyncTextRootReplay(accountID: account.identifier, epoch: record.epoch.uuidString,
+                recordID: record.recordID, in: database) { return false }
+            return try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                     OR EXISTS (SELECT 1 FROM clipboard_sync_outbox WHERE account_id = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID, account.identifier, record.recordID]) ?? false
@@ -181,14 +185,23 @@ extension ClipboardHistoryModule {
             let exists = try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID]) ?? false
-            guard !exists else { return false }
+            let recoversRoot = try Self.needsSyncTextRootReplay(accountID: account.identifier,
+                epoch: record.epoch.uuidString, recordID: record.recordID, in: database)
+            guard !exists || recoversRoot else { return false }
             switch content {
             case .tag(let tag):
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
             case .text(let text):
                 try importSyncText(text, account: account, record: record, in: database)
+                try Self.registerSyncTextRoot(text, record: record, account: account, in: database)
+                try reconcileSyncTextVersions(subjectID: text.id.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: record.epoch.uuidString, in: database)
+            case .textEdit(let edit):
+                try Self.receiveSyncTextEdit(edit, record: record, account: account, in: database)
+                try reconcileSyncTextVersions(subjectID: edit.id.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: record.epoch.uuidString, in: database)
             }
-            try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
+            try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)

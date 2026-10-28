@@ -72,7 +72,7 @@ final class ClipboardTextWindow {
     func showEditor(
         entry: ClipboardHistoryEntry,
         text: String,
-        onSave: @escaping (String) -> Void,
+        onSave: @escaping (String) async throws -> Void,
         onClose: (() -> Void)? = nil
     ) {
         present(
@@ -82,6 +82,20 @@ final class ClipboardTextWindow {
             onSave: onSave,
             onClose: onClose
         )
+    }
+
+    func showConflict(
+        entry: ClipboardHistoryEntry,
+        plan: ClipboardHistoryTextEditPlan,
+        onResolve: @escaping (UUID) async throws -> Void,
+        reload: @escaping () async throws -> [ClipboardHistoryTextVersion],
+        onClose: (() -> Void)? = nil
+    ) {
+        guard yieldToModal() else { return }
+        present(entry: entry, text: plan.text, editable: true, onSave: { _ in }, onClose: onClose)
+        model?.conflictVersions = plan.versions
+        model?.onResolve = onResolve
+        model?.reloadConflicts = reload
     }
 
     /// Esc / Cancel: discard-confirm when dirty, straight close otherwise.
@@ -132,7 +146,7 @@ final class ClipboardTextWindow {
         entry: ClipboardHistoryEntry,
         text: String,
         editable: Bool,
-        onSave: @escaping (String) -> Void,
+        onSave: @escaping (String) async throws -> Void,
         onClose: (() -> Void)?
     ) {
         // An in-progress dirty edit is never silently replaced; surface the
@@ -269,7 +283,14 @@ final class ClipboardTextPanelModel {
     /// Asks the host to copy this item to the pasteboard ("c" key / the
     /// header's copy button). Keeps the preview open.
     var onCopyRequest: () -> Void = {}
-    var onSave: (String) -> Void = { _ in }
+    var onSave: (String) async throws -> Void = { _ in }
+    private(set) var isSaving = false
+    private(set) var saveFailed = false
+    var conflictVersions: [ClipboardHistoryTextVersion] = []
+    var selectedVersionID: UUID?
+    var onResolve: (UUID) async throws -> Void = { _ in }
+    var reloadConflicts: () async throws -> [ClipboardHistoryTextVersion] = { [] }
+    var isConflict: Bool { !conflictVersions.isEmpty }
 
     init(
         entry: ClipboardHistoryEntry,
@@ -286,7 +307,10 @@ final class ClipboardTextPanelModel {
     /// Only a zero-length edit is refused, matching the store, which accepts a
     /// whitespace-only edit exactly as it accepts a whitespace-only copy.
     /// Trimming here disabled Save for text the store would have kept.
-    var canSave: Bool { !text.isEmpty }
+    var canSave: Bool {
+        if isConflict { return conflictVersions.contains { $0.id == selectedVersionID } }
+        return !text.isEmpty
+    }
 
     /// Preview-follow: swap to another item without recreating the panel.
     func replace(entry: ClipboardHistoryEntry, text: String) {
@@ -298,6 +322,7 @@ final class ClipboardTextPanelModel {
     /// Esc / close button. A second request while the overlay is up means
     /// "keep editing" (Esc backs out of the confirmation, not the editor).
     func requestClose() {
+        guard !isSaving else { return }
         if showDiscardConfirm {
             showDiscardConfirm = false
             return
@@ -310,7 +335,28 @@ final class ClipboardTextPanelModel {
     }
 
     func saveIfPossible() {
-        guard isEditable, canSave else { return }
+        Task { await save() }
+    }
+
+    func save() async {
+        guard isEditable, canSave, !isSaving else { return }
+        if isConflict, let selectedVersionID {
+            isSaving = true
+            saveFailed = false
+            defer { isSaving = false }
+            do {
+                try await onResolve(selectedVersionID)
+                onDismiss()
+            } catch {
+                saveFailed = true
+                self.selectedVersionID = nil
+                do {
+                    conflictVersions = try await reloadConflicts()
+                    if conflictVersions.count < 2 { onDismiss() }
+                } catch { /* Keep the displayed alternatives available for retry. */ }
+            }
+            return
+        }
         // No changes: closing is all the user wants; skipping the store write
         // also preserves the item's rich payload (saving would clear it).
         guard isDirty else {
@@ -318,8 +364,15 @@ final class ClipboardTextPanelModel {
             return
         }
         let newText = text
-        onSave(newText)
-        onDismiss()
+        isSaving = true
+        saveFailed = false
+        defer { isSaving = false }
+        do {
+            try await onSave(newText)
+            onDismiss()
+        } catch {
+            saveFailed = true
+        }
     }
 
     func requestEdit() {
@@ -343,8 +396,12 @@ struct ClipboardTextPanelView: View {
             VStack(spacing: 0) {
                 header
                 Divider()
-                PlainTextEditor(text: $model.text, isEditable: model.isEditable)
-                    .padding(8)
+                if model.isConflict {
+                    conflictChoices
+                } else {
+                    PlainTextEditor(text: $model.text, isEditable: model.isEditable && !model.isSaving)
+                        .padding(8)
+                }
                 Divider()
                 footer
             }
@@ -357,7 +414,7 @@ struct ClipboardTextPanelView: View {
 
     private var header: some View {
         HStack {
-            LocalizedText(model.isEditable ? .clipboardEditTitle : .clipboardPreviewTitle)
+            LocalizedText(model.isConflict ? .clipboardTextConflict : (model.isEditable ? .clipboardEditTitle : .clipboardPreviewTitle))
                 .font(.headline)
             Spacer()
             if !model.isEditable {
@@ -408,21 +465,58 @@ struct ClipboardTextPanelView: View {
 
     private var footer: some View {
         HStack {
-            Text(metaText)
-                .font(.caption).foregroundStyle(.secondary)
+            if model.saveFailed {
+                LocalizedText(model.isConflict ? .clipboardTextConflictRetry : .clipboardEditSaveFailed)
+                    .font(.caption).foregroundStyle(.red)
+            } else {
+                Text(metaText)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
             if model.isEditable {
                 Button { model.requestClose() } label: {
                     LocalizedText(.clipboardEditCancel)
                 }
                 Button { model.saveIfPossible() } label: {
-                    LocalizedText(.clipboardEditSave)
+                    LocalizedText(model.isConflict ? .clipboardTextConflictUse : .clipboardEditSave)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!model.canSave)
+                .disabled(!model.canSave || model.isSaving)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private var conflictChoices: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                LocalizedText(.clipboardTextConflictMessage)
+                    .foregroundStyle(.secondary)
+                ForEach(model.conflictVersions) { version in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            model.selectedVersionID = version.id
+                        } label: {
+                            HStack {
+                                Image(systemName: model.selectedVersionID == version.id ? "largecircle.fill.circle" : "circle")
+                                Text(version.editedAt, style: .date)
+                                Text(version.editedAt, style: .time)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.isSaving)
+                        .accessibilityLabel(L(.clipboardTextConflictSelect))
+                        .accessibilityValue(model.selectedVersionID == version.id ? L(.clipboardTextConflictSelected) : "")
+                        Text(version.text)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(12)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .padding(14)
+        }
     }
 
     /// Mirrors the card subtitle: line count for multi-line, else characters.

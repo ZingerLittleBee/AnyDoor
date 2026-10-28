@@ -695,7 +695,8 @@ extension ClipboardHistoryModule {
                 provenance: ClipboardHistoryCaptureSourceProvenance(
                     rawValue: row["source_provenance"]
                 ) ?? .unknown
-            )
+            ),
+            hasTextConflict: try hasSyncTextConflict(entryID: .init(value), in: database)
         )
     }
 
