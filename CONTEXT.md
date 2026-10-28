@@ -682,6 +682,43 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   Image Conversion output and its user-relevant configuration/outcome. Records
   do not own their files and are created only when an output exists.
 
+## Clipboard Sync
+
+Vocabulary for the [Clipboard iCloud Sync specification](docs/prds/2026-10-28-clipboard-icloud-sync.md),
+which describes an accepted design that is not implemented yet.
+
+- **Clipboard Sync**: Optional sharing of selected Clipboard History across
+  participating Macs using the same Apple Account. It is distinct from Config
+  Sync and from replacing the current system clipboard.
+  _Avoid_: Universal Clipboard, Config Sync.
+- **Sync Tag**: A Clipboard History tag selected to include matching entries
+  in Clipboard Sync. The selected set is shared by participating devices.
+  _Avoid_: Sync Folder, Content Facet.
+- **Participating Device**: A Mac on which the user has explicitly enabled
+  Clipboard Sync. Sharing an Apple Account alone does not make a Mac a
+  Participating Device.
+  _Avoid_: Every Account Device, Automatically Enabled Device.
+- **Tracked File**: A file, directory, or file package whose content changes
+  continue to be reflected in Clipboard Sync while it remains in the selected
+  scope.
+  _Avoid_: Initial Snapshot, Static File Attachment.
+- **File Placeholder**: A synchronized file listing whose current content is
+  not downloaded on this device. It represents known remote content rather
+  than a missing original file.
+  _Avoid_: Empty File, Broken File Reference.
+- **Linked Location**: A local file, directory, or package location associated
+  with a Tracked File for bidirectional changes. A separately pasted or saved
+  copy is not a Linked Location unless explicitly associated.
+  _Avoid_: Every Copy, Matching Path.
+- **Linked Working Copy**: An ordinary editable local copy of a Tracked File
+  at a Linked Location. It is distinct from encrypted background storage and
+  from an independent exported copy.
+  _Avoid_: Encrypted Cache, Temporary Preview.
+- **Cloud Reset**: The explicit removal of shared Clipboard Sync data while
+  preserving local copies and ending current device participation. Retained
+  copies do not by themselves authorize publishing that data again.
+  _Avoid_: Local Clear History, Disable This Device.
+
 ## Config Sync & Backup
 
 - **Config Sync** (配置同步) — Optional automatic convergence of Portable
