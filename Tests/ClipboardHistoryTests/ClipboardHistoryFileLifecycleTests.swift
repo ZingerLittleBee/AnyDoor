@@ -6,6 +6,63 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testDirectoryDeletionPreservesCompleteOfflineTreeAsIndependentCopy() async throws {
+        let fixture = try await makeLinkedFixture(prepareSource: { url in
+            try FileManager.default.removeItem(at: url)
+            try FileManager.default.createDirectory(at: url.appendingPathComponent("Empty"), withIntermediateDirectories: true)
+            try Data("initial member".utf8).write(to: url.appendingPathComponent("notes.txt"))
+            try FileManager.default.createSymbolicLink(atPath: url.appendingPathComponent("Relative link").path, withDestinationPath: "notes.txt")
+        })
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        let saved = Data("offline directory member update".utf8)
+        try saved.write(to: working.url.appendingPathComponent("notes.txt"))
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+
+        let notices = try await fixture.receiver.preservedSyncEdits()
+
+        XCTAssertEqual(notices.count, 1)
+        let value = try await fixture.receiver.materialize(.init(entryID: XCTUnwrap(notices.first).id, purpose: .normalPaste))
+        guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing independent tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("notes.txt")), saved)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: file.currentURL.appendingPathComponent("Empty").path), [])
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: file.currentURL.appendingPathComponent("Relative link").path), "notes.txt")
+        XCTAssertNotEqual(file.currentURL, working.url)
+        XCTAssertEqual(try Data(contentsOf: fixture.original.appendingPathComponent("notes.txt")), Data("initial member".utf8))
+    }
+
+    @MainActor
+    func testFileDeletionRetriesPreservationWhenLocalAccessReturns() async throws {
+        let fixture = try await makeLinkedFixture()
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        let saved = Data("saved work temporarily unavailable during remote deletion".utf8)
+        try saved.write(to: working.url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: working.url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: working.url.path) }
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+        let pending = try await fixture.receiver.preservedSyncEdits()
+        XCTAssertTrue(pending.isEmpty, "Unverified inaccessible work must remain pending rather than claim a preserved copy")
+        try await fixture.receiver.closeStoreForTesting()
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: working.url.path)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+
+        let notices = try await reopened.preservedSyncEdits()
+
+        XCTAssertEqual(notices.count, 1)
+        let value = try await reopened.materialize(.init(entryID: XCTUnwrap(notices.first).id, purpose: .normalPaste))
+        guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing preserved work") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), saved)
+        XCTAssertEqual(try Data(contentsOf: working.url), saved)
+    }
+
+    @MainActor
     func testFilePreservationSurvivesRestartAfterCopyAndLaterSourceSave() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.syncFilePreservationAfterCopy]))
         let page = try await fixture.receiver.page(.init())

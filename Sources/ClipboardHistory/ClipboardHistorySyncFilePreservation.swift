@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import UniformTypeIdentifiers
 
 struct ClipboardSyncPreservedFileSource: Codable, Sendable {
     var location: ClipboardLinkedLocationSource
@@ -171,6 +172,7 @@ extension ClipboardHistoryModule {
             }
             catch { continue } // Inaccessible or changing saved work stays durable and retryable.
             try faultInjector.check(.syncFilePreservationAfterCopy)
+            let resourceType = try proof?.url.resourceValues(forKeys: [.contentTypeKey]).contentType?.identifier
             try await waitForWriteTurn()
             guard storeEpoch == epoch else { throw ClipboardHistoryModuleError.operationUnavailable }
             try syncWrite { database in
@@ -181,7 +183,7 @@ extension ClipboardHistoryModule {
                           JOIN clipboard_sync_preserved_edits AS notice ON notice.local_entry_id = saved.id
                           WHERE saved.account_id = ? AND saved.epoch = ? AND saved.shared_id = ? AND saved.preserved_digest = ?)
                         """, arguments: [row["account_id"] as String, row["epoch"] as String, row["shared_id"] as String, proof.digest]) ?? false
-                    if !duplicate { try Self.insertPreservedSyncFile(id: id, source: source, proof: proof, row: row, in: database) }
+                    if !duplicate { try Self.insertPreservedSyncFile(id: id, source: source, proof: proof, resourceType: resourceType, row: row, in: database) }
                 }
                 try database.execute(sql: "UPDATE clipboard_sync_file_preservations SET completed = 1, preserved_digest = ? WHERE id = ?", arguments: [proof?.digest, id])
                 try Self.bumpHistoryRevision(in: database)
@@ -215,7 +217,7 @@ extension ClipboardHistoryModule {
     }
 
     private static func insertPreservedSyncFile(id: String, source: ClipboardSyncPreservedFileSource,
-        proof: ClipboardLinkedFileProof, row: Row, in database: Database) throws {
+        proof: ClipboardLinkedFileProof, resourceType: String?, row: Row, in database: Database) throws {
         let name = proof.url.lastPathComponent
         try database.execute(sql: """
             INSERT INTO clipboard_sync_preserved_edits(account_id, epoch, shared_id, version_id, local_entry_id)
@@ -235,9 +237,11 @@ extension ClipboardHistoryModule {
         try database.execute(sql: """
             INSERT INTO clipboard_file_members(entry_id, item_index, member_index, captured_path, current_path,
                 display_name, bookmark_data, resource_type, availability, identity_data)
-            VALUES (?, 0, 0, ?, ?, ?, ?, 'file', 'available', ?)
-            """, arguments: [id, proof.url.path, proof.url.path, name, proof.bookmark, proof.identity])
-        try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'file')", arguments: [id])
+            VALUES (?, 0, 0, ?, ?, ?, ?, ?, 'available', ?)
+            """, arguments: [id, proof.url.path, proof.url.path, name, proof.bookmark, resourceType, proof.identity])
+        for facet in ClipboardHistoryFileClassification.facets(resourceType: resourceType, capturedPath: proof.url.path) {
+            try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, ?)", arguments: [id, facet.rawValue])
+        }
         try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, ?, 1)", arguments: [id, source.lastCapturedAt])
         for tagID in source.tagIDs {
             try database.execute(sql: "INSERT INTO clipboard_entry_tags(entry_id, tag_id) SELECT ?, id FROM clipboard_tag_definitions WHERE id = ?", arguments: [id, tagID])
