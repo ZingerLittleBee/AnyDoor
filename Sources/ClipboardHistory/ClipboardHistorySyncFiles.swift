@@ -5,7 +5,7 @@ import GRDB
 extension ClipboardHistoryModule {
     static let automaticSyncFileDownloadBytes: Int64 = 5_000_000
 
-    private static let liveSyncFileMember = """
+    static let liveSyncFileMember = """
         EXISTS (SELECT 1 FROM clipboard_representations AS current
             WHERE current.entry_id = member.entry_id AND current.item_index = member.item_index
               AND current.representation_index = member.representation_index AND current.kind = 'fileReference')

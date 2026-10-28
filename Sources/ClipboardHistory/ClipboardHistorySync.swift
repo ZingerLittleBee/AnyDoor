@@ -237,6 +237,7 @@ extension ClipboardHistoryModule {
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
+            try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
             try await waitForWriteTurn()
             try admitSync(generation)
             try stageSyncBackfill(account: account, control: control, key: key)
