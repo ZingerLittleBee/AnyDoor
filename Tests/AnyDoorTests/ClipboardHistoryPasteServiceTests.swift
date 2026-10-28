@@ -8,6 +8,48 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryPasteServiceTests: XCTestCase {
+    func testCopyUsesCompleteWorkingFileURLsAndPreservesTheirOrder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("working-file-paste-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let urls = [root.appendingPathComponent("First.txt"), root.appendingPathComponent("Second.txt")]
+        try Data("first file".utf8).write(to: urls[0])
+        try Data("second file".utf8).write(to: urls[1])
+        let id = ClipboardHistoryEntryID(UUID())
+        let presentation = makePresentation { _ in
+            ClipboardHistoryMaterialization(items: urls.map {
+                .init(representations: [.file(.init(capturedPath: "/another-mac/original", displayName: $0.lastPathComponent, currentURL: $0))])
+            })
+        }
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+
+        let result = await ClipboardHistoryPasteService.copyEntry(id, from: presentation, to: pasteboard)
+
+        XCTAssertEqual(result, .copied)
+        XCTAssertEqual(pasteboard.pasteboardItems?.compactMap { $0.string(forType: .fileURL) }, urls.map(\.absoluteString))
+        XCTAssertEqual(try Data(contentsOf: urls[0]), Data("first file".utf8))
+        XCTAssertEqual(try Data(contentsOf: urls[1]), Data("second file".utf8))
+    }
+
+    func testPendingFileCopyPreservesPasteboardAndReportsWholeEntryPending() async throws {
+        let id = ClipboardHistoryEntryID(UUID())
+        let presentation = makePresentation { _ in
+            throw ClipboardHistoryModuleError.syncFilesPending(id, count: 1)
+        }
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("keep current clipboard", forType: .string)
+        let generation = pasteboard.changeCount
+
+        let result = await ClipboardHistoryPasteService.copyEntry(id, from: presentation, to: pasteboard)
+
+        XCTAssertEqual(result, .materializationFailed(.syncFilesPending(entryID: id, count: 1)))
+        XCTAssertEqual(pasteboard.changeCount, generation)
+        XCTAssertEqual(pasteboard.string(forType: .string), "keep current clipboard")
+        XCTAssertEqual(ClipboardHistoryActionFailureNotice(.syncFilesPending(entryID: id, count: 1)).titleKey, .clipboardSyncFilesPending)
+    }
+
     func testWritePreservesItemAndRepresentationOrder() throws {
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("ClipboardHistoryPasteServiceTests.order")

@@ -87,10 +87,25 @@ otherwise unrelated user data appears "lost".
 `ClipboardHistoryModule` owns local participation, selected tags, encrypted outbox,
 remote inbox, and imported history in its existing SQLCipher store. The additive
 `v14_clipboard_sync` migration keeps those records separate from local content and
-leaves the device-only history master key unchanged. The current slice transfers
-existing and newly eligible single-item plain text for one selected tag. Other
-content, updates, withdrawal, and conflict handling follow the
+leaves the device-only history master key unchanged. Ordered entry envelopes
+preserve supported standard representations; ordinary files use independent
+encrypted version descriptors and bodies. Tag membership uses `v15_clipboard_sync_tags`;
+file versions and ordered membership use `v19_clipboard_sync_files`. Versioned
+text edits and explicit text conflict resolution are supported. Further file
+lifecycle and withdrawal behavior follow the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+
+The additive `v18_clipboard_sync_versions` journal records immutable versions and
+parent relationships in SQLCipher before a local edit can be acknowledged. Edits
+and resolutions share the same account, epoch and shared identity as the original
+entry. Receiving an ancestor or duplicate does not restore old text; concurrent
+heads preserve each local working text until an explicit choice creates a result
+with all displayed heads as parents. The wall shows a conflict action and the
+existing text panel presents the full alternatives. The editor carries the basis
+it displayed, keeps a failed save open, and never silently rebases an old draft.
+Text edits retain favorite/tag/provenance state and local recency. The v14 upgrade
+can replay the initial encrypted operation to recover ancestry while preserving
+an edit whose original upload chunks have already been reclaimed.
 
 Every device starts disabled. Constructing the production services does not access
 CloudKit or the synchronizable Keychain. The host resumes stored consent only
@@ -112,6 +127,28 @@ and control fencing make retry and restart safe without sharing the local store
 or local-history key. See [release provisioning](../releasing.md) for the signed
 capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
 for isolated real-store coverage; those tests do not establish live iCloud delivery.
+
+`ClipboardHistorySyncFiles` prepares currently accessible ordinary-file bytes
+before staging an entry envelope. Source paths and bookmarks remain local.
+The small-file path automatically fetches at most 5,000,000 original bytes;
+larger files retain explicit pending-upload metadata until the streaming slice.
+Directory/package/symlink content is not flattened into an ordinary file.
+Metadata discovery skips file-body assets; only an authenticated entry descriptor
+authorizes a version download. Normal paste and host actions require every file
+member to be available and never silently return a subset.
+
+`ClipboardSyncFileIO` verifies authentication, complete length, and digest in
+memory before writing any plaintext. It publishes into the visible
+`~/Documents/AnyDoor/Clipboard/` working root, under account/object/version folders,
+with no-follow directory traversal, a synced ordinary pending output, and atomic
+non-overwriting publication. This visible working location is the plaintext
+exception; encrypted transfer/outbox storage has no plaintext download cache.
+The version descriptor is durable before publication, so interrupted publication
+retries only adopt identical complete bytes and refuse an unrelated existing file.
+Missing or replaced working files are unavailable, not a complete-looking path.
+History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
+remain independent and do not create Linked Locations. Watching, later versions,
+move reconciliation, and conflict resolution are separate implementation slices.
 
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.

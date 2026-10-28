@@ -9,6 +9,7 @@ struct ClipboardSyncResetJournal: Codable, Sendable {
     var deletedRecordCount = 0
     var stage = ClipboardHistoryCloudResetStatus.Stage.preparing
     var failure: ClipboardHistorySyncPhase?
+    var retryNotBefore: Date?
 
     var status: ClipboardHistoryCloudResetStatus {
         .init(stage: stage, deletedRecordCount: deletedRecordCount, failure: failure)
@@ -54,13 +55,23 @@ extension ClipboardHistoryModule {
         await retrySync()
     }
 
-    func cloudReset(in database: Database) throws -> ClipboardSyncResetJournal? {
-        try Data.fetchOne(database, sql: "SELECT journal FROM clipboard_sync_reset WHERE id = 1")
+    func cloudReset(in database: Database, accountID: String? = nil) throws -> ClipboardSyncResetJournal? {
+        let scope = try accountID ?? syncSettings(in: database).accountID
+        guard let scope else { return nil }
+        return try Data.fetchOne(database, sql: "SELECT journal FROM clipboard_sync_resets WHERE account_id = ?", arguments: [scope])
             .map { try JSONDecoder().decode(ClipboardSyncResetJournal.self, from: $0) }
     }
 
-    func currentCloudReset() throws -> ClipboardSyncResetJournal? {
-        try requiredDatabase().read { try cloudReset(in: $0) }
+    func currentCloudReset(accountID: String? = nil) throws -> ClipboardSyncResetJournal? {
+        try requiredDatabase().read { try cloudReset(in: $0, accountID: accountID) }
+    }
+
+    func hasPendingCloudResets() throws -> Bool {
+        try requiredDatabase().read { database in
+            try Data.fetchAll(database, sql: "SELECT journal FROM clipboard_sync_resets").contains {
+                try JSONDecoder().decode(ClipboardSyncResetJournal.self, from: $0).status.isPending
+            }
+        }
     }
 
     func currentSyncAccountID() throws -> String? {
@@ -74,14 +85,17 @@ extension ClipboardHistoryModule {
     }
 
     func saveCloudReset(_ journal: ClipboardSyncResetJournal, in database: Database) throws {
-        try database.execute(sql: "UPDATE clipboard_sync_reset SET journal = ? WHERE id = 1",
-            arguments: [try JSONEncoder().encode(journal)])
+        try database.execute(sql: """
+            INSERT INTO clipboard_sync_resets(account_id, journal) VALUES (?, ?)
+            ON CONFLICT(account_id) DO UPDATE SET journal = excluded.journal
+            """, arguments: [journal.account.identifier, try JSONEncoder().encode(journal)])
     }
 
     /// Keep user history, tags, memberships, and cross-account authorization
     /// records. Only this collection's publication state is retired.
     func retireLocalSyncCollection(accountID: String, in database: Database) throws {
         try database.execute(sql: "DELETE FROM clipboard_sync_outbox WHERE account_id = ?", arguments: [accountID])
+        try database.execute(sql: "DELETE FROM clipboard_sync_tag_states WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "UPDATE clipboard_sync_tags SET selected = 0, locally_authorized = 0, record_id = NULL WHERE account_id = ?",
             arguments: [accountID])
     }
@@ -99,6 +113,47 @@ extension ClipboardHistoryModule {
         }
         syncSuspended = true
         setSyncPhase(.disabled)
+    }
+
+    /// Old account journals remain dormant while another account participates.
+    /// Resolving the current system account never grants ordinary sync consent.
+    func discoverPendingCloudReset(generation: UInt64) async {
+        do {
+            guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
+            try admitCloudResetDiscovery(generation)
+            let account = try await services.transport.account()
+            try admitCloudResetDiscovery(generation)
+            if let journal = try currentCloudReset(accountID: account.identifier), journal.status.isPending {
+                try await waitForWriteTurn()
+                try admitCloudResetDiscovery(generation)
+                try syncWrite { database in
+                    try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ?, enabled = 0 WHERE id = 1",
+                        arguments: [account.identifier])
+                    try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
+                }
+                if let deadline = journal.retryNotBefore, deadline > now() { publishSyncStatus(); return }
+                await performCloudReset(generation: generation)
+            } else if syncStatus().isEnabled {
+                await performSync(generation: generation, allowAccountBinding: false)
+            } else if let bound = try currentCloudReset(), bound.status.isPending, bound.account != account {
+                throw ClipboardSyncServiceError.accountChanged
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            if let journal = try? currentCloudReset(), journal.status.isPending {
+                await failCloudReset(error, journal: journal, generation: generation)
+            } else {
+                let delay: TimeInterval?
+                if case ClipboardSyncServiceError.network(let retryAfter) = error { delay = retryAfter } else { delay = nil }
+                await finishSync(syncFailurePhase(error), generation: generation, retryAfter: delay)
+            }
+        }
+    }
+
+    func admitCloudResetDiscovery(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard generation == syncGeneration, !syncSuspended, availability == .ready else { throw CancellationError() }
     }
 
     func performCloudReset(generation: UInt64) async {
@@ -138,6 +193,7 @@ extension ClipboardHistoryModule {
             if journal.resetID != control.epoch { journal.resetID = control.epoch; journal.cursor = nil }
             journal.stage = .clearing
             journal.failure = nil
+            journal.retryNotBefore = nil
             try syncWrite { database in
                 try retireLocalSyncCollection(accountID: journal.account.identifier, in: database)
                 try saveCloudReset(journal, in: database)
@@ -161,6 +217,7 @@ extension ClipboardHistoryModule {
             guard control.phase == "stopped", control.epoch == journal.resetID else { throw ClipboardSyncServiceError.missingRemoteState }
             journal.stage = .completed
             journal.failure = nil
+            journal.retryNotBefore = nil
             try syncWrite { database in
                 var state = try syncAccountState(journal.account, in: database)
                 state.control = control
@@ -175,23 +232,24 @@ extension ClipboardHistoryModule {
         } catch is CancellationError {
             return
         } catch {
-            do {
-                try await waitForWriteTurn()
-                try admitCloudReset(generation)
-                journal.failure = syncFailurePhase(error)
-                let delay: TimeInterval?
-                if case ClipboardSyncServiceError.network(let retryAfter) = error { delay = retryAfter } else { delay = nil }
-                let deadline = delay.flatMap { $0.isFinite && $0 > 0 ? now().addingTimeInterval($0) : nil }
-                try syncWrite { database in
-                    try saveCloudReset(journal, in: database)
-                    try database.execute(sql: "UPDATE clipboard_sync_recovery SET retry_not_before = ? WHERE id = 1",
-                        arguments: [deadline?.timeIntervalSince1970])
-                }
-                publishSyncStatus()
-            } catch {
-                guard generation == syncGeneration, !syncSuspended else { return }
-                setSyncPhase(.failed(.localStorage))
-            }
+            await failCloudReset(error, journal: journal, generation: generation)
+        }
+    }
+
+    private func failCloudReset(_ error: Error, journal: ClipboardSyncResetJournal, generation: UInt64) async {
+        do {
+            try await waitForWriteTurn()
+            try admitCloudReset(generation)
+            var journal = journal
+            journal.failure = syncFailurePhase(error)
+            let delay: TimeInterval?
+            if case ClipboardSyncServiceError.network(let retryAfter) = error { delay = retryAfter } else { delay = nil }
+            journal.retryNotBefore = delay.flatMap { $0.isFinite && $0 > 0 ? now().addingTimeInterval($0) : nil }
+            try syncWrite { try saveCloudReset(journal, in: $0) }
+            publishSyncStatus()
+        } catch {
+            guard generation == syncGeneration, !syncSuspended else { return }
+            setSyncPhase(.failed(.localStorage))
         }
     }
 

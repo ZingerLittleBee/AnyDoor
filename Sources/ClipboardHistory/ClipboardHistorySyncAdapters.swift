@@ -29,6 +29,7 @@ struct ClipboardSyncControl: Codable, Equatable, Sendable {
 enum ClipboardSyncRecordKind: String, Codable, Sendable {
     case tag
     case entry
+    case fileBody
 }
 
 struct ClipboardSyncRemoteRecord: Codable, Equatable, Sendable {

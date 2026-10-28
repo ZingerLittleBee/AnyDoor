@@ -129,9 +129,12 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             }
         }
         try checkCancellation(generation)
-        guard fetched.deletedRecordIDs.isEmpty else {
+        guard !fetched.deletedRecordIDs.contains(controlID(account)) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
+        // A retained zone includes deletion history from completed resets. A
+        // content deletion is not the loss of the permanent authority record.
+        var requiresAuthorityRefresh = !fetched.deletedRecordIDs.isEmpty
         var records: [ClipboardSyncRemoteRecord] = []
         for record in fetched.records {
             guard record.recordID.zoneID == zoneID(account) else {
@@ -145,15 +148,22 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 }
             case Self.controlType:
                 let observed = try decodeControl(record, account: account)
-                guard observed.epoch == control.epoch, observed.keyID == control.keyID,
-                      observed.phase == "active"
-                else { throw ClipboardSyncServiceError.missingRemoteState }
+                if observed.epoch != control.epoch || observed.keyID != control.keyID || observed.phase != "active" {
+                    requiresAuthorityRefresh = true
+                }
             case Self.chunkType:
                 // Unpublished immutable chunks are not complete history.
                 break
             default:
                 throw ClipboardSyncServiceError.unsupportedVersion
             }
+        }
+        if requiresAuthorityRefresh {
+            let authoritative = try await self.control(for: account)
+            try checkCancellation(generation)
+            guard let authoritative, authoritative.epoch == control.epoch,
+                  authoritative.keyID == control.keyID, authoritative.keyCheck == control.keyCheck,
+                  authoritative.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
         }
         return ClipboardSyncChanges(
             records: records.sorted { $0.recordID < $1.recordID },

@@ -186,6 +186,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v14_clipboard_sync") { database in
             try Self.createSyncSchema(in: database)
         }
+        migrator.registerMigration("v15_clipboard_sync_tags") { database in
+            try Self.createSyncTagSchema(in: database)
+        }
         migrator.registerMigration("v16_clipboard_sync_recovery") { database in
             try database.execute(sql: """
                 CREATE TABLE clipboard_sync_recovery (
@@ -196,14 +199,28 @@ extension ClipboardHistoryModule {
                 INSERT INTO clipboard_sync_recovery(id) VALUES (1);
                 """)
         }
+        migrator.registerMigration("v18_clipboard_sync_versions") { database in
+            try Self.createSyncVersionSchema(in: database)
+        }
+        migrator.registerMigration("v19_clipboard_sync_files") { database in
+            try Self.createSyncFileSchema(in: database)
+        }
         migrator.registerMigration("v20_clipboard_sync_reset") { database in
             try database.execute(sql: """
                 CREATE TABLE clipboard_sync_reset (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
-                    journal BLOB,
                     activation_authorized INTEGER NOT NULL DEFAULT 0
                 );
                 INSERT INTO clipboard_sync_reset(id) VALUES (1);
+                CREATE TABLE clipboard_sync_resets (
+                    account_id TEXT PRIMARY KEY NOT NULL,
+                    journal BLOB NOT NULL
+                ) WITHOUT ROWID;
+                CREATE TABLE clipboard_sync_reset_exclusions (
+                    account_id TEXT NOT NULL,
+                    local_entry_id TEXT NOT NULL REFERENCES clipboard_entries(id) ON DELETE CASCADE,
+                    PRIMARY KEY(account_id, local_entry_id)
+                ) WITHOUT ROWID;
                 """)
         }
         return migrator

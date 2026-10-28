@@ -14,6 +14,8 @@ struct ClipboardCardView: View {
     var onPluginAction:
         ((NativePluginID, PluginClipboardAction, PluginClipboardPayload) -> Void)?
     var onRevealInFinder: (() -> Void)?
+    var onOpenFiles: (() -> Void)?
+    var onSaveFiles: (() -> Void)?
     var onToggleTag: ((String) -> Void)?
     var onNewTag: (() -> Void)?
     var onIgnoreSource: (() -> Void)?
@@ -31,6 +33,13 @@ struct ClipboardCardView: View {
             Divider()
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let status = entry.syncFileStatusText {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(8)
+            }
         }
         .frame(width: 230, height: 230)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -47,7 +56,7 @@ struct ClipboardCardView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(entry.presentationTitle)
-        .task(id: entry.id) {
+        .task(id: entry.filePresentationIdentity) {
             async let preview = presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
@@ -77,8 +86,8 @@ struct ClipboardCardView: View {
         if hostMaterialization?.editableText != nil, let onEdit {
             menu.addItem(
                 ClosureMenuItem(
-                    title: L(.clipboardActionEdit),
-                    systemImage: "pencil",
+                    title: L(entry.hasTextConflict ? .clipboardTextConflict : .clipboardActionEdit),
+                    systemImage: entry.hasTextConflict ? "arrow.triangle.2.circlepath" : "pencil",
                     handler: onEdit
                 )
             )
@@ -115,6 +124,14 @@ struct ClipboardCardView: View {
                     handler: onRevealInFinder
                 )
             )
+        }
+        if entry.facets.contains(.file) {
+            if let onOpenFiles {
+                menu.addItem(ClosureMenuItem(title: L(.clipboardActionOpenFiles), systemImage: "arrow.up.forward.app", handler: onOpenFiles))
+            }
+            if let onSaveFiles {
+                menu.addItem(ClosureMenuItem(title: L(.clipboardActionSaveFiles), systemImage: "square.and.arrow.down", handler: onSaveFiles))
+            }
         }
         if let onIgnoreSource,
             let bundleID = entry.source.bundleIdentifier
@@ -201,6 +218,15 @@ struct ClipboardCardView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            if entry.hasTextConflict, let onEdit {
+                Button(action: onEdit) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .help(L(.clipboardTextConflict))
+                .accessibilityLabel(L(.clipboardTextConflict))
+            }
             if entry.isFavorite {
                 Image(systemName: "star.fill")
                     .font(.system(size: 10))
