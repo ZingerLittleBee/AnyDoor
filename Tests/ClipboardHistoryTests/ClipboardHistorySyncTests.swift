@@ -8,6 +8,27 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testRejoinDuringPendingWithdrawalCleanupPublishesBeforeTheSyncPassCompletes() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xD7, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("rejoin during cleanup")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        _ = try await first.apply(.setTags(capture.entryID, []))
+        await cloud.holdNextPurge()
+        let cleanup = Task { await first.retrySync() }
+        await cloud.waitForHeldPurge()
+        _ = try await first.apply(.setTags(capture.entryID, [tag.id]))
+        await cloud.releasePurge()
+        await cleanup.value
+        let fresh = makeModule(services: services, keyByte: 0xD8, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        let restored = try await fresh.page(.init()).entries
+        XCTAssertEqual(restored.map(\.id), [capture.entryID])
+    }
+
     func testOfflineRenameCannotReactivateWithdrawnContentEvenWithALaterTagRevision() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -3450,6 +3471,9 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var losesPurgeResponse = false
     private var purgedRecords = Set<String>()
     private var revision = 0
+    private var holdsPurge = false
+    private var heldPurge: CheckedContinuation<Void, Never>?
+    private var purgeObserver: CheckedContinuation<Void, Never>?
     private var holdsEntryCommit = false
     private var heldEntryCommit: CheckedContinuation<Void, Never>?
     private var entryCommitObserver: CheckedContinuation<Void, Never>?
@@ -3619,8 +3643,22 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return bytes
     }
     func loseNextPurgeResponse() { losesPurgeResponse = true }
+    func holdNextPurge() { holdsPurge = true }
+    func waitForHeldPurge() async {
+        guard heldPurge == nil else { return }
+        await withCheckedContinuation { purgeObserver = $0 }
+    }
+    func releasePurge() { heldPurge?.resume(); heldPurge = nil }
     func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
-               control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        if holdsPurge {
+            holdsPurge = false
+            await withCheckedContinuation {
+                heldPurge = $0
+                purgeObserver?.resume()
+                purgeObserver = nil
+            }
+        }
         try checkAccount(account)
         guard let current = descriptors[account.identifier], current == control else { throw ClipboardSyncServiceError.conflict }
         guard current.phase == "active", current.epoch == record.epoch, current.keyID == record.keyID else {
