@@ -606,6 +606,7 @@ extension ClipboardHistoryModule {
         }
         monitoringRequested = false
         monitoringEnabled = false
+        await suspendSync()
         await captureMonitor?.setEnabled(false)
         await stopMaintenanceTask()
         await stopDerivedJobScheduler()

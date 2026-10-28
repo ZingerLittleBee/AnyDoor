@@ -97,6 +97,12 @@ public actor ClipboardHistoryModule {
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
+    var syncServices: ClipboardSyncServices?
+    var syncPhase: ClipboardHistorySyncPhase = .disabled
+    var syncGeneration: UInt64 = 0
+    var syncTask: Task<Void, Never>?
+    var syncPollTask: Task<Void, Never>?
+    var syncSuspended = true
 
     /// The `appBuild` of a build without a `CFBundleVersion` (`swift run`),
     /// fixed so that relaunching one never resets the retry budget.
@@ -257,7 +263,8 @@ public actor ClipboardHistoryModule {
             ClipboardHistoryVisionRecognizer(),
         notificationCenter: NotificationCenter = .default,
         captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil,
-        appBuild: String = unversionedAppBuild
+        appBuild: String = unversionedAppBuild,
+        syncServices: ClipboardSyncServices? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -286,6 +293,7 @@ public actor ClipboardHistoryModule {
         self.faultInjector = faultInjector
         self.appBuild = appBuild
         self.now = now
+        self.syncServices = syncServices
         self.maintenanceScheduler = maintenanceScheduler
         self.storageTraversalHook = storageTraversalHook
         self.fingerprintDigest = fingerprintDigest
@@ -455,6 +463,7 @@ public actor ClipboardHistoryModule {
             name: .clipboardHistoryV2DidMutate,
             object: nil
         )
+        scheduleSync()
     }
 
     func installCaptureMonitorForTesting(
@@ -552,6 +561,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         isClosingStore = true
+        await suspendSync()
         // The monitor holds this module strongly. Drop it before the first
         // suspension, so a reentrant caller cannot reuse a monitor that is
         // being torn down. A setMonitoring call during or after the close

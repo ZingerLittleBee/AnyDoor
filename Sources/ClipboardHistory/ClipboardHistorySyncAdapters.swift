@@ -62,6 +62,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case accessDenied
     case network(retryAfter: TimeInterval?)
     case quota
+    case localStorage
     case conflict
     case missingRemoteState
     case corruptData

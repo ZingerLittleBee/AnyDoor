@@ -65,8 +65,3 @@ public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {
     }
 }
 
-extension ClipboardHistoryModule {
-    public func syncStatus() -> ClipboardHistorySyncStatus {
-        ClipboardHistorySyncStatus()
-    }
-}

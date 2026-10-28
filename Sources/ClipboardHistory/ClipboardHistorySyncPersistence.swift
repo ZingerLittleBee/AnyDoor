@@ -5,7 +5,9 @@ extension ClipboardHistoryModule {
     public func syncTags() throws -> [ClipboardHistorySyncTag] {
         let database = try requiredDatabase()
         return try database.read { database in
-            try Row.fetchAll(database, sql: """
+            let accountID = try syncSettings(in: database).accountID ?? ""
+            let selected = Set(try selectedSyncTags(accountID: accountID, in: database).map(\.id))
+            return try Row.fetchAll(database, sql: """
                 SELECT definition.id, definition.display_name,
                        (SELECT COUNT(*) FROM clipboard_entry_tags AS membership
                         JOIN clipboard_entries AS entry ON entry.id = membership.entry_id
@@ -16,7 +18,7 @@ extension ClipboardHistoryModule {
                 """).map { row in
                     ClipboardHistorySyncTag(
                         id: row["id"], displayName: row["display_name"],
-                        isSelected: false, eligibleEntryCount: row["eligible_count"]
+                        isSelected: selected.contains(row["id"]), eligibleEntryCount: row["eligible_count"]
                     )
                 }
         }
