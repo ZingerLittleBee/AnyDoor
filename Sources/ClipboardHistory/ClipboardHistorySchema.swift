@@ -235,6 +235,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v24_clipboard_linked_locations") { database in
             try Self.createLinkedFileSchema(in: database)
         }
+        migrator.registerMigration("v25_clipboard_sync_file_identity") { database in
+            try Self.createLinkedFileIdentitySchema(in: database)
+        }
         return migrator
     }
 

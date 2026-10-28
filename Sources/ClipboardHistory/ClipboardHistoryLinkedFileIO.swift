@@ -9,6 +9,7 @@ struct ClipboardLinkedFileProof: Sendable {
     let digest: Data
     let byteCount: Int64
     let stamp: ClipboardLinkedFileStamp
+    let nativeIdentity: ClipboardLinkedNativeIdentity?
 }
 
 struct ClipboardLinkedFileStamp: Sendable {
@@ -148,6 +149,7 @@ enum ClipboardLinkedFileIO {
         guard fstat(file, &before) == 0, before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), before.st_size >= 0 else {
             throw ClipboardHistoryModuleError.invalidFileAssociation
         }
+        let nativeIdentity = try ClipboardLinkedNativeIdentity.read(url, status: before)
         let values = try url.resourceValues(forKeys: [.fileResourceIdentifierKey, .isSymbolicLinkKey])
         guard values.isSymbolicLink != true, let identifier = values.fileResourceIdentifier as? NSObject else {
             throw ClipboardHistoryModuleError.invalidFileAssociation
@@ -185,6 +187,6 @@ enum ClipboardLinkedFileIO {
         return ClipboardLinkedFileProof(url: url,
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
-            digest: Data(hasher.finalize()), byteCount: offset, stamp: ClipboardLinkedFileStamp(after))
+            digest: Data(hasher.finalize()), byteCount: offset, stamp: ClipboardLinkedFileStamp(after), nativeIdentity: nativeIdentity)
     }
 }

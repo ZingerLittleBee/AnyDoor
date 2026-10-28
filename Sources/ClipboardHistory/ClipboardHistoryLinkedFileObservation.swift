@@ -39,6 +39,9 @@ struct ClipboardLinkedLocationSource: Sendable {
     let objectID: UUID
     let url: URL
     let identity: Data
+    let bookmark: Data
+    let revision: UInt64
+    let nativeIdentity: ClipboardLinkedNativeIdentity?
     let baseVersionID: UUID
     let baseDigest: Data
     let state: ClipboardHistoryLinkedFileLocationState
@@ -100,9 +103,9 @@ extension ClipboardHistoryModule {
 
     /// Reconcile on resume/poll as well as notifications: an event is a hint,
     /// not durable evidence that a file's saved bytes are unchanged.
-    func reconcileLinkedFileObservations(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+    func reconcileLinkedFileObservations(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64, onlyUnproven: Bool = false) async throws {
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
-        for source in sources {
+        for source in sources where !onlyUnproven || source.nativeIdentity == nil {
             _ = try await observeLinkedLocation(source.id, account: account, epoch: control.epoch, generation: generation)
         }
     }
@@ -112,7 +115,9 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: account, services: services)
         guard let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: $0).first }) else { return false }
         let inspection = Task.detached(priority: .utility) {
-            Result { try ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity) }
+            Result {
+                try ClipboardLinkedIdentityResolution.inspect(source)
+            }
         }
         let result = await withTaskCancellationHandler {
             await inspection.value
@@ -121,23 +126,31 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: account, services: services)
         let changed = try syncWrite { database in
             guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: database).first,
+                  current.revision == source.revision,
                   current.identity == source.identity, current.baseVersionID == source.baseVersionID else { return false }
             let state: ClipboardHistoryLinkedFileLocationState
             let digest: Data?
+            let proof: ClipboardLinkedFileProof?
             switch result {
-            case .success(let proof):
-                digest = proof.digest
+            case .success(let inspected):
+                proof = inspected
+                digest = inspected.digest
                 if current.state == .conflict { state = .conflict }
-                else if proof.digest != current.baseDigest { state = .localChanges }
+                else if inspected.digest != current.baseDigest { state = .localChanges }
                 else { state = current.state == .pendingUpload ? .pendingUpload : .current }
             case .failure:
+                proof = nil
                 digest = nil
                 state = .unavailable
             }
             let previous = try Data.fetchOne(database, sql: "SELECT observed_digest FROM clipboard_sync_linked_locations WHERE id = ?", arguments: [id.uuidString])
-            guard state != current.state || digest != previous else { return false }
-            try database.execute(sql: "UPDATE clipboard_sync_linked_locations SET state = ?, observed_digest = ? WHERE id = ?",
-                arguments: [state.rawValue, digest, id.uuidString])
+            guard state != current.state || digest != previous || proof.map({ $0.url != current.url || $0.nativeIdentity != current.nativeIdentity || $0.identity != current.identity }) == true else { return false }
+            try database.execute(sql: """
+                UPDATE clipboard_sync_linked_locations SET state = ?, observed_digest = ?,
+                  path = ?, bookmark = ?, identity = ?, native_identity = ? WHERE id = ?
+                """, arguments: [state.rawValue, digest, proof?.url.path ?? current.url.path,
+                    proof?.bookmark ?? current.bookmark, proof?.identity ?? current.identity,
+                    try (proof?.nativeIdentity ?? current.nativeIdentity)?.encoded(), id.uuidString])
             try Self.bumpHistoryRevision(in: database)
             return true
         }
@@ -163,7 +176,9 @@ extension ClipboardHistoryModule {
                     throw ClipboardHistoryModuleError.storageFailure
                 }
                 return ClipboardLinkedLocationSource(id: id, objectID: objectID, url: URL(fileURLWithPath: row["path"]),
-                    identity: row["identity"], baseVersionID: base, baseDigest: row["base_digest"], state: state)
+                    identity: row["identity"], bookmark: row["bookmark"], revision: row["revision"],
+                    nativeIdentity: try (row["native_identity"] as Data?).map { try JSONDecoder().decode(ClipboardLinkedNativeIdentity.self, from: $0) },
+                    baseVersionID: base, baseDigest: row["base_digest"], state: state)
             }
     }
 }

@@ -61,7 +61,7 @@ extension ClipboardHistoryModule {
                 let state: ClipboardHistoryLinkedFileLocationState = saved.map { $0.digest == digest ? .pendingUpload : .localChanges } ?? .unavailable
                 try syncWrite { database in
                     guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
-                          current.identity == source.identity, current.baseVersionID == source.baseVersionID else { return }
+                          current.revision == source.revision, current.identity == source.identity, current.baseVersionID == source.baseVersionID else { return }
                     try database.execute(sql: """
                         UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
                           state = ?, pending_version_id = ?, observed_digest = ? WHERE id = ?
@@ -85,7 +85,7 @@ extension ClipboardHistoryModule {
     private func linkedSourceIsCurrent(_ source: ClipboardLinkedLocationSource, account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> Bool {
         try linkedRead { database in
             guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first else { return false }
-            return current.identity == source.identity && current.baseVersionID == source.baseVersionID
+            return current.revision == source.revision && current.identity == source.identity && current.baseVersionID == source.baseVersionID
         }
     }
 
@@ -149,7 +149,7 @@ extension ClipboardHistoryModule {
                         guard try Bool.fetchOne(database, sql: "SELECT enabled = 1 AND account_id = ? FROM clipboard_sync_settings WHERE id = 1",
                             arguments: [account.identifier]) == true,
                               let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
-                              current.baseVersionID == source.baseVersionID, current.identity == source.identity else {
+                              current.revision == source.revision, current.baseVersionID == source.baseVersionID, current.identity == source.identity else {
                             throw CancellationError()
                         }
                         return try mutation()
@@ -175,10 +175,10 @@ extension ClipboardHistoryModule {
         try syncWrite { database in
             try database.execute(sql: """
                 UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
-                  bookmark = ?, identity = ?, observed_digest = ?, state = ?, pending_version_id = NULL,
+                  bookmark = ?, identity = ?, native_identity = ?, observed_digest = ?, state = ?, pending_version_id = NULL,
                   applying_version_id = NULL, applying_digest = NULL, replacement_path = NULL, replacement_identity = NULL
                 WHERE id = ?
-                """, arguments: [versionID.uuidString, digest, proof.bookmark, proof.identity, proof.digest,
+                """, arguments: [versionID.uuidString, digest, proof.bookmark, proof.identity, try proof.nativeIdentity?.encoded(), proof.digest,
                     proof.digest == digest ? "current" : "localChanges", source.id.uuidString])
             try Self.bumpHistoryRevision(in: database)
         }
