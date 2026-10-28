@@ -2931,7 +2931,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             bytes += Int64(chunk.count)
             try await progress(bytes)
         }
-        return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
+        return try await commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
         fileSegmentRequests.append(index)

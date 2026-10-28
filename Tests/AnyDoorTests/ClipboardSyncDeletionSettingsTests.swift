@@ -78,6 +78,13 @@ private actor DeletionSettingsKeys: ClipboardSyncKeyStoring {
 }
 
 private actor DeletionSettingsCloud: ClipboardSyncTransport {
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "settings")
     private var descriptor: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
