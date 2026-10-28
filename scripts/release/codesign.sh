@@ -8,13 +8,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/release/codesign.sh --app PATH --identity ID [--keychain PATH]
+Usage: scripts/release/codesign.sh --app PATH --identity ID [--keychain PATH] [--profile PATH]
 
   --app PATH       The assembled AnyDoor.app (scripts/release/assemble.sh).
   --identity ID    Signing identity: the certificate's SHA-1 in CI, or `-` for
                    an ad-hoc signature (rehearsals; no secure timestamp and no
                    Team ID assertion).
   --keychain PATH  Only search this keychain for the identity.
+  --profile PATH   Developer ID provisioning profile authorizing Clipboard Sync.
+                   Required for real signing; unavailable in ad-hoc rehearsals.
 
 A real identity signs with the hardened runtime and a secure timestamp, and the
 result must carry TeamIdentifier APPLE_TEAM_ID (scripts/release/release.conf).
@@ -24,15 +26,17 @@ USAGE
 APP=""
 IDENTITY=""
 KEYCHAIN=""
+PROFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h | --help) usage; exit 0 ;;
-    --app | --identity | --keychain)
+    --app | --identity | --keychain | --profile)
       [[ $# -ge 2 && -n "$2" ]] || die "$1 requires a value"
       case "$1" in
         --app) APP="$2" ;;
         --identity) IDENTITY="$2" ;;
         --keychain) KEYCHAIN="$2" ;;
+        --profile) PROFILE="$2" ;;
       esac
       shift 2 ;;
     *) usage >&2; die "unknown argument: $1" ;;
@@ -50,13 +54,26 @@ ENTITLEMENTS="$REPO_ROOT/Resources/AnyDoor.entitlements"
 ADHOC=0
 SIGN_FLAGS=(--force --options=runtime)
 if [[ "$IDENTITY" == "-" ]]; then
+  [[ -z "$PROFILE" && ! -e "$APP/Contents/embedded.provisionprofile" && ! -L "$APP/Contents/embedded.provisionprofile" ]] \
+    || die "ad-hoc signing cannot include a provisioning profile"
   ADHOC=1
 else
+  [[ -n "$PROFILE" ]] || die "--profile is required for Developer ID Clipboard Sync signing"
   # Developer ID requires a secure timestamp; ad-hoc signatures cannot carry one.
   SIGN_FLAGS+=(--timestamp)
 fi
 if [[ -n "$KEYCHAIN" ]]; then
   SIGN_FLAGS+=(--keychain "$KEYCHAIN")
+fi
+
+if [[ "$ADHOC" -eq 0 ]]; then
+  entitlements_dir="$(mktemp -d "${TMPDIR:-/tmp}/anydoor-entitlements.XXXXXX")"
+  trap 'rm -rf "$entitlements_dir"' EXIT
+  ENTITLEMENTS="$entitlements_dir/AnyDoor.entitlements"
+  # Validate before touching any signatures. Embed the authorized profile before
+  # signing the bundle, and use concrete values rather than Xcode-only macros.
+  python3 "$RELEASE_DIR/provisioning.py" prepare --app "$APP" \
+    --profile "$PROFILE" --identity "$IDENTITY" --entitlements "$ENTITLEMENTS"
 fi
 
 SIGNED=()
@@ -111,7 +128,7 @@ grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$app_details" \
   || die "$APP is not signed with the hardened runtime"
 
 if [[ "$ADHOC" -eq 1 ]]; then
-  log "Ad-hoc signature verified (no Team ID to assert)"
+  log "Ad-hoc signature verified; native Clipboard Sync unavailable (no provisioned identity)"
   exit 0
 fi
 
@@ -124,4 +141,6 @@ for code in "${SIGNED[@]}"; do
   [[ "$team" == "$TEAM_ID" ]] \
     || die "${code#"${APP%/*}/"} has TeamIdentifier '${team:-none}', expected $TEAM_ID"
 done
+python3 "$RELEASE_DIR/provisioning.py" verify --app "$APP" \
+  --profile "$PROFILE" --identity "$IDENTITY" --entitlements "$ENTITLEMENTS"
 log "Signed ${#SIGNED[@]} code objects with TeamIdentifier $TEAM_ID"
