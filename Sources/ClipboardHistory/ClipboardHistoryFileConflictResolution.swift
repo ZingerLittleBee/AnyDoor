@@ -153,11 +153,18 @@ extension ClipboardHistoryModule {
             try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             guard storeEpoch == store else { throw CancellationError() }
             try faultInjector.check(.fileConflictBeforeStaging)
+            try linkedRead { database in
+                try Self.validateConflictBasis(fileConflictBasis(entryID: entryID, objectID: snapshot.objectID, in: database), snapshot: snapshot)
+                guard proofs.values.allSatisfy({ $0.stamp.matches($0.url) }) else { throw ClipboardHistoryFileConflictError.stalePlan }
+            }
+            let published = try ClipboardSyncFilePublication.publish(output, descriptor: result.descriptor,
+                root: syncWorkingRoot, accountID: account.identifier, faults: faultInjector)
+            try await ClipboardSyncFilePublication.verifyPublished(published, candidate: output, faults: faultInjector)
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            guard storeEpoch == store else { throw CancellationError() }
             try syncWrite { database in
                 try Self.validateConflictBasis(fileConflictBasis(entryID: entryID, objectID: snapshot.objectID, in: database), snapshot: snapshot)
                 guard proofs.values.allSatisfy({ $0.stamp.matches($0.url) }) else { throw ClipboardHistoryFileConflictError.stalePlan }
-                let published = try ClipboardSyncFilePublication.publish(output, descriptor: result.descriptor,
-                    root: syncWorkingRoot, accountID: account.identifier, faults: faultInjector)
                 for prepared in journal.prepared where prepared.descriptor.versionID != journal.resultID {
                     try storePreparedFileVersion(prepared, account: account, control: control, in: database)
                 }

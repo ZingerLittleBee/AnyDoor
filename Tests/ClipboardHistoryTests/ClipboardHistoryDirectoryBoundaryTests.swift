@@ -6,6 +6,40 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testConflictResolutionRejectsNestedChangesToItsConstructedResult() async throws {
+        let mutation = ConflictTreeOutputMutation()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .fileConflictBeforeStaging { mutation.changeCandidate() }
+            return false
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("nested"), withIntermediateDirectories: true)
+            try Data("initial tree".utf8).write(to: root.appendingPathComponent("nested/note.txt"))
+        })
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("remote branch".utf8).write(to: fixture.original.appendingPathComponent("nested/note.txt"))
+        let localBytes = Data("chosen local branch".utf8)
+        try localBytes.write(to: working.url.appendingPathComponent("nested/note.txt"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        let before = try await fixture.receiver.page(.init()).entries.first?.syncFiles.first
+        mutation.arm(fixture.receiverRoot)
+        do {
+            _ = try await fixture.receiver.resolveFileConflict(plan, choosing: .localLocation(working.id))
+            XCTFail("A changed constructed tree cannot become a complete conflict result")
+        } catch {}
+        XCTAssertTrue(mutation.changed)
+        let after = try await fixture.receiver.page(.init()).entries.first?.syncFiles.first
+        XCTAssertEqual(after?.availableVersionID, before?.availableVersionID)
+        XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent("nested/note.txt")), localBytes)
+        XCTAssertEqual(try Data(contentsOf: fixture.original.appendingPathComponent("nested/note.txt")), Data("remote branch".utf8))
+    }
+
+    @MainActor
     func testAuthenticatedTreeTraversalCannotReplaceTheCompleteDirectoryOrEscapeItsRoot() async throws {
         try await assertInvalidTreePath(.parentTraversal, reopen: true)
     }
@@ -170,6 +204,27 @@ extension ClipboardHistoryLinkedFileTests {
         XCTAssertEqual(localBranch.parents, [working.baseVersionID], "The chosen tree must retain its actual edited base")
         let resolved = try await fixture.receiver.page(.init())
         XCTAssertEqual(resolved.entries.first?.syncFiles.first?.hasConflict, false)
+    }
+}
+
+private final class ConflictTreeOutputMutation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var root: URL?
+    private var didChange = false
+    var changed: Bool { lock.withLock { didChange } }
+    func arm(_ root: URL) { lock.withLock { self.root = root } }
+    func changeCandidate() {
+        lock.withLock {
+            guard !didChange, let root,
+                  let entries = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return }
+            for case let url as URL in entries where url.lastPathComponent.hasPrefix("Receiving-") && url.pathExtension == "partial" {
+                do {
+                    try Data("unverified nested edit".utf8).write(to: url.appendingPathComponent("nested/note.txt"))
+                    didChange = true
+                } catch {}
+                return
+            }
+        }
     }
 }
 
