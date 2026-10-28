@@ -27,6 +27,10 @@ extension ClipboardHistoryModule {
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
             try await admitSync(generation, account: account, services: services)
+            if try linkedRead({ try Bool.fetchOne($0, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions
+                  WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'preparing')
+                """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]) }) == true { continue }
             guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
             if !selection.hasConflict, selection.latest.versionID == source.baseVersionID,
                source.state == .current || !canPublish { continue }
@@ -39,7 +43,16 @@ extension ClipboardHistoryModule {
             catch { continue }
             try await admitSync(generation, account: account, services: services)
             guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
-            if source.state == .conflict { continue }
+            if source.state == .conflict {
+                guard proof.digest == source.baseDigest, !selection.hasConflict,
+                      try linkedVersion(selection.latest.versionID, descendsFrom: source.baseVersionID,
+                        objectID: source.objectID, account: account, control: control),
+                      let pending = try linkedRead({ try String.fetchOne($0,
+                        sql: "SELECT pending_version_id FROM clipboard_sync_linked_locations WHERE id = ?", arguments: [source.id.uuidString]) }),
+                      let pendingID = UUID(uuidString: pending),
+                      try linkedVersion(selection.latest.versionID, descendsFrom: pendingID,
+                        objectID: source.objectID, account: account, control: control) else { continue }
+            }
             if selection.hasConflict || (proof.digest != source.baseDigest && selection.latest.versionID != source.baseVersionID) {
                 try setLinkedConflict(source, remoteVersion: selection.latest.versionID)
                 continue
@@ -110,6 +123,8 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: row["version_id"]) else { continue }
                 graph[id] = try JSONDecoder().decode([UUID].self, from: row["parents"])
             }
+            let nodes = graph.map { ClipboardSyncVersionNode(id: $0.key, parents: Set($0.value)) }
+            guard ClipboardSyncVersionGraph.isComplete(nodes) else { return false }
             var pending = [version]
             var visited = Set<UUID>()
             while let next = pending.popLast() {

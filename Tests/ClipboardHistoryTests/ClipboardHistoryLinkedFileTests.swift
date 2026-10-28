@@ -317,7 +317,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
     }
 
     @MainActor
-    func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
+    func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init(), initialBytes: Data = Data("initial linked bytes".utf8)) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         entryID: ClipboardHistoryEntryID, original: URL, root: URL, receiverRoot: URL,
         services: ClipboardSyncServices, cloud: LinkedFileCloud
@@ -326,7 +326,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         removeClipboardHistoryDirectoryAfterTest(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let original = root.appendingPathComponent("Linked notes.txt")
-        try Data("initial linked bytes".utf8).write(to: original)
+        try initialBytes.write(to: original)
         let cloud = LinkedFileCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: LinkedFileKeys(), pollingInterval: nil)
         let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51)
@@ -342,6 +342,12 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         try await sender.setSyncTagSelected(tag.definition.id, selected: true)
         try await sender.setSyncEnabled(true)
         try await receiver.setSyncEnabled(true)
+        if initialBytes.count > 5 * 1_024 * 1_024 {
+            let page = try await receiver.page(.init())
+            if let file = page.entries.first?.syncFiles.first {
+                try await receiver.requestSyncFileDownload(entryID: capture.entryID, objectID: file.id, versionID: file.versionID)
+            }
+        }
         return (sender, receiver, capture.entryID, original, root, receiverRoot, services, cloud)
     }
 
@@ -376,10 +382,20 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
+    private var purgedRecords: Set<String> = []
     private var commitsFail = false
     private var shouldHoldDownload = false
     private var heldDownload: CheckedContinuation<Void, Never>?
     private var cancellations = 0
+    private var fileDownloads: [UUID] = []
+    func downloadedFileVersions() -> [UUID] { fileDownloads }
+    func uploadedRecords() -> [ClipboardSyncUpload] { uploads }
+    func moveLastTwoRecordsToFront() {
+        guard uploads.count >= 2 else { return }
+        let tail = Array(uploads.suffix(2))
+        uploads.removeLast(2)
+        uploads.insert(contentsOf: tail, at: 0)
+    }
     func failCommits(_ fail: Bool) { commitsFail = fail }
     func holdNextDownload() { shouldHoldDownload = true }
     func downloadIsHeld() -> Bool { heldDownload != nil }
@@ -395,10 +411,10 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
-        return .init(records: uploads.dropFirst(offset).map(\.record), cursor: Data(String(uploads.count).utf8), hasMore: false)
+        return .init(records: uploads.dropFirst(offset).filter { !purgedRecords.contains($0.record.recordID) }.map(\.record), cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
-        guard let content = uploads.first(where: { $0.record == record }) else { throw ClipboardSyncServiceError.missingRemoteState }
+        guard !purgedRecords.contains(record.recordID), let content = uploads.first(where: { $0.record == record }) else { throw ClipboardSyncServiceError.recordUnavailable }
         return content.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
@@ -417,6 +433,15 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         return updated
     }
     func cancel() { cancellations += 1 }
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        guard let currentControl, account == identity, currentControl.epoch == control.epoch else { throw ClipboardSyncServiceError.accountChanged }
+        guard currentControl.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }
+        purgedRecords.insert(record.recordID)
+        let updated = advanced(currentControl)
+        self.currentControl = updated
+        return updated
+    }
     func cancellationCount() -> Int { cancellations }
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
         control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
@@ -431,6 +456,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        fileDownloads.append(record.operationID)
         if shouldHoldDownload {
             shouldHoldDownload = false
             await withCheckedContinuation { heldDownload = $0 }

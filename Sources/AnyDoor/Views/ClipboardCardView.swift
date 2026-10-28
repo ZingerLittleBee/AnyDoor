@@ -241,6 +241,11 @@ struct ClipboardCardView: View {
                 item.submenu = actions
                 destination.addItem(item)
             }
+            if entry.syncFiles.contains(where: { $0.id == objectID && $0.hasConflict }) || locations.contains(where: { $0.state == .conflict }) {
+                destination.addItem(ClosureMenuItem(title: L(.clipboardFileConflictTitle), systemImage: "arrow.triangle.2.circlepath") {
+                    Task { await presentation.beginFileConflict(entryID: entry.id, objectID: objectID) }
+                })
+            }
             if let onAssociateFile {
                 destination.addItem(.separator())
                 destination.addItem(ClosureMenuItem(title: L(.clipboardLinkedFileAssociate), systemImage: "link") {

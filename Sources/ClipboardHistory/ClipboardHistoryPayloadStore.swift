@@ -20,6 +20,9 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 }
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
+    case fileConflictAfterBranchFreeze
+    case fileConflictBeforeStaging
+    case fileConflictAfterStaging
     case diskFull
     case payloadWrite
     case payloadAuthentication

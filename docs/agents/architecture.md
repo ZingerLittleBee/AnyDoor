@@ -235,11 +235,39 @@ dirty locations retain their bytes and expose a pending conflict. Visible verifi
 replacement files beside a linked location are ordinary working output, not a
 plaintext download cache. History exposes Linked Locations and Associate File;
 normal materialization prefers the stable linked location after completeness checks.
-Move/replacement identity reconciliation and conflict resolution remain separate slices.
 The final exchange uses a revocable generation gate and a serialized database
 authority check after file hashing. Off revokes the gate before waiting for work
 to exit; deletion/withdrawal/reset transactions cannot race the last eligibility
 read. No long file hashing or provider I/O holds that final mutation gate.
+
+The additive `v26_clipboard_sync_file_conflicts` migration persists displayed
+choices, resolution journals, and version retention pins. File ancestry must be
+complete and acyclic before selecting or installing a descendant; missing parents
+can arrive later, while cyclic events are rejected. The conflict sheet binds a
+choice to its account/epoch, exact heads, and every participating location's
+revision, identity, actual edited base, and saved digest. Confirmation freezes
+each dirty location as its own version against that base, then atomically stages
+those branches and one causal merge through the existing encrypted transfer path.
+Saved changes or new heads invalidate the displayed choice. Existing final
+replacement admission still controls every physical linked-file update.
+
+Every complete conflicting head at or below 5,000,000 bytes is obtained
+automatically, including non-current heads. Larger candidates require explicit
+per-version download consent. Candidate transfers use their own completion cursor
+and preserve existing working-file availability. An explicit candidate download
+authorizes only that object/version and publishes
+an ordinary verified file under the visible working root's `Conflict Versions`
+directory. It does not select the candidate or move the last complete version.
+Choosing an available old large version does not fetch unchosen newer bodies.
+Preparing journals retain authenticated encrypted segments across restart;
+staged journals reuse the same operation IDs. If a later save invalidates an
+interrupted choice, its previously frozen branches remain selectable and can be
+restored from retained local ciphertext. A new resolution includes these retained
+branches as well as current dirty bytes. Pins remain until the result is committed
+and every recorded linked location has durably installed it; superseded proposals
+do not trigger eager body deletion. History exposes review, Open, explicit
+Download, Refresh, Cancel, and Use This Version. A saved choice can still await
+upload or linked-file application. Independent exports remain independent.
 
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.

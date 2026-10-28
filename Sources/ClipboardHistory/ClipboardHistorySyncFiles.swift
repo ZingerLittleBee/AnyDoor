@@ -46,10 +46,11 @@ extension ClipboardHistoryModule {
                     }
                 }
                 let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
+                let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
                     availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
-                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending)
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending, hasConflict: conflict)
             }
     }
 
@@ -323,6 +324,7 @@ extension ClipboardHistoryModule {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString,
                 descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity, try JSONEncoder().encode(parents), publicationRecordID])
+        try Self.validateSyncFileAncestry(accountID: account.identifier, epoch: epoch, objectID: descriptor.objectID, in: database)
         try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
             epoch: epoch, complete: transferState == "complete", in: database)
     }
@@ -331,12 +333,14 @@ extension ClipboardHistoryModule {
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
         services: ClipboardSyncServices, generation: UInt64
     ) async throws {
+        try stageAutomaticFileConflictDownloads(account: account, control: control)
         let descriptors = try syncFileRead { database in
             try Data.fetchAll(database, sql: """
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
-                WHERE version.account_id = ? AND version.epoch = ? AND transfer_state != 'complete'
-                  AND version.version_id = choice.current_version_id
+                WHERE version.account_id = ? AND version.epoch = ?
+                  AND ((transfer_state != 'complete' AND version.version_id = choice.current_version_id)
+                    OR \(Self.pinnedFileConflictDownload) OR \(Self.automaticFileConflictDownload))
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
@@ -347,6 +351,15 @@ extension ClipboardHistoryModule {
         }
         for descriptor in descriptors {
             try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
+            guard try syncFileRead({ database in
+                let nodes = try Row.fetchAll(database, sql: """
+                    SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
+                        guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                        return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                    }
+                return ClipboardSyncVersionGraph.isComplete(nodes)
+            }) else { continue }
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }
@@ -380,7 +393,7 @@ extension ClipboardHistoryModule {
             try admitSync(generation)
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
             output = try ClipboardSyncFileIO.publish(
-                content.bytes, descriptor: descriptor, root: syncWorkingRoot,
+                content.bytes, descriptor: descriptor, root: try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch),
                 accountID: account.identifier, faultInjector: faultInjector
             )
             }
@@ -393,8 +406,24 @@ extension ClipboardHistoryModule {
                     """, arguments: [output.url.path, output.bookmark, output.identity,
                         account.identifier, control.epoch.uuidString,
                         descriptor.objectID.uuidString, descriptor.versionID.uuidString])
-                try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
-                    epoch: control.epoch, complete: true, in: database)
+                let pinned = try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins WHERE account_id = ? AND epoch = ?
+                      AND object_id = ? AND version_id = ? AND download_requested = 1)
+                      OR EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                        account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                if !pinned {
+                    try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
+                        epoch: control.epoch, complete: true, in: database)
+                }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_conflict_pins SET download_completed = 1
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND download_requested = 1
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_auto_candidates SET completed = 1
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
                 try database.execute(sql: """
                     UPDATE clipboard_sync_file_downloads SET failure = NULL
                     WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
@@ -416,13 +445,19 @@ extension ClipboardHistoryModule {
         _ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID
     ) throws -> Bool {
         try requiredDatabase().read { database in
-            try Bool.fetchOne(database, sql: """
+            try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
-                    WHERE member.account_id = ? AND member.epoch = ? AND member.object_id = ? AND choice.current_version_id = ?
-                      AND \(Self.liveSyncFileMember))
-                """, arguments: [account.identifier, epoch.uuidString,
-                    descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                    JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                    WHERE member.account_id = \(account.identifier) AND member.epoch = \(epoch.uuidString) AND member.object_id = \(descriptor.objectID.uuidString)
+                      AND (choice.current_version_id = \(descriptor.versionID.uuidString) OR EXISTS(
+                        SELECT 1 FROM clipboard_sync_file_conflict_pins AS pin WHERE pin.account_id = member.account_id
+                          AND pin.epoch = member.epoch AND pin.object_id = member.object_id
+                          AND pin.version_id = \(descriptor.versionID.uuidString) AND pin.download_requested = 1)
+                        OR EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates AS candidate WHERE candidate.account_id = member.account_id
+                          AND candidate.epoch = member.epoch AND candidate.object_id = member.object_id AND candidate.version_id = \(descriptor.versionID.uuidString)))
+                      AND \(SQL(sql: Self.liveSyncFileMember)) AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier))))
+                """)) ?? false
         }
     }
 
