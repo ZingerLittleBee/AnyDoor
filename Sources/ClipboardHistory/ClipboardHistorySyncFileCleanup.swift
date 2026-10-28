@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import Darwin
 
 extension ClipboardHistoryModule {
     static func createSyncFileCleanupSchema(in database: Database) throws {
@@ -39,6 +40,7 @@ extension ClipboardHistoryModule {
     func reclaimDeletedSyncFileTransfers() async throws {
         let store = storeEpoch
         let root = storeRoot.appendingPathComponent("SyncTransfers", isDirectory: true)
+        let faults = faultInjector
         let rows = try linkedRead { database in
             try Row.fetchAll(database, sql: """
                 SELECT cleanup.* FROM clipboard_sync_file_cleanup AS cleanup
@@ -61,7 +63,7 @@ extension ClipboardHistoryModule {
                 root.appendingPathComponent("Downloads/\(account)/\(epoch)/\(version)")]
             do {
                 try await Task.detached(priority: .utility) {
-                    for url in urls { try Self.removeOwnedSyncTransfer(url, root: root) }
+                    for url in urls { try Self.removeOwnedSyncTransfer(url, root: root, faults: faults) }
                 }.value
             } catch { continue }
             try await waitForWriteTurn()
@@ -79,17 +81,55 @@ extension ClipboardHistoryModule {
         }
     }
 
-    nonisolated private static func removeOwnedSyncTransfer(_ url: URL, root: URL) throws {
-        // Reject a replaced/symlinked parent rather than following it outside
-        // this store. Missing paths make interrupted reclamation idempotent.
-        let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
-        let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
-        let expectedRoot = root.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
-            .appendingPathComponent(root.lastPathComponent)
-        let suffix = String(url.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count))
-        guard canonicalRoot.path == expectedRoot.path, canonical.path == canonicalRoot.path + suffix else {
-            throw ClipboardHistoryModuleError.operationUnavailable
+    nonisolated private static func removeOwnedSyncTransfer(_ url: URL, root: URL, faults: ClipboardHistoryFaultInjector) throws {
+        let store = root.deletingLastPathComponent()
+        guard url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/") else {
+            throw ClipboardHistoryStorageError.unsafePayloadPath
         }
-        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        let components = url.pathComponents.dropFirst(store.pathComponents.count)
+        guard let name = components.last else { throw ClipboardHistoryStorageError.unsafePayloadPath }
+        var parent = open(store.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard parent >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        defer { close(parent) }
+        for component in components.dropLast() {
+            let child = openat(parent, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+            if child < 0, errno == ENOENT { return }
+            guard child >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            close(parent); parent = child
+        }
+        let directory = openat(parent, name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        if directory < 0, errno == ENOENT { return }
+        guard directory >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        defer { close(directory) }
+        var identity = stat()
+        guard fstat(directory, &identity) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        try faults.check(.syncFileCleanupBeforeRemoval)
+        let enumeration = dup(directory)
+        guard enumeration >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard let stream = fdopendir(enumeration) else {
+            close(enumeration); throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        defer { closedir(stream) }
+        while let item = readdir(stream) {
+            let leaf = withUnsafeBytes(of: item.pointee.d_name) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) }
+            guard let leaf, ClipboardSyncFileIO.validFilename(leaf) else {
+                if leaf == "." || leaf == ".." { continue }
+                throw ClipboardHistoryStorageError.unsafePayloadPath
+            }
+            var status = stat()
+            if fstatat(directory, leaf, &status, AT_SYMLINK_NOFOLLOW) < 0, errno == ENOENT { continue }
+            guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else { throw ClipboardHistoryStorageError.unsafePayloadPath }
+            guard unlinkat(directory, leaf, 0) == 0 || errno == ENOENT else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+        }
+        var current = stat()
+        if fstatat(parent, name, &current, AT_SYMLINK_NOFOLLOW) < 0, errno == ENOENT { return }
+        guard current.st_dev == identity.st_dev, current.st_ino == identity.st_ino else {
+            throw ClipboardHistoryStorageError.unsafePayloadPath
+        }
+        guard unlinkat(parent, name, AT_REMOVEDIR) == 0 || errno == ENOENT else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
     }
 }

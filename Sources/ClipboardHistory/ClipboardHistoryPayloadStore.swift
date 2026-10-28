@@ -21,6 +21,7 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case syncFilePreservationAfterCopy
+    case syncFileCleanupBeforeRemoval
     case syncFileRejoinBeforeStaging
     case fileConflictAfterBranchFreeze
     case fileConflictBeforeStaging

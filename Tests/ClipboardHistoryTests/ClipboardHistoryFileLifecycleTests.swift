@@ -6,6 +6,33 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFileTransferCleanupCannotFollowParentReplacedBySymlink() async throws {
+        let barrier = LinkedReplacementBarrier()
+        let bytes = Data(repeating: 0x32, count: 20_000_000)
+        let fixture = try await makeLinkedFixture(receiverFault: .init(shouldFail: { point in
+            if point == .syncFileCleanupBeforeRemoval { barrier.pause() }
+            return false
+        }), initialBytes: bytes)
+        let downloads = fixture.receiverRoot.appendingPathComponent("SyncTransfers/Downloads")
+        let outside = fixture.root.appendingPathComponent("Independent documents")
+        try FileManager.default.copyItem(at: downloads, to: outside)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: outside, includingPropertiesForKeys: nil))
+        let external = try XCTUnwrap(enumerator.allObjects.compactMap { $0 as? URL }.first { $0.pathExtension == "ciphertext" })
+        let contents = try Data(contentsOf: external)
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        let deletion = Task { await fixture.receiver.retrySync() }
+        try await eventually { barrier.isWaiting }
+        try FileManager.default.moveItem(at: downloads, to: fixture.receiverRoot.appendingPathComponent("Retained transfer directory"))
+        try FileManager.default.createSymbolicLink(at: downloads, withDestinationURL: outside)
+        barrier.release()
+        await deletion.value
+
+        XCTAssertEqual(try Data(contentsOf: external), contents, "Cleanup must use the opened owned directory, not a later parent symlink")
+        XCTAssertEqual(try Data(contentsOf: fixture.original), bytes)
+    }
+
+    @MainActor
     func testDirectoryDeletionPreservesCompleteOfflineTreeAsIndependentCopy() async throws {
         let fixture = try await makeLinkedFixture(prepareSource: { url in
             try FileManager.default.removeItem(at: url)
