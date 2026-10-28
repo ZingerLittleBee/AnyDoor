@@ -82,6 +82,19 @@ struct ClipboardSyncSettingsView: View {
                 }
             }
 
+            if !model.preservedEdits.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L(.settingsClipboardSyncPreserved, model.preservedEdits.count))
+                    ForEach(model.preservedEdits) { entry in
+                        Text(entry.previewText).lineLimit(2).font(.caption)
+                    }
+                    Button(L(.settingsClipboardSyncPreservedDismiss)) {
+                        Task { await model.dismissPreservedEdits() }
+                    }
+                    .disabled(model.isPerformingAction)
+                }
+            }
+
             if let recoveryURL = model.recoveryHelpURL {
                 Link(destination: recoveryURL) {
                     LocalizedText(.settingsClipboardSyncRecoveryHelp)

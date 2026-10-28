@@ -102,6 +102,7 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
         let pool = try requiredDatabase()
         try pool.write { database in
+            try stageSyncDeletions(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
@@ -199,7 +200,15 @@ extension ClipboardHistoryModule {
             guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
             try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
+            if let subject = content.entrySubjectID,
+               try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+                try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
+                    arguments: [account.identifier, record.epoch.uuidString, record.recordID])
+                return false
+            }
             switch content {
+            case .deletion(let deletion):
+                try receiveSyncDeletion(deletion, record: record, account: account, in: database)
             case .tag(let tag):
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
             case .text(let text):

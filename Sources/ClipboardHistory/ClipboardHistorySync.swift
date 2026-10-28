@@ -244,6 +244,8 @@ extension ClipboardHistoryModule {
             while let upload = try nextSyncUpload(account: account, control: control) {
                 do {
                     try await admitSync(generation, account: account, services: services)
+                    guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
+                        arguments: [upload.record.recordID]) ?? false }) else { continue }
                     let committed = try await services.transport.commit(upload, for: account, control: control)
                     try await admitSync(generation, account: account, services: services)
                     guard committed.epoch == control.epoch, committed.keyID == control.keyID else {

@@ -687,6 +687,9 @@ extension ClipboardHistoryModule {
                 }
 
                 let expiredIDs = try expiredEntryIDs(at: date, in: database)
+                if case .clear = payload.operation {
+                    try Self.recordExplicitSyncDeletion(entryIDs: currentIDs, in: database)
+                }
                 let allDeletedIDs = Set(currentIDs).union(expiredIDs)
                 let payloadPaths = try logicallyDelete(
                     entryIDs: Array(allDeletedIDs),
@@ -1381,6 +1384,10 @@ extension ClipboardHistoryModule {
         encoder.outputFormatting = [.sortedKeys]
         return ClipboardHistoryDestructivePreview(
             affectedCount: payload.entryIDs.count,
+            sharedAffectedCount: try {
+                guard case .clear = operation else { return 0 }
+                return try Self.sharedDeletionCount(entryIDs: entryIDs, in: database)
+            }(),
             token: ClipboardHistoryConfirmationToken(
                 data: try encoder.encode(payload)
             )

@@ -26,7 +26,8 @@ extension ClipboardHistoryModule {
 
     /// Admission is for the whole entry, never a filtered representation subset.
     static let syncEntryEligibility = """
-        EXISTS (SELECT 1 FROM clipboard_items WHERE entry_id = entry.id)
+        NOT EXISTS (SELECT 1 FROM clipboard_sync_preserved_edits WHERE local_entry_id = entry.id)
+        AND EXISTS (SELECT 1 FROM clipboard_items WHERE entry_id = entry.id)
         AND NOT EXISTS (SELECT 1 FROM clipboard_items AS item
             WHERE item.entry_id = entry.id AND NOT EXISTS (
                 SELECT 1 FROM clipboard_representations AS representation

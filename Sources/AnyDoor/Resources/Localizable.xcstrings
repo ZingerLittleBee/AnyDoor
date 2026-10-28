@@ -15045,6 +15045,54 @@
         }
       }
     },
+    "settings.clipboard.clear.shared": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld shared entries will also be deleted on other participating Macs. Original files and exported copies will remain."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其中 %lld 项共享记录也将从其他参与同步的 Mac 删除。原始文件和导出的副本会保留。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.preserved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld offline edits were saved as local-only copies in Clipboard History after deletion on another Mac. Their selected tags will not upload them."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其他 Mac 删除共享记录后，%lld 项离线编辑已保留为剪贴板历史中的仅本机副本。所选标签不会自动上传这些副本。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.preserved.dismiss": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss Notice"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭提示"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.counts": {
       "extractionState": "manual",
       "localizations": {

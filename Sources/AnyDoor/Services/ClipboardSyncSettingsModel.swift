@@ -10,6 +10,7 @@ final class ClipboardSyncSettingsModel {
     @ObservationIgnored private var actionGeneration = 0
 
     private(set) var status = ClipboardHistorySyncStatus()
+    private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
     private(set) var tags: [ClipboardHistorySyncTag] = []
     private(set) var operationFailed = false
     private(set) var isPerformingAction = false
@@ -67,11 +68,13 @@ final class ClipboardSyncSettingsModel {
         let currentStatus = await module.syncStatus()
         do {
             let currentTags = try await module.syncTags()
+            let currentPreservedEdits = try await module.preservedSyncEdits()
             guard generation == refreshGeneration, !Task.isCancelled else {
                 return
             }
             status = currentStatus
             tags = currentTags
+            preservedEdits = currentPreservedEdits
             operationFailed = false
         } catch {
             guard generation == refreshGeneration, !Task.isCancelled else {
@@ -80,6 +83,12 @@ final class ClipboardSyncSettingsModel {
             status = currentStatus
             operationFailed = true
         }
+    }
+
+    func dismissPreservedEdits() async {
+        guard !isPerformingAction else { return }
+        let ids = preservedEdits.map(\.id)
+        await performAction { try await module.dismissPreservedSyncEdits(ids) }
     }
 
     private func performAction(_ action: () async throws -> Void) async {
