@@ -94,6 +94,12 @@ extension ClipboardHistoryModule {
     private func runSync(allowAccountBinding: Bool) async {
         guard !syncSuspended else { return }
         if let syncTask { await syncTask.value; return }
+        if let deadline = syncRetryNotBefore, deadline > now() {
+            setSyncPhase(.failed(.network))
+            scheduleSync()
+            return
+        }
+        syncRetryNotBefore = nil
         let generation = syncGeneration
         let task = Task { await self.performSync(generation: generation, allowAccountBinding: allowAccountBinding) }
         syncTask = task
@@ -105,7 +111,9 @@ extension ClipboardHistoryModule {
 
     func scheduleSync() {
         guard !syncSuspended, syncTask == nil, syncPollTask == nil,
-              let interval = syncServices?.pollingInterval else { return }
+              let pollingInterval = syncServices?.pollingInterval else { return }
+        let remainingDelay = syncRetryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
+        let interval = max(pollingInterval, .seconds(remainingDelay))
         syncPollTask = Task { [weak self] in
             do { try await Task.sleep(for: interval) } catch { return }
             guard let self else { return }
@@ -244,6 +252,10 @@ extension ClipboardHistoryModule {
             return
         } catch {
             guard generation == syncGeneration, !syncSuspended else { return }
+            if case .network(let retryAfter) = error as? ClipboardSyncServiceError,
+               let retryAfter, retryAfter.isFinite, retryAfter > 0 {
+                syncRetryNotBefore = now().addingTimeInterval(retryAfter)
+            }
             if error as? ClipboardSyncServiceError == .accountChanged {
                 do {
                     try await waitForWriteTurn()

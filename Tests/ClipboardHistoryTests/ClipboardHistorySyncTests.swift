@@ -2,10 +2,30 @@ import AppKit
 import Foundation
 import XCTest
 import ClipboardHistoryTestSupport
+import os
 
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testRetryWaitsForProviderDelayBeforeConsultingCloudAgain() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x13,
+            time: 1_000, clock: { clock.withLock { $0 } })
+        await cloud.failNextAccountRead(retryAfter: 120)
+        try await module.setSyncEnabled(true)
+        let waiting = await module.syncStatus()
+        XCTAssertEqual(waiting.phase, .failed(.network))
+        await module.retrySync()
+        let earlyReads = await cloud.accountReadCount()
+        XCTAssertEqual(earlyReads, 1)
+        clock.withLock { $0 = $0.addingTimeInterval(120) }
+        await module.retrySync()
+        let recovered = await module.syncStatus()
+        XCTAssertEqual(recovered.phase, .upToDate)
+    }
+
     func testRemoteTagInNewAccountDoesNotAuthorizeOldAccountHistory() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -51,7 +71,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let reopened = makeModule(services: .init(transport: cloud, keys: delayedKeys, pollingInterval: nil), keyByte: 0x19, time: 2_000, root: root)
         await reopened.resumeSync()
         let waiting = await reopened.syncStatus()
-        let account = await cloud.account()
+        let account = try await cloud.account()
         let unpublished = try await cloud.control(for: account)
         let waitingAttempts = await cloud.controlCreationAttempts()
         XCTAssertEqual(waiting.phase, .waitingForKey)
@@ -170,7 +190,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(status.phase, .failed(.recoveryRequired))
         let count = await keys.count()
         XCTAssertEqual(count, 1)
-        let account = await cloud.account()
+        let account = try await cloud.account()
         let control = try await cloud.control(for: account)
         XCTAssertNil(control)
     }
@@ -317,7 +337,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
 
     private func makeModule(
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
-        root: URL? = nil
+        root: URL? = nil, clock: (@Sendable () -> Date)? = nil
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-sync-\(UUID())")
@@ -325,7 +345,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         return trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: SyncTestLocalKeyStore(byte: keyByte),
-            now: { Date(timeIntervalSince1970: time) },
+            now: clock ?? { Date(timeIntervalSince1970: time) },
             syncServices: services
         ))
     }
@@ -391,8 +411,17 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var cancellationObserver: CheckedContinuation<Void, Never>?
     private var failsControlCreation = false
     private var controlAttempts: [UUID] = []
+    private var accountFailureDelay: TimeInterval?
 
-    func account() -> ClipboardSyncAccount { reads += 1; return currentAccount }
+    func account() throws -> ClipboardSyncAccount {
+        reads += 1
+        if let delay = accountFailureDelay {
+            accountFailureDelay = nil
+            throw ClipboardSyncServiceError.network(retryAfter: delay)
+        }
+        return currentAccount
+    }
+    func failNextAccountRead(retryAfter: TimeInterval) { accountFailureDelay = retryAfter }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
         if rendezvous, descriptors[account.identifier] == nil {
