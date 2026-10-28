@@ -7,7 +7,35 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
-    func testTagChoiceRequiresActivationAndSurvivesDisablingThisMac()
+    func testSameNameChoicesShowIdentityAndMergeRequiresDisplayedScopeConfirmation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: directory,
+            keyStore: SettingsSyncLocalKeyStore(), syncServices: .init(
+                transport: HeldSettingsSyncTransport(holdsAccountRequest: false), keys: UnavailableSettingsSyncKeys(), pollingInterval: nil)))
+        let entry = try await module.capture(.init(source: .unknown, content: .text("newly enrolled")))
+        _ = try await module.replaceTagDefinitions(with: [
+            .init(id: "same-prefix-a", displayName: "Work"), .init(id: "same-prefix-b", displayName: "Work")])
+        _ = try await module.apply(.setTags(entry.entryID, ["same-prefix-b"]))
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        await model.selectTag("same-prefix-a")
+        XCTAssertEqual(Set(model.tags.map { model.tagTitle($0) }).count, 2)
+        await model.prepareMerge(sourceID: "same-prefix-b", targetID: "same-prefix-a")
+        XCTAssertEqual(model.mergePreview?.newlyEligibleEntryCount, 1)
+        model.cancelMerge()
+        await model.confirmMerge()
+        let cancelled = try await module.tagDefinitions()
+        XCTAssertEqual(cancelled.count, 2)
+        await model.prepareMerge(sourceID: "same-prefix-b", targetID: "same-prefix-a")
+        await model.confirmMerge()
+        XCTAssertNil(model.mergePreview)
+        XCTAssertEqual(model.tags.map(\.id), ["same-prefix-a"])
+        let merged = try await module.page(.init()).entries
+        XCTAssertEqual(merged.first?.tagIDs, ["same-prefix-a"])
+    }
+
+    func testMultipleTagChoicesRequireActivationAndSurviveDisablingThisMac()
         async throws
     {
         let directory = FileManager.default.temporaryDirectory
@@ -23,25 +51,28 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let assignment = try await module.createTagDefinition(
             named: "Work", assigningTo: capture.entryID
         )
+        let other = try await module.createTagDefinition(named: "Other", assigningTo: capture.entryID)
         let model = ClipboardSyncSettingsModel(module: module)
         await model.refresh()
 
         await model.selectTag(assignment.definition.id)
 
-        XCTAssertNil(model.selectedTagID)
+        XCTAssertFalse(model.tags.contains(where: \.isSelected))
         await model.setEnabled(true)
         await model.selectTag(assignment.definition.id)
-        XCTAssertEqual(model.selectedTagID, assignment.definition.id)
-        XCTAssertFalse(model.canSelectTag)
+        XCTAssertEqual(model.tags.filter(\.isSelected).map(\.id), [assignment.definition.id])
+        XCTAssertTrue(model.canSelectTag)
+        await model.selectTag(other.definition.id)
+        XCTAssertEqual(Set(model.tags.filter(\.isSelected).map(\.id)), [assignment.definition.id, other.definition.id])
 
         await model.setEnabled(false)
         let reopenedSettings = ClipboardSyncSettingsModel(module: module)
         await reopenedSettings.refresh()
 
-        XCTAssertEqual(reopenedSettings.selectedTagID, assignment.definition.id)
+        XCTAssertEqual(Set(reopenedSettings.tags.filter(\.isSelected).map(\.id)), [assignment.definition.id, other.definition.id])
         XCTAssertFalse(reopenedSettings.status.isEnabled)
         let entries = try await module.page(ClipboardHistoryQuery()).entries
-        XCTAssertEqual(entries.first?.tagIDs, [assignment.definition.id])
+        XCTAssertEqual(entries.first?.tagIDs, [assignment.definition.id, other.definition.id])
     }
 
     func testDisablingWhileConnectingCancelsTheRequestWithoutEnablingMonitoring()
@@ -176,11 +207,14 @@ private struct UnavailableSettingsSyncKeys: ClipboardSyncKeyStoring {
 }
 
 private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
+    let holdsAccountRequest: Bool
+    init(holdsAccountRequest: Bool = true) { self.holdsAccountRequest = holdsAccountRequest }
     private var accountRequest: CheckedContinuation<ClipboardSyncAccount, any Error>?
 
     var hasPendingAccount: Bool { accountRequest != nil }
 
     func account() async throws -> ClipboardSyncAccount {
+        if !holdsAccountRequest { return .init(container: "test", environment: "test", owner: "test") }
         try Task.checkCancellation()
         return try await withCheckedThrowingContinuation { accountRequest = $0 }
     }

@@ -170,7 +170,7 @@ struct ClipboardCardView: View {
         )
         let submenu = NSMenu()
         for tag in presentation.tags {
-            let item = ClosureMenuItem(title: tag.displayName) {
+            let item = ClosureMenuItem(title: presentation.tagTitle(tag.id)) {
                 onToggleTag(tag.id)
             }
             item.state = entry.tagIDs.contains(tag.id) ? .on : .off

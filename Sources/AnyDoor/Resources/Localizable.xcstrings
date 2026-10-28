@@ -1,6 +1,12 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.clipboard.sync.authorizeRetained": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Include this Mac’s retained history for %@ in the current account"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "将本机为 %@ 保留的历史纳入当前账户同步"}}}},
+    "settings.clipboard.sync.merge.title": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge Tags…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并标签…"}}}},
+    "settings.clipboard.sync.merge.with": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge with %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "与 %@ 合并"}}}},
+    "settings.clipboard.sync.merge.confirm": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge Tags"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并标签"}}}},
+    "settings.clipboard.sync.merge.scope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge the independent “%@” tags? This includes %lld additional eligible entries on this Mac. The merge is shared with participating Macs, which may have additional matching history."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并独立的“%@”标签？这会在本机新增同步 %lld 条符合条件的历史。合并会同步到参与的 Mac，其他设备可能还包含更多匹配历史。"}}}},
+    "clipboard.tag.chooseIdentity": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Several tags have this name. Choose the collection to use."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "多个标签使用了此名称。请选择要使用的分类。"}}}},
     "capture.pinned.disableClickThrough": {
       "extractionState": "manual",
       "localizations": {
@@ -14813,47 +14819,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selecting a tag shares its existing and future plain-text entries. Received history does not replace the current clipboard."
+            "value": "The selection is shared across participating Macs. Existing and future history matching any selected tag is included; counts show matching supported history on this Mac."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择标签后，会同步该标签下已有和之后新增的纯文本记录。收到的历史不会替换当前剪贴板。"
-          }
-        }
-      }
-    },
-    "settings.clipboard.sync.tag": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sync Tag"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "同步标签"
-          }
-        }
-      }
-    },
-    "settings.clipboard.sync.chooseTag": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose a tag"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择标签"
+            "value": "所选标签会在参与同步的 Mac 间共享。匹配任一所选标签的现有和未来历史都会纳入同步；数量表示本机匹配且支持同步的历史。"
           }
         }
       }
@@ -14898,13 +14870,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "To pause sharing from this Mac, turn off iCloud sync above."
+            "value": "Removing the final matching Sync Tag is not available yet. Turn off Clipboard Sync on this Mac to pause its syncing."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "如需暂停这台 Mac 的同步，请关闭上方的 iCloud 同步开关。"
+            "value": "暂不支持移除最后一个匹配的同步标签。关闭本机的剪贴板同步可暂停本机同步。"
           }
         }
       }

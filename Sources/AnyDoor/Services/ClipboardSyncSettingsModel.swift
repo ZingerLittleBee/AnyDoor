@@ -13,17 +13,14 @@ final class ClipboardSyncSettingsModel {
     private(set) var tags: [ClipboardHistorySyncTag] = []
     private(set) var operationFailed = false
     private(set) var isPerformingAction = false
+    private(set) var mergePreview: ClipboardHistorySyncTagMergePreview?
 
     init(module: ClipboardHistoryModule) {
         self.module = module
     }
 
-    var selectedTagID: String? {
-        tags.first(where: \.isSelected)?.id
-    }
-
     var canSelectTag: Bool {
-        status.isEnabled && selectedTagID == nil && !isPerformingAction
+        status.isEnabled && !isPerformingAction
     }
 
     func setEnabled(_ enabled: Bool) async {
@@ -35,13 +32,32 @@ final class ClipboardSyncSettingsModel {
         }
     }
 
-    func selectTag(_ id: String) async {
+    func selectTag(_ id: String, selected: Bool = true) async {
         guard canSelectTag, tags.contains(where: { $0.id == id }) else {
             return
         }
         await performAction {
-            try await module.setSyncTagSelected(id, selected: true)
+            try await module.setSyncTagSelected(id, selected: selected)
         }
+    }
+
+    func prepareMerge(sourceID: String, targetID: String) async {
+        guard canSelectTag else { return }
+        mergePreview = nil
+        await performAction {
+            mergePreview = try await module.prepareSyncTagMerge(sourceID: sourceID, targetID: targetID)
+        }
+    }
+    func confirmMerge(_ confirmedPreview: ClipboardHistorySyncTagMergePreview? = nil) async {
+        guard let preview = confirmedPreview ?? mergePreview, canSelectTag else { return }
+        mergePreview = nil
+        await performAction { try await module.mergeSyncTags(preview) }
+    }
+    func cancelMerge() { mergePreview = nil }
+
+    func tagTitle(_ tag: ClipboardHistorySyncTag) -> String {
+        ClipboardTagLabel.title(id: tag.id, name: tag.displayName,
+            among: tags.map { .init(id: $0.id, displayName: $0.displayName) })
     }
 
     func retry() async {
