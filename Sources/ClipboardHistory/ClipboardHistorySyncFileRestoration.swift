@@ -135,7 +135,9 @@ extension ClipboardHistoryModule {
     private func replaceUnrecoverableSyncFile(_ file: ClipboardSyncFileRestoration, row: Row,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, generation: UInt64) async throws {
         guard let services = syncServices,
-              try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID,
+              let selection = try syncFileSelection(objectID: file.descriptor.objectID),
+              selection.latest.versionID == file.descriptor.versionID,
+              selection.heads.map(\.versionID) == [file.descriptor.versionID],
               let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier,
                 epoch: control.epoch, in: $0).first { $0.objectID == file.descriptor.objectID
                     && $0.baseVersionID == file.descriptor.versionID && !$0.hasPendingApplication } }) else { return }
@@ -171,6 +173,15 @@ extension ClipboardHistoryModule {
                     WHERE account_id = ? AND epoch = ? AND object_id = ?
                     """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]) == file.descriptor.versionID.uuidString,
                   let digest = prepared.descriptor.contentDigest else { return false }
+            let nodes = try Row.fetchAll(database, sql: """
+                SELECT version_id, parents FROM clipboard_sync_file_versions
+                WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
+                    guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                    return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                }
+            guard ClipboardSyncVersionGraph.isComplete(nodes),
+                  ClipboardSyncVersionGraph.heads(nodes) == [file.descriptor.versionID] else { return false }
             try storePreparedFileVersion(prepared, account: account, control: control, in: database)
             let state: ClipboardHistoryLinkedFileLocationState = saved.map { $0.digest == digest ? .pendingUpload : .localChanges } ?? .unavailable
             try database.execute(sql: """

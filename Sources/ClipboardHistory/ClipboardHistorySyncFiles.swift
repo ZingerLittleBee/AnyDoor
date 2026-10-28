@@ -431,6 +431,9 @@ extension ClipboardHistoryModule {
             publishMutation()
             } catch {
                 try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
+                // A retired immutable body may be unavailable while independent
+                // conflict heads remain downloadable. Other failures still stop.
+                if (error as? ClipboardSyncServiceError) == .recordUnavailable { continue }
                 throw error
             }
         }

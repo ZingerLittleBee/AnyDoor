@@ -5,6 +5,122 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testMissingRetiredBaseDoesNotBlockRejoinedConflictCandidates() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.page(.init())
+        let base = try XCTUnwrap(initial.entries.first?.linkedFileLocations.first)
+        let tag = try XCTUnwrap(initial.entries.first?.tagIDs.first)
+        try await fixture.sender.setSyncEnabled(false)
+        let firstParent = UUID(), secondParent = UUID(), firstHead = UUID(), secondHead = UUID()
+        for (id, parents, bytes) in [
+            (firstHead, [firstParent], Data("first complete head".utf8)),
+            (secondHead, [secondParent], Data("second complete head".utf8)),
+            (firstParent, [base.baseVersionID], Data("first intermediate".utf8)),
+            (secondParent, [base.baseVersionID], Data("second intermediate".utf8))
+        ] {
+            _ = try await commitConflictRemoteFile(bytes: bytes, versionID: id, parents: parents, objectID: base.objectID,
+                root: fixture.root, services: fixture.services, cloud: fixture.cloud)
+        }
+        await fixture.receiver.retrySync()
+        try await fixture.receiver.setSyncTagSelected(tag, selected: false)
+        try await fixture.receiver.setSyncTagSelected(tag, selected: true)
+
+        // The authenticated checkpoint is order-independent. Deliver its root,
+        // then unresolved heads, then parents; the retained base body is absent.
+        let account = await fixture.cloud.account()
+        let remoteControl = await fixture.cloud.control(for: account)
+        var control = try XCTUnwrap(remoteControl)
+        let loaded = try await fixture.services.keys.load(account: account, keyID: control.keyID)
+        let key = try XCTUnwrap(loaded)
+        let uploads = await fixture.cloud.uploadedRecords()
+        let checkpoint = try XCTUnwrap(uploads.reversed().first { upload in
+            if case .rejoin = try? ClipboardSyncCodec.open(upload.record, chunks: upload.chunks,
+                account: account, control: control, key: key) { return true }
+            return false
+        })
+        guard case .rejoin(let value) = try ClipboardSyncCodec.open(checkpoint.record, chunks: checkpoint.chunks,
+            account: account, control: control, key: key) else { return XCTFail("Missing checkpoint") }
+        let ordered = try XCTUnwrap(value.fileVersions).sorted {
+            func rank(_ id: UUID) -> Int { id == base.baseVersionID ? 0 : [firstParent, secondParent].contains(id) ? 2 : 1 }
+            return rank($0.descriptor.versionID) < rank($1.descriptor.versionID)
+        }
+        let replay = ClipboardSyncRejoin(state: value.state, entry: value.entry, initialRecordID: value.initialRecordID,
+            versions: value.versions, selectedVersionID: value.selectedVersionID, metadata: value.metadata,
+            memberships: value.memberships, fileVersions: ordered)
+        for upload in uploads {
+            if case .fileVersion = try? ClipboardSyncCodec.open(upload.record, chunks: upload.chunks,
+                account: account, control: control, key: key) {
+                control = try await fixture.services.transport.purge(upload.record, for: account, control: control)
+            }
+        }
+        control = try await fixture.services.transport.purge(checkpoint.record, for: account, control: control)
+        let replacement = try ClipboardSyncCodec.seal(.rejoin(replay), account: account, control: control, key: key)
+        _ = try await fixture.cloud.commit(replacement, for: account, control: control)
+        let fresh = makeLinkedModule(root: fixture.root.appendingPathComponent("Fresh retired base"), services: fixture.services, key: 0x53)
+
+        try await fresh.setSyncEnabled(true)
+
+        let status = await fresh.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let plan = try await fresh.fileConflictPlan(entryID: fixture.entryID, objectID: base.objectID)
+        XCTAssertTrue(plan.ancestryComplete)
+        XCTAssertEqual(Set(plan.candidates.map(\.id)), Set([firstHead, secondHead].map(ClipboardHistoryFileConflictChoice.version)),
+            "An unchanged retained base is not a new conflicting edit")
+        XCTAssertTrue(plan.candidates.allSatisfy { $0.availability == .available })
+    }
+
+    @MainActor
+    func testTwoRetainedPeersRejoinOneObjectWithBothConflictingHeads() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.page(.init())
+        let original = try XCTUnwrap(initial.entries.first?.syncFiles.first)
+        let working = try XCTUnwrap(initial.entries.first?.linkedFileLocations.first)
+        let tag = try XCTUnwrap(initial.entries.first?.tagIDs.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        await fixture.cloud.failCommits(true)
+        let firstBytes = Data("first offline branch".utf8)
+        let secondBytes = Data("second offline branch".utf8)
+        try firstBytes.write(to: fixture.original)
+        try secondBytes.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.cloud.failCommits(false)
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let conflict = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: original.id)
+        let heads = conflict.candidates.compactMap { candidate -> UUID? in
+            if case .version(let id) = candidate.id { return id }
+            return nil
+        }
+        XCTAssertEqual(heads.count, 2)
+        XCTAssertTrue(conflict.ancestryComplete)
+        try await fixture.sender.setSyncTagSelected(tag, selected: false)
+        await fixture.receiver.retrySync()
+
+        async let first: Void = fixture.sender.setSyncTagSelected(tag, selected: true)
+        async let second: Void = fixture.receiver.setSyncTagSelected(tag, selected: true)
+        _ = try await (first, second)
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+
+        let fresh = makeLinkedModule(root: fixture.root.appendingPathComponent("Fresh conflicting rejoin"), services: fixture.services, key: 0x53)
+        try await fresh.setSyncEnabled(true)
+        let page = try await fresh.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [fixture.entryID])
+        XCTAssertEqual(page.entries.first?.syncFiles.map(\.id), [original.id])
+        let restored = try await fresh.fileConflictPlan(entryID: fixture.entryID, objectID: original.id)
+        XCTAssertTrue(restored.ancestryComplete)
+        XCTAssertEqual(Set(restored.candidates.map(\.id)), Set(heads.map(ClipboardHistoryFileConflictChoice.version)))
+        XCTAssertTrue(restored.candidates.allSatisfy { $0.availability == .available })
+        let contents = try restored.candidates.map { try Data(contentsOf: XCTUnwrap($0.localURL)) }
+        XCTAssertEqual(Set(contents), Set([firstBytes, secondBytes]))
+        XCTAssertEqual(try Data(contentsOf: fixture.original), firstBytes)
+        XCTAssertEqual(try Data(contentsOf: working.url), secondBytes)
+    }
+
+    @MainActor
     func testRestartRechecksPreparedCiphertextAndPreservesLaterWorkingEdits() async throws {
         let fixture = try await makeLinkedFixture(initialBytes: Data(repeating: 0x61, count: 6 * 1_024 * 1_024))
         let initial = try await fixture.receiver.page(.init())
