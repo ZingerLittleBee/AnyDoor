@@ -9,6 +9,7 @@ struct ClipboardSyncFileCandidate: Sendable {
     let parentDevice: Int32
     let parentInode: UInt64
     let snapshot: ClipboardSyncFileSnapshot
+    var treeWitness: ClipboardFileTree? = nil
 }
 
 struct ClipboardSyncFileSnapshot: Codable, Sendable, Equatable {
@@ -126,11 +127,6 @@ enum ClipboardSyncFilePublication {
         }
         guard ClipboardSyncFileSnapshot(source) == candidate.snapshot else { throw ClipboardSyncServiceError.localStorage }
         try faults.check(.syncFileBeforePublication)
-        if descriptor.bodyFormat == .treeSegmentsV1 {
-            let measurement = try ClipboardFileTree(url.appendingPathComponent(sourceName)).stream { _ in }
-            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
-                  measurement.encoded == descriptor.encodedByteCount else { throw ClipboardSyncServiceError.corruptData }
-        }
         if let pending = candidate.pendingName {
             if descriptor.bodyFormat == .treeSegmentsV1 {
                 guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }

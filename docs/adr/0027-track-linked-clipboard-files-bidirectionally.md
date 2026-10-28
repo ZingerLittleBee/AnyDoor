@@ -45,6 +45,16 @@ Generic filesystem and file-coordination callbacks do not establish that proof.
 Pause, retry, resume, and reassociation actions validate the displayed location
 revision so a stale picker cannot silently replace a changed association.
 
-Directory/package tracking and conflict resolution are separate slices.
+Complete directory versions now reuse the same linked identity, file graph,
+explicit per-version download consent, and conflict resolution. Recursive changes
+freeze as one authenticated tree, including portable metadata and logical forks.
+The original-size threshold counts all synchronized content and attribute values;
+encoded framing has a separate size. Incomplete or changing trees cannot replace
+the previous complete version. Source proof and reconstruction use disk-backed
+encrypted inventories and bounded content streams; ordinary xattrs require one
+platform-sized value buffer. See the [format and mutation boundary](../agents/architecture.md#clipboard-sync).
+
+Application-package Apply Update and running-application protection remain a
+separate acceptance slice.
 The complete specification defines the signed-app and multi-device acceptance
 gates; isolated real-file tests do not establish live iCloud delivery.

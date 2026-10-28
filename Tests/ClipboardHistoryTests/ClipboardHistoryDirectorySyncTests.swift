@@ -6,6 +6,57 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testDirectoryAtAggregateThresholdDownloadsAutomatically() async throws {
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data(repeating: 0x61, count: 2_500_000).write(to: root.appendingPathComponent("one"))
+            try Data(repeating: 0x62, count: 2_500_000).write(to: root.appendingPathComponent("two"))
+        })
+        let page = try await fixture.receiver.page(.init())
+        let file = try XCTUnwrap(page.entries.first?.syncFiles.first)
+        XCTAssertEqual(file.originalByteCount, 5_000_000)
+        XCTAssertEqual(file.state, .complete)
+        XCTAssertFalse(file.downloadRequested)
+        let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let result) = content.items.first?.representations.first else { return XCTFail("Expected complete directory") }
+        XCTAssertEqual(try Data(contentsOf: result.currentURL.appendingPathComponent("two")), Data(repeating: 0x62, count: 2_500_000))
+    }
+
+    @MainActor
+    func testDisablingDuringDirectoryOutputVerificationKeepsThePreviousCompleteTree() async throws {
+        let race = DirectoryFreezeRace()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .syncFileTreeBeforeOutputVerification { race.pauseIfArmed() }
+            return false
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("deep"), withIntermediateDirectories: true)
+            try Data("old complete tree".utf8).write(to: root.appendingPathComponent("deep/member"))
+        })
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try Data("remote replacement".utf8).write(to: fixture.original.appendingPathComponent("deep/member"))
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        race.arm()
+        let receive = Task { await fixture.receiver.retrySync() }
+        try await eventually { race.barrier.isWaiting }
+        let cancellations = await fixture.cloud.cancellationCount()
+        let disable = Task { try await fixture.receiver.setSyncEnabled(false) }
+        // Shutdown drains its task before returning, but revocation/cancellation
+        // must reach the external boundary while the recursive proof is paused.
+        try await eventually { await fixture.cloud.cancellationCount() > cancellations }
+        race.barrier.release()
+        try await disable.value
+        await receive.value
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.availableVersionID, working.baseVersionID)
+        let materialized = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing previous complete tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("deep/member")), Data("old complete tree".utf8))
+    }
+
+    @MainActor
     func testRootAttributeSavedDuringExchangePreservesTheEditedCompleteTree() async throws {
         let race = DirectoryRootAttributeRace()
         let fixture = try await makeLinkedFixture(receiverFault: .init { point in
@@ -313,3 +364,4 @@ private final class DirectoryRootAttributeRace: @unchecked Sendable {
         }
     }
 }
+

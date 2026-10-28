@@ -64,7 +64,7 @@ enum ClipboardFileTreeDecoding {
                 guard header.path.isEmpty, header.kind == descriptor.kind?.rawValue else { throw ClipboardSyncServiceError.corruptData }
             }
             if header.kind == "link" {
-                guard let link = header.link, !link.contains("\0"), link.utf8.count < Int(MAXPATHLEN) else { throw ClipboardSyncServiceError.corruptData }
+                guard let link = header.link, !link.isEmpty, !link.contains("\0"), link.utf8.count < Int(MAXPATHLEN) else { throw ClipboardSyncServiceError.corruptData }
             } else if header.link != nil { throw ClipboardSyncServiceError.corruptData }
             try database.write { try $0.execute(sql: "INSERT INTO entries(path, kind, header) VALUES (?, ?, ?)", arguments: [header.path, header.kind, bytes]) }
             previous = header.path

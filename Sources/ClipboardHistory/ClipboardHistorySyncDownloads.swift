@@ -148,8 +148,13 @@ extension ClipboardHistoryModule {
         try await waitForWriteTurn()
         try admitSync(generation)
         guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { return nil }
-        return try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: publicationRoot,
+        let published = try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: publicationRoot,
             accountID: account.identifier, faults: faultInjector)
+        try await ClipboardSyncFilePublication.verifyPublished(published, candidate: candidate, faults: faultInjector)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+        guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
+              try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else { return nil }
+        return published
     }
 
     func admitSyncFilePublication(_ generation: UInt64, account: ClipboardSyncAccount,
