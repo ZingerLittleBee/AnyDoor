@@ -204,10 +204,13 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let remaining = await cloud.currentUploads()
         XCTAssertTrue(Set(contentRecords).isDisjoint(with: remaining.map(\.record.recordID)))
         XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        await cloud.redeliverPurgedContent()
         let peer = makeModule(services: services, keyByte: 0x9B, time: 2_000)
         try await peer.setSyncEnabled(true)
         let page = try await peer.page(.init())
         XCTAssertTrue(page.entries.isEmpty)
+        let cleanedAgain = await cloud.currentUploads()
+        XCTAssertTrue(Set(contentRecords).isDisjoint(with: cleanedAgain.map(\.record.recordID)))
     }
 
     func testDeletionWinsWhenAnOfflineUploadLosesItsControlRace() async throws {
@@ -2913,6 +2916,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }
+    func redeliverPurgedContent() { purgedRecords.removeAll(); reversesAllChanges = true }
     func failNextControlCreation() { failsControlCreation = true }
     func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
