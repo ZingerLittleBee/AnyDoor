@@ -7,6 +7,50 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x17,
+            time: 1_000, clock: { clock.withLock { $0 } })
+        try await module.setSyncEnabled(true)
+        await cloud.failNextAccountRead(retryAfter: 120)
+        await module.retrySync()
+        await cloud.switchAccount(to: "account-B")
+        try await module.setSyncEnabled(true)
+        try await module.setSyncEnabled(false)
+        let readsBeforeDeadline = await cloud.accountReadCount()
+        clock.withLock { $0 = $0.addingTimeInterval(120) }
+        await module.retrySync()
+        let status = await module.syncStatus()
+        let readsAfterDeadline = await cloud.accountReadCount()
+        let keyCount = await keys.count()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(readsAfterDeadline, readsBeforeDeadline)
+        XCTAssertEqual(keyCount, 1)
+    }
+
+    func testExplicitNewAccountActivationSurvivesProviderBackoff() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x16,
+            time: 1_000, clock: { clock.withLock { $0 } })
+        try await module.setSyncEnabled(true)
+        await cloud.failNextAccountRead(retryAfter: 120)
+        await module.retrySync()
+        await cloud.switchAccount(to: "explicitly-enabled-account-B")
+        try await module.setSyncEnabled(false)
+        try await module.setSyncEnabled(true)
+        clock.withLock { $0 = $0.addingTimeInterval(120) }
+        await module.retrySync()
+        let status = await module.syncStatus()
+        let keyCount = await keys.count()
+        XCTAssertTrue(status.isEnabled)
+        XCTAssertEqual(status.phase, .upToDate)
+        XCTAssertEqual(keyCount, 2)
+    }
+
     func testDamagedCiphertextDoesNotImportAndRetryKeepsTheUnreadCursor() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

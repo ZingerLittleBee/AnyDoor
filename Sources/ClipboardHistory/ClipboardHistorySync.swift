@@ -78,6 +78,7 @@ extension ClipboardHistoryModule {
     private func stopSyncTasks() async -> UInt64 {
         syncSuspended = true
         syncGeneration &+= 1
+        syncAccountBindingGeneration = nil
         let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
@@ -94,6 +95,7 @@ extension ClipboardHistoryModule {
     private func runSync(allowAccountBinding: Bool) async {
         guard !syncSuspended else { return }
         if let syncTask { await syncTask.value; return }
+        if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         if let deadline = syncRetryNotBefore, deadline > now() {
             setSyncPhase(.failed(.network))
             scheduleSync()
@@ -101,7 +103,8 @@ extension ClipboardHistoryModule {
         }
         syncRetryNotBefore = nil
         let generation = syncGeneration
-        let task = Task { await self.performSync(generation: generation, allowAccountBinding: allowAccountBinding) }
+        let bindingAuthorized = syncAccountBindingGeneration == generation
+        let task = Task { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
         syncTask = task
         await task.value
         guard generation == syncGeneration else { return }
@@ -146,6 +149,7 @@ extension ClipboardHistoryModule {
                 try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ? WHERE id = 1", arguments: [account.identifier])
                 return try syncAccountState(account, in: database)
             }
+            syncAccountBindingGeneration = nil
             var control = try await services.transport.control(for: account)
             try await admitSync(generation, account: account, services: services)
             if control == nil {

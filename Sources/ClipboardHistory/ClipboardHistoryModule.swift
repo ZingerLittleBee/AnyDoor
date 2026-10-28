@@ -104,6 +104,7 @@ public actor ClipboardHistoryModule {
     var syncPollTask: Task<Void, Never>?
     var syncSuspended = true
     var syncRetryNotBefore: Date?
+    var syncAccountBindingGeneration: UInt64?
 
     /// The `appBuild` of a build without a `CFBundleVersion` (`swift run`),
     /// fixed so that relaunching one never resets the retry budget.
