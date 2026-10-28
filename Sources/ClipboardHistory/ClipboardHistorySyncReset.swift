@@ -94,8 +94,20 @@ extension ClipboardHistoryModule {
     /// Keep user history, tags, memberships, and cross-account authorization
     /// records. Only this collection's publication state is retired.
     func retireLocalSyncCollection(accountID: String, in database: Database) throws {
+        try database.execute(sql: """
+            INSERT OR IGNORE INTO clipboard_sync_reset_exclusions(account_id, local_entry_id)
+            SELECT ?, shared.local_entry_id FROM clipboard_sync_entries AS shared
+              JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+              WHERE shared.account_id = ?
+            UNION SELECT ?, entry_id FROM clipboard_sync_file_members WHERE account_id = ?
+            UNION SELECT ?, membership.entry_id FROM clipboard_entry_tags AS membership
+              JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
+              WHERE selected.account_id = ? AND selected.selected = 1
+            """, arguments: [accountID, accountID, accountID, accountID, accountID, accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_outbox WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_states WHERE account_id = ?", arguments: [accountID])
+        try database.execute(sql: "DELETE FROM clipboard_sync_tag_merge_outbox WHERE account_id = ?", arguments: [accountID])
+        try database.execute(sql: "DELETE FROM clipboard_sync_tag_aliases WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "UPDATE clipboard_sync_tags SET selected = 0, locally_authorized = 0, record_id = NULL WHERE account_id = ?",
             arguments: [accountID])
     }

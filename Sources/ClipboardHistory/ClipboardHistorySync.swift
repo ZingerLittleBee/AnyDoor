@@ -9,7 +9,10 @@ extension ClipboardHistoryModule {
             return try database.read { database in
                 let settings = try syncSettings(in: database)
                 let recovery = try syncRecovery(in: database)
-                let reset = try cloudReset(in: database)?.status
+                var reset = try cloudReset(in: database)?.status
+                if let current = reset, current.isPending, syncPhase == .failed(.localStorage) {
+                    reset = .init(stage: current.stage, deletedRecordCount: current.deletedRecordCount, failure: syncPhase)
+                }
                 let phase = syncPhase == .disabled ? recovery.phase ?? .connecting : syncPhase
                 let accountID = settings.accountID ?? ""
                 let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
@@ -75,6 +78,10 @@ extension ClipboardHistoryModule {
                 ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = excluded.selected, locally_authorized = 1
                 """, arguments: [accountID, tagID, selected])
             if selected {
+                try database.execute(sql: """
+                    DELETE FROM clipboard_sync_reset_exclusions WHERE account_id = ?
+                      AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
+                    """, arguments: [accountID, tagID])
                 try database.execute(sql: """
                     DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
                       AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)

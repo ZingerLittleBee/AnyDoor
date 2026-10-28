@@ -136,7 +136,9 @@ The public-module reset cases in
 use real encrypted temporary stores with account-aware CAS adapters. They cover
 local-history/key preservation, permanent stopped control, offline peer consent,
 old operation replay after retirement, response loss at retirement/deletion/stop,
-restart, missing authority, account switches, late cleanup during local store
+restart, missing authority, independent account A/B clear journals, old tag-merge
+queues, retained-copy exclusion and explicit reselection, already-deleted local
+history, account switches, late cleanup during local store
 replacement, and a newer explicit activation superseding unfinished local work.
 [Settings tests](../../Tests/AnyDoorTests/ClipboardSyncSettingsModelTests.swift)
 cover confirmation cancellation/dismissal and retry while ordinary sync is off,

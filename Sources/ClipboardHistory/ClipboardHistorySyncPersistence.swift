@@ -57,7 +57,9 @@ extension ClipboardHistoryModule {
     /// bound inside the literal so callers never manage this predicate's slots.
     static func syncEntryPublicationAuthority(accountID: String) -> SQL {
         """
-        NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
+        NOT EXISTS (SELECT 1 FROM clipboard_sync_reset_exclusions AS retired
+                    WHERE retired.account_id = \(accountID) AND retired.local_entry_id = entry.id)
+        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
                     WHERE blocked.account_id = \(accountID) AND blocked.local_entry_id = entry.id)
         AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
             JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id

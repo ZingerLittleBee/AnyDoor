@@ -131,6 +131,10 @@ extension ClipboardHistoryModule {
         }
         if locallyConfirmed {
             try database.execute(sql: """
+                DELETE FROM clipboard_sync_reset_exclusions WHERE account_id = ?
+                  AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
+                """, arguments: [accountID, canonical])
+            try database.execute(sql: """
                 DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
                   AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
                 """, arguments: [accountID, canonical])

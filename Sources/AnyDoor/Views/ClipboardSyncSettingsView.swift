@@ -193,7 +193,7 @@ struct ClipboardSyncSettingsView: View {
     }
 
     private var statusKey: L10n.Key {
-        switch model.status.phase {
+        switch model.status.cloudReset?.failure ?? model.status.phase {
         case .disabled: .settingsClipboardSyncDisabled
         case .connecting: .settingsClipboardSyncConnecting
         case .waitingForAccount: .settingsClipboardSyncWaitingForAccount

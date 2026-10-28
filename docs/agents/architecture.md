@@ -188,7 +188,10 @@ responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
 
-Cloud reset uses the additive `v20_clipboard_sync_reset` journal. The typed
+Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
+An interrupted clear for account A does not prevent explicit participation or
+an independent clear in account B. Only the current account can resume its
+journal; switching accounts never retargets a prior confirmation. The typed
 confirmation binds the visible account and collection; execution revalidates the
 current system account. The permanent control record first moves by atomic CAS
 to a resetting epoch, then each bounded metadata-only cleanup page deletes
@@ -201,8 +204,11 @@ without touching newer content or claiming observed completion.
 Offline peers revoke participation and retire old publication queues when they
 observe retirement or another epoch. Manual activation reuses the existing key,
 creates a new active epoch by CAS, and requires fresh tag selection for local
-backfill. Reset does not remove independent local-only or cross-account exclusion
-records. Settings exposes preparation, confirmed deletion progress, interruption,
+backfill. Reset preserves independent local-only and cross-account exclusion records.
+Its own retained-entry exclusions prevent remote tag selection from publishing
+pre-reset copies; explicit local selection or confirmed merge can authorize them
+again through the shared content-publication predicate. Cloud tag states, aliases,
+and queued merges retire with the old collection; local tags and memberships stay. Settings exposes preparation, confirmed deletion progress, interruption,
 and completion even while ordinary sync is off. See
 [cloud-reset evidence](../testing/clipboard-sync-signing.md#cloud-reset-evidence).
 
