@@ -1,6 +1,76 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "clipboard.linkedFile.locations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Linked Locations" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关联位置" } }
+      }
+    },
+    "clipboard.linkedFile.original": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Original" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "原始文件" } }
+      }
+    },
+    "clipboard.linkedFile.workingCopy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Working Copy" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工作副本" } }
+      }
+    },
+    "clipboard.linkedFile.associated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Associated File" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已关联文件" } }
+      }
+    },
+    "clipboard.linkedFile.associate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Associate File…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关联文件…" } }
+      }
+    },
+    "clipboard.linkedFile.associateMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Saved changes at this location will sync with the linked file. The chosen file’s current contents are preserved." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置保存的改动将与关联文件同步。所选文件的当前内容会保留。" } }
+      }
+    },
+    "clipboard.linkedFile.localChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local file changes waiting to sync" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地文件改动等待同步" } }
+      }
+    },
+    "clipboard.linkedFile.conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "File conflict · Local changes preserved" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "文件冲突 · 本地改动已保留" } }
+      }
+    },
+    "clipboard.linkedFile.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose an available ordinary file to associate." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请选择可用的普通文件进行关联。" } }
+      }
+    },
+    "clipboard.linkedFile.alreadyAssociated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This location is already associated with another file." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置已与另一个文件关联。" } }
+      }
+    },
     "clipboard.sync.fileLocalUnavailable": {
       "extractionState": "manual",
       "localizations": {

@@ -26,6 +26,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ClipboardHistoryMaterializationRequest
         ) async throws -> ClipboardHistoryMaterialization
     let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
+    let associateFileLocation: @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation
     let tagDefinitions:
         @Sendable () async throws -> [ClipboardHistoryTagDefinition]
     let sourceSummaries:
@@ -94,6 +95,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         exportFiles = { entryID, destinations in
             try await module.exportFiles(entryID, to: destinations)
         }
+        associateFileLocation = { try await module.associateFileLocation($0) }
         createTagDefinition = { name, entryID in
             let assignment = try await module.createTagDefinition(
                 named: name,
@@ -194,6 +196,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         exportFiles: @escaping @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL] = { _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
         },
+        associateFileLocation: @escaping @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
         retrySearchIndex:
             @escaping @Sendable () async throws
                 -> ClipboardHistorySearchIndexStatus = {
@@ -206,6 +211,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.apply = apply
         self.materialize = materialize
         self.exportFiles = exportFiles
+        self.associateFileLocation = associateFileLocation
         self.tagDefinitions = tagDefinitions
         self.sourceSummaries = sourceSummaries
         self.createTagDefinition = createTagDefinition
@@ -266,6 +272,8 @@ enum ClipboardHistoryActionFailure: Equatable {
     )
     case syncFilesPending(entryID: ClipboardHistoryEntryID, count: Int)
     case fileExportCollision
+    case invalidFileAssociation
+    case fileLocationAlreadyAssociated
     case fileCollectionRequiresRestore(
         entryID: ClipboardHistoryEntryID,
         ownedCount: Int,
@@ -303,6 +311,10 @@ enum ClipboardHistoryActionFailure: Equatable {
             self = .syncFilesPending(entryID: entryID, count: count)
         case .fileExportCollision:
             self = .fileExportCollision
+        case .invalidFileAssociation:
+            self = .invalidFileAssociation
+        case .fileLocationAlreadyAssociated:
+            self = .fileLocationAlreadyAssociated
         case .fileCollectionRequiresRestore(
             let entryID,
             let ownedCount,
@@ -322,8 +334,6 @@ enum ClipboardHistoryActionFailure: Equatable {
         case .invalidTextEdit:
             self = .invalidTextEdit
         case .resetFailed,
-             .invalidFileAssociation,
-             .fileLocationAlreadyAssociated,
              .invalidFileExport,
              .invalidConfirmation,
              .unsupportedLegacyTransferVersion,
@@ -537,6 +547,19 @@ final class ClipboardHistoryPresentationModel {
         actionFailure = nil
         do {
             _ = try await operations.exportFiles(entryID, destinations)
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func associateFileLocation(_ request: ClipboardHistoryFileLocationAssociation) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.associateFileLocation(request)
+            invalidateMaterializations(for: request.entryID)
+            await reload()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)

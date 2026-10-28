@@ -56,7 +56,12 @@ extension ClipboardHistoryModule {
         try requiredDatabase().read { database in
             let storedID = entryID.value.uuidString.lowercased()
             guard try isLiveEntry(storedID, at: now(), in: database) else { throw ClipboardHistoryModuleError.entryNotFound }
-            return try Row.fetchAll(database, sql: """
+            return try Self.linkedFileLocations(entryID: storedID, in: database)
+        }
+    }
+
+    static func linkedFileLocations(entryID: String, in database: Database) throws -> [ClipboardHistoryLinkedFileLocation] {
+        try Row.fetchAll(database, sql: """
                 SELECT DISTINCT location.* FROM clipboard_sync_linked_locations AS location
                 JOIN clipboard_sync_file_members AS member
                   ON member.account_id = location.account_id AND member.epoch = location.epoch
@@ -64,8 +69,7 @@ extension ClipboardHistoryModule {
                 WHERE member.entry_id = ? AND \(Self.liveSyncFileMember)
                   AND location.account_id = (SELECT account_id FROM clipboard_sync_settings WHERE id = 1)
                 ORDER BY location.kind, location.path, location.id
-                """, arguments: [storedID]).map { try Self.linkedFileLocation($0) }
-        }
+                """, arguments: [entryID]).map { try linkedFileLocation($0) }
     }
 
     static func createLinkedFileSchema(in database: Database) throws {

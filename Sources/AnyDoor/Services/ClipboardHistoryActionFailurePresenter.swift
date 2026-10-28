@@ -17,6 +17,12 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
         case .fileExportCollision:
             titleKey = .clipboardFileExportCollision
             details = []
+        case .invalidFileAssociation:
+            titleKey = .clipboardLinkedFileInvalid
+            details = []
+        case .fileLocationAlreadyAssociated:
+            titleKey = .clipboardLinkedFileAlreadyAssociated
+            details = []
         case .fileReferencesUnavailable(_, let count):
             titleKey = .clipboardToastFileMissing
             details = [.unavailable(count: count)]

@@ -16,6 +16,8 @@ struct ClipboardCardView: View {
     var onRevealInFinder: (() -> Void)?
     var onOpenFiles: (() -> Void)?
     var onSaveFiles: (() -> Void)?
+    var onAssociateFile: ((UUID) -> Void)?
+    var onRevealLinkedLocation: ((URL) -> Void)?
     var onToggleTag: ((String) -> Void)?
     var onNewTag: (() -> Void)?
     var onIgnoreSource: (() -> Void)?
@@ -132,6 +134,7 @@ struct ClipboardCardView: View {
             if let onSaveFiles {
                 menu.addItem(ClosureMenuItem(title: L(.clipboardActionSaveFiles), systemImage: "square.and.arrow.down", handler: onSaveFiles))
             }
+            if let locations = makeLinkedLocationsMenu() { menu.addItem(locations) }
         }
         if let onIgnoreSource,
             let bundleID = entry.source.bundleIdentifier
@@ -172,6 +175,45 @@ struct ClipboardCardView: View {
             )
         }
         return menu
+    }
+
+    private func makeLinkedLocationsMenu() -> NSMenuItem? {
+        guard !entry.linkedFileLocations.isEmpty else { return nil }
+        let parent = NSMenuItem(title: L(.clipboardLinkedFileLocations), action: nil, keyEquivalent: "")
+        let menu = NSMenu()
+        let objectIDs = entry.linkedFileLocations.map(\.objectID).reduce(into: [UUID]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        for objectID in objectIDs {
+            let locations = entry.linkedFileLocations.filter { $0.objectID == objectID }
+            let destination: NSMenu
+            if objectIDs.count > 1 {
+                let name = entry.syncFiles.first { $0.id == objectID }?.displayName ?? locations.first?.url.lastPathComponent ?? ""
+                let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+                destination = NSMenu()
+                item.submenu = destination
+                menu.addItem(item)
+            } else { destination = menu }
+            for location in locations {
+                let kind: L10n.Key = switch location.kind {
+                case .original: .clipboardLinkedFileOriginal
+                case .workingCopy: .clipboardLinkedFileWorkingCopy
+                case .associated: .clipboardLinkedFileAssociated
+                }
+                let item = ClosureMenuItem(title: L(kind) + ": " + location.url.path,
+                    systemImage: "folder") { onRevealLinkedLocation?(location.url) }
+                item.toolTip = location.url.path
+                destination.addItem(item)
+            }
+            if let onAssociateFile {
+                destination.addItem(.separator())
+                destination.addItem(ClosureMenuItem(title: L(.clipboardLinkedFileAssociate), systemImage: "link") {
+                    onAssociateFile(objectID)
+                })
+            }
+        }
+        parent.submenu = menu
+        return parent
     }
 
     private func makeTagSubmenu() -> NSMenuItem? {

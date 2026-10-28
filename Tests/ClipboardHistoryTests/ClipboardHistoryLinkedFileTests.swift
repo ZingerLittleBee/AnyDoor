@@ -70,6 +70,9 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
         XCTAssertEqual(locations.count, 2)
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.linkedFileLocations, locations,
+            "History surfaces must expose the same persisted associations and dirty state")
         try await fixture.receiver.closeStoreForTesting()
         let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
         let restored = try await reopened.linkedFileLocations(for: fixture.entryID)

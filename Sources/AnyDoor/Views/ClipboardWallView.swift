@@ -22,6 +22,8 @@ struct ClipboardWallView: View {
     let onRevealInFinder: (ClipboardHistoryEntry) -> Void
     let onOpenFiles: (ClipboardHistoryEntry) -> Void
     let onSaveFiles: (ClipboardHistoryEntry) -> Void
+    let onAssociateFile: (ClipboardHistoryEntry, UUID) -> Void
+    let onRevealLinkedLocation: (URL) -> Void
     let onDelete: (ClipboardHistoryEntry) -> Void
     let onToggleTag: (ClipboardHistoryEntry, String) -> Void
     let onNewTag: (ClipboardHistoryEntry) -> Void
@@ -739,6 +741,8 @@ struct ClipboardWallView: View {
                             },
                             onOpenFiles: { state.select(item.id); onOpenFiles(item) },
                             onSaveFiles: { state.select(item.id); onSaveFiles(item) },
+                            onAssociateFile: { state.select(item.id); onAssociateFile(item, $0) },
+                            onRevealLinkedLocation: onRevealLinkedLocation,
                             onToggleTag: { state.select(item.id); onToggleTag(item, $0) },
                             onNewTag: { state.select(item.id); onNewTag(item) },
                             onIgnoreSource: { state.select(item.id); onIgnoreSource(item) },

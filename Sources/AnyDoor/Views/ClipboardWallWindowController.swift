@@ -289,6 +289,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
             onOpenFiles: { [weak self] item in self?.openFiles(item) },
             onSaveFiles: { [weak self] item in self?.saveFiles(item) },
+            onAssociateFile: { [weak self] item, objectID in self?.associateFile(item, objectID: objectID) },
+            onRevealLinkedLocation: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
             onDelete: { [weak self] item in
                 self?.performMutation(.delete(item.id))
             },
@@ -1040,6 +1042,22 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                   !content.fileURLs.isEmpty else { presentActionFailure(); return }
             for url in content.fileURLs {
                 if !NSWorkspace.shared.open(url) { ClipboardHistoryActionFailurePresenter.present(.operationUnavailable) }
+            }
+        }
+    }
+
+    private func associateFile(_ entry: ClipboardHistoryEntry, objectID: UUID) {
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardLinkedFileAssociate)
+        panel.message = L(.clipboardLinkedFileAssociateMessage)
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if !(await state.presentation.associateFileLocation(.init(entryID: entry.id, objectID: objectID, url: url))) {
+                presentActionFailure()
             }
         }
     }

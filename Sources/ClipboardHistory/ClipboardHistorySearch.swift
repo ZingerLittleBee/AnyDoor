@@ -697,7 +697,8 @@ extension ClipboardHistoryModule {
                 ) ?? .unknown
             ),
             hasTextConflict: try hasSyncTextConflict(entryID: .init(value), in: database),
-            syncFiles: try syncFileSummaries(entryID: storedID, in: database)
+            syncFiles: try syncFileSummaries(entryID: storedID, in: database),
+            linkedFileLocations: try Self.linkedFileLocations(entryID: storedID, in: database)
         )
     }
 
