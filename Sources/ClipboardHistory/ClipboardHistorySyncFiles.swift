@@ -349,6 +349,15 @@ extension ClipboardHistoryModule {
         }
         for descriptor in descriptors {
             try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
+            guard try syncFileRead({ database in
+                let nodes = try Row.fetchAll(database, sql: """
+                    SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
+                        guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                        return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                    }
+                return ClipboardSyncVersionGraph.isComplete(nodes)
+            }) else { continue }
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }

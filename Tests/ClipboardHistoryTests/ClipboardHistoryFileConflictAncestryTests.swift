@@ -5,6 +5,31 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFreshReceiverDoesNotLinkIncompleteVersionDeliveredBeforeEntry() async throws {
+        let fixture = try await makeLinkedFixture()
+        let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(locations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        let parentID = UUID(), childID = UUID()
+        let expected = Data("complete version after reordered metadata".utf8)
+        _ = try await commitConflictRemoteFile(bytes: expected, versionID: childID,
+            parents: [original.baseVersionID, parentID], objectID: original.objectID,
+            root: fixture.root, services: fixture.services, cloud: fixture.cloud)
+        await fixture.cloud.moveLastTwoRecordsToFront()
+        let fresh = makeLinkedModule(root: fixture.root.appendingPathComponent("Fresh"), services: fixture.services, key: 0x53)
+        try await fresh.setSyncEnabled(true)
+        let unproven = try await fresh.linkedFileLocations(for: fixture.entryID)
+        XCTAssertTrue(unproven.isEmpty)
+        _ = try await commitConflictRemoteFile(bytes: Data("parent version".utf8), versionID: parentID,
+            parents: [original.baseVersionID], objectID: original.objectID,
+            root: fixture.root, services: fixture.services, cloud: fixture.cloud)
+        await fresh.retrySync()
+        let complete = try await fresh.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(complete.first?.baseVersionID, childID)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(complete.first?.url)), expected)
+    }
+
+    @MainActor
     func testReorderedFileAncestryWaitsForEveryParentBeforeInstalling() async throws {
         let fixture = try await makeLinkedFixture()
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

@@ -199,7 +199,7 @@ extension ClipboardHistoryModule {
         guard basis.account.identifier == snapshot.accountID, basis.control.epoch == snapshot.epoch,
               basis.control.keyID == snapshot.keyID, basis.control.phase == "active", basis.heads == snapshot.heads,
               conflictLocationFactsMatch(snapshot.locations, sources: basis.locations) else { throw ClipboardHistoryFileConflictError.stalePlan }
-        guard !basis.nodes.isEmpty, basis.nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: basis.nodes) }) else {
+        guard ClipboardSyncVersionGraph.isComplete(basis.nodes) else {
             throw ClipboardHistoryFileConflictError.incompleteAncestry
         }
     }

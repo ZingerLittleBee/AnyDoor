@@ -85,7 +85,7 @@ extension ClipboardHistoryModule {
                 localURL: available ? proof?.url : nil))
         }
         let nodes = basis.nodes
-        let complete = !nodes.isEmpty && nodes.allSatisfy { ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }
+        let complete = ClipboardSyncVersionGraph.isComplete(nodes)
         guard candidates.count > 1 || !complete || basis.locations.contains(where: { $0.state == .conflict }) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
@@ -164,7 +164,7 @@ extension ClipboardHistoryModule {
             guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
             return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
         }
-        if ClipboardSyncVersionGraph.heads(nodes).count > 1 || !nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) { return true }
+        if ClipboardSyncVersionGraph.heads(nodes).count > 1 || !ClipboardSyncVersionGraph.isComplete(nodes) { return true }
         return try Bool.fetchOne(database, sql: """
             SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations WHERE account_id = ? AND epoch = ? AND object_id = ? AND state = 'conflict')
               OR EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'needsReview')

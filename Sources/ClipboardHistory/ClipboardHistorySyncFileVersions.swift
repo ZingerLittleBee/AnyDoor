@@ -161,7 +161,7 @@ extension ClipboardHistoryModule {
         }
         let heads = ClipboardSyncVersionGraph.heads(nodes)
         if heads.count == 1, let head = heads.first,
-           nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) {
+           ClipboardSyncVersionGraph.isComplete(nodes) {
             try database.execute(sql: """
                 UPDATE clipboard_sync_file_selections SET current_version_id = ?
                 WHERE account_id = ? AND epoch = ? AND object_id = ?
@@ -186,19 +186,8 @@ extension ClipboardHistoryModule {
             guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
             graph[id] = Set(try JSONDecoder().decode([UUID].self, from: row["parents"]))
         }
-        let known = Set(graph.keys)
-        var remaining = graph.mapValues { $0.intersection(known) }
-        var children: [UUID: Set<UUID>] = [:]
-        for (id, parents) in remaining { for parent in parents { children[parent, default: []].insert(id) } }
-        var ready = remaining.filter { $0.value.isEmpty }.map(\.key)
-        var visited = 0
-        while let next = ready.popLast() {
-            visited += 1
-            for child in children[next] ?? [] {
-                remaining[child]?.remove(next)
-                if remaining[child]?.isEmpty == true { ready.append(child) }
-            }
+        guard ClipboardSyncVersionGraph.isAcyclic(graph.map { .init(id: $0.key, parents: $0.value) }) else {
+            throw ClipboardSyncServiceError.corruptData
         }
-        guard visited == graph.count else { throw ClipboardSyncServiceError.corruptData }
     }
 }

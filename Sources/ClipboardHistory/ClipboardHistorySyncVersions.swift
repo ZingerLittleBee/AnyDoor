@@ -17,6 +17,35 @@ struct ClipboardSyncVersionNode: Sendable {
 }
 
 enum ClipboardSyncVersionGraph {
+    /// Validate a complete DAG in linear time without recursive stack growth.
+    /// Missing nodes are permitted only during immutable event admission.
+    static func isAcyclic(_ nodes: [ClipboardSyncVersionNode], requireAllParents: Bool = false) -> Bool {
+        let known = Set(nodes.map(\.id))
+        guard known.count == nodes.count else { return false }
+        var counts: [UUID: Int] = [:]
+        var children: [UUID: [UUID]] = [:]
+        for node in nodes {
+            if requireAllParents && !node.parents.isSubset(of: known) { return false }
+            let parents = node.parents.intersection(known)
+            counts[node.id] = parents.count
+            for parent in parents { children[parent, default: []].append(node.id) }
+        }
+        var ready = counts.filter { $0.value == 0 }.map(\.key)
+        var visited = 0
+        while let next = ready.popLast() {
+            visited += 1
+            for child in children[next] ?? [] {
+                counts[child, default: 0] -= 1
+                if counts[child] == 0 { ready.append(child) }
+            }
+        }
+        return visited == nodes.count
+    }
+
+    static func isComplete(_ nodes: [ClipboardSyncVersionNode]) -> Bool {
+        !nodes.isEmpty && isAcyclic(nodes, requireAllParents: true)
+    }
+
     static func heads(_ nodes: [ClipboardSyncVersionNode]) -> Set<UUID> {
         Set(nodes.map(\.id)).subtracting(nodes.flatMap(\.parents))
     }

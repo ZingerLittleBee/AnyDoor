@@ -389,6 +389,12 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private var fileDownloads: [UUID] = []
     func downloadedFileVersions() -> [UUID] { fileDownloads }
     func uploadedRecords() -> [ClipboardSyncUpload] { uploads }
+    func moveLastTwoRecordsToFront() {
+        guard uploads.count >= 2 else { return }
+        let tail = Array(uploads.suffix(2))
+        uploads.removeLast(2)
+        uploads.insert(contentsOf: tail, at: 0)
+    }
     func failCommits(_ fail: Bool) { commitsFail = fail }
     func holdNextDownload() { shouldHoldDownload = true }
     func downloadIsHeld() -> Bool { heldDownload != nil }
