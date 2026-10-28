@@ -1,0 +1,486 @@
+---
+// The interactive hotkey unit (#demo): an LCD readout, a rack of app modules,
+// and a keyboard. F1–F6 open/hide apps, Esc dismisses all, and Caps Lock arms
+// Hyper Key mode (⇪ + S/F/L/M). The markup renders the initial F-keys state;
+// the script below owns every state change.
+import Bi from './Bi.astro';
+import { biAttrs, type Bi as BiText } from '../lib/i18n';
+import { APPS, HYPER, ROWS, hyperName, isAppKey, lcd, unit, type KeyDef } from '../lib/content/hotkey';
+
+// Accessible name for a keycap; Hyper actions carry a bilingual name.
+const label = (k: KeyDef): string | BiText => {
+  const app = APPS.find((a) => a.key === k.id);
+  if (app) return `${app.key} · ${app.name}`;
+  if (k.id === 'Escape') return 'Esc';
+  if (k.id === 'CapsLock') return 'Caps Lock · Hyper';
+  const h = HYPER.find((x) => x.key === k.id);
+  if (h) {
+    const n = hyperName(h);
+    return { zh: `Hyper ${h.l} · ${n.zh}`, en: `Hyper ${h.l} · ${n.en}` };
+  }
+  return k.lg;
+};
+const labelAttrs = (k: KeyDef) => {
+  const l = label(k);
+  if (typeof l !== 'string') return biAttrs({ 'aria-label': l });
+  return l ? { 'aria-label': l } : {};
+};
+// Bound in the initial F-keys mode; the script re-evaluates on mode changes.
+const boundAtStart = (id: string) => id === 'Escape' || id === 'CapsLock' || isAppKey(id);
+---
+
+<div class="device chassis" id="demo" data-hotkey-unit>
+  <span class="screw a"></span><span class="screw b"></span><span class="screw c"></span><span class="screw d"></span>
+  <div class="dev-head">
+    <span class="lbl"><b>K-00</b> · <Bi text={unit.name} /></span>
+    <span class="lbl hide-sm">HID · CGEvent tap</span>
+    <div class="seg" role="group" {...biAttrs({ 'aria-label': unit.modeAria })}>
+      <button type="button" class="on" aria-pressed="true" data-mode="fkeys"><Bi text={unit.modeFkeys} /></button>
+      <button type="button" aria-pressed="false" data-mode="hyper">⇪ <Bi text={unit.modeHyper} /></button>
+    </div>
+  </div>
+  <div class="lcd" role="status" aria-live="polite">
+    <div>
+      <div class="l1" data-lcd="1"><Bi text={lcd.ready} /></div>
+      <div class="l2" data-lcd="2"><Bi text={lcd.tryF} /></div>
+    </div>
+    <div class="lcd-stat" aria-hidden="true">
+      <div class="on-t" data-stat="fkeys"><span class="lamp on"></span>F-KEYS</div>
+      <div data-stat="hyper"><span class="lamp"></span>HYPER</div>
+      <div>OPEN <span data-open-count>0/6</span></div>
+    </div>
+  </div>
+  <div class="rack r6" style="--n: 6" data-rack="fkeys">
+    {APPS.map((a) => (
+      <button type="button" class="mod" data-mod={a.key} aria-label={`${a.key} · ${a.name}`}>
+        <span class="top"><span>{a.key}</span><span class="led"></span></span>
+        <span class="tile">{a.letter}</span>
+        <span class="nm">{a.name}</span>
+        <span class="tg">{a.tag}</span>
+      </button>
+    ))}
+  </div>
+  <div class="rack r4" style="--n: 4" data-rack="hyper" hidden>
+    {HYPER.map((h) => {
+      const n = hyperName(h);
+      return (
+        <button type="button" class="mod" data-mod={h.key} {...biAttrs({ 'aria-label': { zh: `Hyper ${h.l} · ${n.zh}`, en: `Hyper ${h.l} · ${n.en}` } })}>
+          <span class="top"><span>⇪ + {h.l}</span><span class="led"></span></span>
+          <span class="tile">{h.l}</span>
+          <span class="nm"><Bi text={n} /></span>
+          <span class="tg">{h.kind === 'app' ? h.tag : <Bi text={h.kind === 'lock' ? unit.actionTag : unit.toggleTag} />}</span>
+        </button>
+      );
+    })}
+  </div>
+  <div class="kb-shell">
+    <div class="kb" role="group" {...biAttrs({ 'aria-label': unit.kbAria })}>
+      {ROWS.map((row) => (
+        <div class:list={['kb-row', row.cls]}>
+          {row.keys.map((k) =>
+            'stack' in k ? (
+              <div class="kstack" style={`flex-grow: ${k.w}`}>
+                {k.stack.map((s) => (
+                  <button type="button" class="key m ghost" data-key={s.id} data-stacked tabindex="-1" aria-hidden="true"><span class="cap"><span class="lg">{s.lg}</span></span></button>
+                ))}
+              </div>
+            ) : (
+              <button
+                type="button"
+                class:list={['key', k.kind, boundAtStart(k.id) ? 'bound' : 'ghost']}
+                style={`flex-grow: ${k.w}`}
+                data-key={k.id}
+                tabindex={boundAtStart(k.id) ? '0' : '-1'}
+                aria-hidden={boundAtStart(k.id) ? undefined : 'true'}
+                {...labelAttrs(k)}
+              ><span class="cap"><span class="lg">{k.lg}</span><span class="sub">{k.sub}</span><span class="led"></span></span></button>
+            ),
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+  <div class="dev-foot">
+    <span><b><Bi text={unit.demoA} /></b><Bi text={unit.demoB} /></span>
+    <span class="kcs" data-hint="fkeys"><span><Bi text={unit.hintF} /></span><span class="kc">F1</span><span class="kc dash">–</span><span class="kc">F6</span><span class="kc txt"><Bi text={unit.hintEsc} /></span><button type="button" class="kc dark" data-dismiss>esc</button></span>
+    <span class="kcs" data-hint="hyper" hidden><span><Bi text={unit.hintH} /></span><span class="kc sig">⇪</span><span class="kc dash">+</span><span class="kc">S</span><span class="kc">F</span><span class="kc">L</span><span class="kc">M</span></span>
+  </div>
+</div>
+
+<script>
+  import { ALIAS, APPS, CODES, HYPER, isAppKey, lcd, type HyperBinding } from '../lib/content/hotkey';
+  import { applyBiAttrs, onLangChange, pick } from '../lib/lang-client';
+
+  type Mode = 'fkeys' | 'hyper';
+  type Verb = 'opened' | 'raised' | 'hidden';
+  type AppBinding = Extract<HyperBinding, { kind: 'app' }>;
+  type Readout =
+    | { k: 'idle' | 'self' | 'armed' | 'lock' | 'esc' | 'escNone' }
+    | { k: 'app'; key: string; verb: Verb }
+    | { k: 'happ'; h: AppBinding; verb: Verb }
+    | { k: 'mute'; muted: boolean };
+
+  interface State {
+    mode: Mode;
+    open: string[]; // F-key apps in the order they were opened
+    front: string | null;
+    hOpen: string[];
+    hFront: string | null;
+    muted: boolean;
+    locked: boolean;
+    down: Set<string>;
+    flash: string | null; // a mod key, 'Escape', or 'hyper-all'
+    lcd: Readout;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-hotkey-unit]');
+  if (root) mount(root);
+
+  function mount(root: HTMLElement) {
+    const $ = <T extends Element>(sel: string) => root.querySelector<T>(sel)!;
+    const $$ = <T extends Element>(sel: string) => [...root.querySelectorAll<T>(sel)];
+    const modeBtns = $$<HTMLButtonElement>('[data-mode]');
+    const stats = $$<HTMLElement>('[data-stat]');
+    const racks = $$<HTMLElement>('[data-rack]');
+    const hints = $$<HTMLElement>('[data-hint]');
+    const mods = $$<HTMLButtonElement>('[data-mod]');
+    const keys = $$<HTMLButtonElement>('[data-key]');
+    const lcd1 = $<HTMLElement>('[data-lcd="1"]');
+    const lcd2 = $<HTMLElement>('[data-lcd="2"]');
+    const openCount = $<HTMLElement>('[data-open-count]');
+
+    const s: State = {
+      mode: 'fkeys', open: [], front: null, hOpen: [], hFront: null,
+      muted: false, locked: false, down: new Set(), flash: null, lcd: { k: 'idle' },
+    };
+    const set = (patch: Partial<State>) => { Object.assign(s, patch); render(); };
+    const later = (fn: () => void, ms: number) => window.setTimeout(fn, ms);
+    const clearFlash = (flash: string, ms: number) => later(() => { if (s.flash === flash) set({ flash: null }); }, ms);
+
+    const hyperOf = (id: string) => HYPER.find((x) => x.key === id);
+    const bound = (id: string) => {
+      if (id === 'Escape' || id === 'CapsLock') return true;
+      if (isAppKey(id)) return s.mode !== 'hyper';
+      return s.mode === 'hyper' && !!hyperOf(id);
+    };
+    const live = (id: string) => {
+      const hy = s.mode === 'hyper';
+      if (isAppKey(id)) return !hy && s.open.includes(id);
+      if (id === 'CapsLock') return hy;
+      const h = hy ? hyperOf(id) : undefined;
+      if (h) return h.kind === 'app' ? s.hOpen.includes(id) : h.kind === 'lock' ? s.locked : s.muted;
+      return false;
+    };
+
+    function setDown(id: string, on: boolean, flash?: string) {
+      const down = new Set(s.down);
+      if (on) down.add(id); else down.delete(id);
+      const patch: Partial<State> = { down };
+      if (flash) { patch.flash = flash; clearFlash(flash, 240); }
+      set(patch);
+    }
+
+    function act(id: string) {
+      if (id === 'Escape') return dismiss();
+      if (id === 'CapsLock') return setMode('hyper', true);
+      if (isAppKey(id)) return toggleApp(id);
+      if (s.mode === 'hyper') {
+        const h = hyperOf(id);
+        if (h) return hyperAct(h);
+      }
+    }
+
+    function setMode(mode: Mode, fromCaps = false) {
+      const patch: Partial<State> = { mode, lcd: { k: mode === 'hyper' ? 'armed' : 'idle' } };
+      if (fromCaps) patch.flash = 'hyper-all';
+      set(patch);
+      if (fromCaps) clearFlash('hyper-all', 260);
+    }
+
+    // First press opens and fronts; pressing a background app fronts it;
+    // pressing the frontmost app hides it and fronts the last one opened.
+    function toggleApp(key: string) {
+      let open = s.open;
+      let front = s.front;
+      let verb: Verb;
+      if (open.includes(key) && front === key) {
+        open = open.filter((k) => k !== key);
+        front = open.at(-1) ?? null;
+        verb = 'hidden';
+      } else if (open.includes(key)) {
+        front = key;
+        verb = 'raised';
+      } else {
+        open = [...open, key];
+        front = key;
+        verb = 'opened';
+      }
+      set({ mode: 'fkeys', open, front, flash: key, lcd: { k: 'app', key, verb } });
+      clearFlash(key, 240);
+    }
+
+    function hyperAct(h: HyperBinding) {
+      const patch: Partial<State> = { flash: h.key };
+      if (h.kind === 'app') {
+        let verb: Verb;
+        if (s.hOpen.includes(h.key) && s.hFront === h.key) {
+          patch.hOpen = s.hOpen.filter((k) => k !== h.key);
+          patch.hFront = null;
+          verb = 'hidden';
+        } else {
+          patch.hOpen = s.hOpen.includes(h.key) ? s.hOpen : [...s.hOpen, h.key];
+          patch.hFront = h.key;
+          verb = 'opened';
+        }
+        patch.lcd = { k: 'happ', h, verb };
+      } else if (h.kind === 'lock') {
+        patch.locked = true;
+        patch.lcd = { k: 'lock' };
+        later(() => set({ locked: false }), 1600);
+      } else {
+        patch.muted = !s.muted;
+        patch.lcd = { k: 'mute', muted: patch.muted };
+      }
+      set(patch);
+      clearFlash(h.key, 240);
+    }
+
+    function dismiss() {
+      const had = s.open.length + s.hOpen.length;
+      set({ open: [], front: null, hOpen: [], hFront: null, flash: 'Escape', lcd: { k: had ? 'esc' : 'escNone' } });
+    }
+
+    function readout(): [string, string] {
+      const hy = s.mode === 'hyper';
+      const L = s.lcd;
+      switch (L.k) {
+        case 'self': return [pick(lcd.selfTest) + ' ···', pick(lcd.selfTestSub)];
+        case 'armed': return ['⇪ ' + pick(lcd.armed), pick(lcd.tryH)];
+        case 'app': return [`${L.key} → ${APPS.find((a) => a.key === L.key)!.name}`, pick(lcd[L.verb])];
+        case 'happ': return [`⇪${L.h.l} → ${L.h.name}`, pick(lcd[L.verb])];
+        case 'lock': return ['⇪L → ' + pick(lcd.lock), pick(lcd.locked)];
+        case 'mute': return ['⇪M → ' + pick(lcd.mute), pick(L.muted ? lcd.muted : lcd.unmuted)];
+        case 'esc': return ['ESC', pick(lcd.escAll)];
+        case 'escNone': return ['ESC', pick(lcd.escNone)];
+        default: return [pick(lcd.ready), pick(hy ? lcd.tryH : lcd.tryF)];
+      }
+    }
+
+    function render() {
+      const hy = s.mode === 'hyper';
+      modeBtns.forEach((b) => {
+        const on = b.dataset.mode === s.mode;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', String(on));
+      });
+      stats.forEach((el) => {
+        const on = el.dataset.stat === s.mode;
+        el.classList.toggle('on-t', on);
+        el.querySelector('.lamp')?.classList.toggle('on', on);
+      });
+      racks.forEach((el) => { el.hidden = el.dataset.rack !== s.mode; });
+      hints.forEach((el) => { el.hidden = el.dataset.hint !== s.mode; });
+      openCount.textContent = hy ? `${s.hOpen.length}/2` : `${s.open.length}/6`;
+
+      const [l1, l2] = readout();
+      if (lcd1.textContent !== l1) lcd1.textContent = l1;
+      if (lcd2.textContent !== l2) lcd2.textContent = l2;
+
+      mods.forEach((el) => {
+        const id = el.dataset.mod!;
+        const h = hyperOf(id);
+        let on: boolean, front: boolean, flash: boolean;
+        if (h) {
+          on = h.kind === 'app' ? s.hOpen.includes(id) : h.kind === 'lock' ? s.locked : s.muted;
+          front = h.kind === 'app' && s.hFront === id;
+          flash = s.flash === id || s.flash === 'hyper-all';
+        } else {
+          on = s.open.includes(id);
+          front = s.front === id;
+          flash = s.flash === id;
+        }
+        el.classList.toggle('on', on);
+        el.classList.toggle('front', front);
+        el.classList.toggle('flash', flash);
+      });
+
+      keys.forEach((el) => {
+        const id = el.dataset.key!;
+        el.classList.toggle('down', s.down.has(id));
+        if ('stacked' in el.dataset) return;
+        const b = bound(id);
+        el.classList.toggle('bound', b);
+        el.classList.toggle('ghost', !b);
+        el.classList.toggle('live', live(id));
+        // A focused key that stops being bound would leave focus on a hidden,
+        // untabbable element; hand it to the active mode button first.
+        if (!b && el === document.activeElement) modeBtns.find((m) => m.dataset.mode === s.mode)?.focus({ preventScroll: true });
+        el.tabIndex = b ? 0 : -1;
+        if (b) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', 'true');
+      });
+    }
+
+    // Keyboard. Physical keys mirror onto the drawn keyboard, but only while
+    // the unit is on screen and never while the visitor is typing elsewhere.
+    // Shortcuts with ⌘/⌃/⌥ stay with the browser; F1–F6 are claimed so the
+    // browser's own bindings (help, reload) don't fire mid-demo.
+    let inView = false;
+    const skipTarget = (e: KeyboardEvent) =>
+      e.target instanceof Element &&
+      !!e.target.closest('input, textarea, select, [contenteditable="true"], [data-capture-keys]');
+    const codeOf = (e: KeyboardEvent) => ALIAS[e.code] ?? e.code;
+
+    window.addEventListener('keydown', (e) => {
+      if (!inView || skipTarget(e)) return;
+      const code = codeOf(e);
+      if (!CODES.has(code)) return;
+      const isMod = /^(Meta|Control|Alt|Shift)/.test(code);
+      if ((e.metaKey || e.ctrlKey || e.altKey) && !isMod) return;
+      if (isAppKey(code)) e.preventDefault();
+      if (e.repeat) return;
+      setDown(code, true);
+      act(code);
+      // macOS only reports Caps Lock state changes, so a release may never come.
+      if (code === 'CapsLock') later(() => setDown('CapsLock', false), 180);
+    });
+    window.addEventListener('keyup', (e) => {
+      const code = codeOf(e);
+      if (CODES.has(code) && s.down.has(code)) setDown(code, false);
+    });
+    window.addEventListener('blur', () => set({ down: new Set() }));
+
+    // Pointer: keys travel while held; a click runs the binding when bound.
+    keys.forEach((el) => {
+      const id = el.dataset.key!;
+      const release = () => { if (s.down.has(id)) setDown(id, false); };
+      el.addEventListener('pointerdown', () => setDown(id, true));
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointerleave', release);
+      if ('stacked' in el.dataset) return;
+      el.addEventListener('click', () => { if (bound(id)) act(id); });
+    });
+    mods.forEach((el) => {
+      const id = el.dataset.mod!;
+      const h = hyperOf(id);
+      el.addEventListener('click', () => (h ? hyperAct(h) : act(id)));
+    });
+    modeBtns.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode as Mode)));
+    // The hint's esc chip doubles as a dismiss button: the Esc keycap is too
+    // small to tap at phone width.
+    $<HTMLButtonElement>('[data-dismiss]').addEventListener('click', dismiss);
+
+    // Power-on self-test: F1–F6 travel in sequence, once, when the unit is
+    // first seen. Skipped under reduced motion.
+    let tested = false;
+    function selfTest() {
+      tested = true;
+      set({ lcd: { k: 'self' } });
+      APPS.forEach((a, i) => {
+        later(() => setDown(a.key, true, a.key), 420 + i * 95);
+        later(() => setDown(a.key, false), 420 + i * 95 + 80);
+      });
+      later(() => { if (s.lcd.k === 'self') set({ lcd: { k: 'idle' } }); }, 420 + 6 * 95 + 700);
+    }
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    new IntersectionObserver(
+      ([entry]) => {
+        inView = entry.isIntersecting && entry.intersectionRatio >= 0.25;
+        if (inView && !tested && !reduceMotion) selfTest();
+      },
+      { threshold: [0, 0.25, 0.5] },
+    ).observe(root);
+
+    applyBiAttrs(undefined, root);
+    onLangChange(render);
+    render();
+  }
+</script>
+
+<style>
+  .device { padding: 16px clamp(12px, 1.8vw, 22px) clamp(14px, 1.8vw, 22px); box-shadow: inset 0 1px 0 #fff, 0 2px 0 var(--steel), 0 40px 70px -40px rgba(20, 24, 38, 0.45), 0 12px 24px -16px rgba(20, 24, 38, 0.2); scroll-margin-top: 80px; }
+  .dev-head { display: flex; align-items: center; gap: 12px; padding: 0 14px 12px; flex-wrap: wrap; }
+  .dev-head .lbl b { color: var(--ink); font-weight: 600; }
+  .dev-head .seg { margin-left: auto; }
+  .lcd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; background: var(--lcd) var(--lcd-scan); border-radius: 10px; padding: 12px 16px; min-height: 72px; box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 0 #fff; color: var(--lcd-ink); font-family: var(--mono); }
+  .lcd .l1 { font-size: 20px; font-weight: 600; letter-spacing: 0.02em; line-height: 1.25; text-shadow: 0 0 12px color-mix(in oklch, var(--lcd-ink) 45%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lcd .l2 { font-size: 12.5px; color: var(--lcd-dim); margin-top: 3px; line-height: 1.45; }
+  .lcd-stat { display: grid; gap: 4px; font-size: 10.5px; letter-spacing: 0.1em; color: var(--lcd-dim); text-align: right; }
+  .lcd-stat div { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+  .lamp { width: 6px; height: 6px; border-radius: 50%; background: oklch(0.4 0.05 262); }
+  .lamp.on { background: var(--glow); box-shadow: 0 0 8px var(--glow); }
+  .lcd-stat .on-t { color: var(--lcd-ink); }
+
+  .rack { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 8px; margin: 12px 0 16px; }
+  .mod { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 9px 10px 10px; background: var(--bone); border: 1px solid var(--rule); border-radius: 9px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75); cursor: pointer; text-align: left; min-width: 0; transition: background 120ms var(--ease), border-color 120ms var(--ease), box-shadow 120ms var(--ease), transform 80ms var(--ease); }
+  .mod:hover { border-color: var(--steel-2); }
+  .mod:active { transform: translateY(1px); }
+  .mod .top { display: flex; width: 100%; justify-content: space-between; align-items: center; font: 600 10.5px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+  .mod .led { width: 7px; height: 7px; border-radius: 50%; background: var(--steel-2); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.25); transition: background 80ms, box-shadow 80ms; }
+  .mod .tile { width: 30px; height: 30px; border-radius: 8px; background: var(--ink); color: var(--paper); display: grid; place-items: center; font: 600 13px/1 var(--sans); box-shadow: 0 2px 0 oklch(0.13 0.016 264); transition: background 80ms, color 80ms; }
+  .mod .nm { font-size: 13px; font-weight: 600; line-height: 1.2; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mod .tg { font: 400 10.5px/1.3 var(--mono); color: var(--ink-2); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mod.on { background: var(--paper); border-color: var(--steel-2); }
+  .mod.on .led { background: var(--sig); box-shadow: 0 0 0 2px color-mix(in oklch, var(--sig) 25%, transparent), 0 0 10px var(--sig); }
+  .mod.on .tile { background: var(--sig); color: var(--on-sig); box-shadow: 0 2px 0 var(--sig-lo); }
+  .mod.front { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink), 0 6px 14px -8px rgba(20, 24, 38, 0.4); }
+  .mod.flash { animation: modflash 240ms steps(2, jump-none) 1; }
+  @keyframes modflash { 0% { background: color-mix(in oklab, var(--sig) 35%, var(--paper)); } 100% { background: var(--paper); } }
+
+  /* Keyboard. Sizes are in container units so the board scales as one piece. */
+  .kb-shell { container-type: inline-size; background: linear-gradient(180deg, oklch(0.83 0.01 80), oklch(0.86 0.009 80)); border-radius: 12px; padding: 8px; box-shadow: inset 0 2px 5px rgba(20, 24, 38, 0.28), 0 1px 0 #fff; }
+  .kb { display: flex; flex-direction: column; gap: 0.85cqi; }
+  .kb-row { display: flex; gap: 0.85cqi; align-items: flex-end; }
+  .key { --face: var(--paper); --edge: oklch(0.885 0.009 82); --skirt: oklch(0.7 0.012 78); --lg: var(--ink); position: relative; flex: 1 1 0; min-width: 0; height: 6.15cqi; padding: 0; border: 0; border-radius: max(4px, 1.05cqi); background: var(--edge); box-shadow: 0 0.38cqi 0 var(--skirt), 0 0.7cqi 1.3cqi -0.3cqi rgba(20, 24, 38, 0.35); cursor: pointer; transition: transform 80ms var(--ease), box-shadow 80ms var(--ease); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .key .cap { position: absolute; inset: 0.2cqi 0.42cqi 0.72cqi; border-radius: max(3px, 0.8cqi); background: radial-gradient(130% 95% at 50% 22%, color-mix(in oklch, var(--face), white 40%) 0%, var(--face) 55%, color-mix(in oklch, var(--face), black 5%) 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 -1px 2px rgba(20, 24, 38, 0.06); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.15cqi; color: var(--lg); }
+  .key .lg { font: 500 max(9px, 1.7cqi)/1 var(--sans); }
+  .key .sub { font: 500 max(6px, 0.95cqi)/1 var(--mono); letter-spacing: 0.04em; text-transform: lowercase; opacity: 0.8; }
+  .key .sub:empty { display: none; }
+  .key .led { position: absolute; top: 0.55cqi; right: 0.6cqi; width: max(3px, 0.62cqi); height: max(3px, 0.62cqi); border-radius: 50%; background: transparent; }
+  .key:active, .key.down { transform: translateY(2px); box-shadow: 0 0.08cqi 0 var(--skirt), 0 0.2cqi 0.4cqi -0.1cqi rgba(20, 24, 38, 0.35); }
+  .key.m { --face: var(--steel); --edge: oklch(0.81 0.01 80); --skirt: oklch(0.62 0.013 76); }
+  .key.m .lg { font-size: max(9px, 1.55cqi); }
+  .fnrow .key { height: 4.1cqi; }
+  .fnrow .key.fn { --face: var(--steel); --edge: oklch(0.81 0.01 80); --skirt: oklch(0.62 0.013 76); }
+  .fnrow .key .lg { font: 600 max(7px, 1.2cqi)/1 var(--mono); }
+  .key.esc { --face: oklch(0.3 0.016 264); --edge: oklch(0.26 0.016 264); --skirt: oklch(0.16 0.016 264); --lg: var(--paper); }
+  .key.esc .lg { text-transform: lowercase; }
+  .key.hyper { --face: var(--sig); --edge: oklch(0.42 0.16 262); --skirt: oklch(0.32 0.13 264); --lg: var(--on-sig); }
+  .key.hyper .cap { background: radial-gradient(130% 95% at 50% 22%, var(--sig-hi) 0%, var(--face) 55%, color-mix(in oklch, var(--face), black 8%) 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 2px rgba(8, 20, 70, 0.2); }
+  .key.hyper .sub { opacity: 1; font-weight: 600; }
+  .key.half { height: 3.05cqi; }
+  .kstack { display: flex; flex-direction: column; gap: 0.2cqi; flex: 1 1 0; min-width: 0; }
+  .kstack .key { flex: none; height: 2.95cqi; }
+  .key.bound .cap::after { content: ""; position: absolute; left: 30%; right: 30%; bottom: 0.45cqi; height: max(2px, 0.28cqi); border-radius: 2px; background: var(--sig); }
+  .key.hyper.bound .cap::after, .key.esc.bound .cap::after { display: none; }
+  .key.live .led { background: var(--sig); box-shadow: 0 0 0 0.25cqi color-mix(in oklch, var(--sig) 30%, transparent), 0 0 1.2cqi var(--sig); }
+  .key.hyper.live .led { background: var(--paper); box-shadow: 0 0 1cqi #fff; }
+  .key.ghost { cursor: default; }
+  @container (max-width: 560px) {
+    .key .sub { display: none; }
+    .key.hyper .sub { display: block; }
+  }
+
+  .dev-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; padding: 14px 14px 0; font-size: 13.5px; color: var(--ink-2); }
+  .dev-foot b { color: var(--ink); font-weight: 600; }
+  .dev-foot .kcs { flex-wrap: wrap; gap: 5px; }
+  .dev-foot button.kc { cursor: pointer; }
+  .kcs .kc.txt, .kcs .kc.dash { background: none; border: 0; box-shadow: none; min-width: 0; padding: 0 1px; font: 500 13px/1 var(--sans); color: var(--ink-2); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .device { animation: rise 640ms 120ms var(--ease) both; }
+  }
+
+  @media (max-width: 640px) {
+    .rack { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .rack.r4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .lcd { grid-template-columns: minmax(0, 1fr); padding: 10px 12px; }
+    .lcd .l1 { font-size: 16px; }
+    .lcd-stat { grid-auto-flow: column; justify-content: start; gap: 14px; text-align: left; }
+    .dev-head { padding: 0 4px 10px; }
+    .dev-head .lbl.hide-sm { display: none; }
+    .device .screw { display: none; }
+    .dev-foot { padding: 12px 4px 0; font-size: 13px; }
+    .kb-shell { padding: 5px; border-radius: 9px; }
+  }
+</style>

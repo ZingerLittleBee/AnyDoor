@@ -1,65 +1,128 @@
 ---
-import { icons } from '../lib/icons';
-import { copy } from '../lib/copy';
+import Bi from './Bi.astro';
+import { download as t } from '../lib/content/end';
+import { biAttrs } from '../lib/i18n';
+import { REPO, dmgUrl, downloadSizeMB } from '../lib/release';
 import { latestVersion } from '../lib/version';
-import { dmgUrl, downloadSizeMB } from '../lib/release';
+
+const dmgLabel = { zh: t.dmgBtn.zh + latestVersion, en: t.dmgBtn.en + latestVersion };
+const command = t.commands.join('\n');
 ---
 
-<section class="section container-x" id="download">
-  <div class="eyebrow">
-    <span class="dot" />
-    <span data-i18n-zh>{copy.download.eyebrow.zh}</span><span data-i18n-en>{copy.download.eyebrow.en}</span>
+<section class="sec wrap" id="download">
+  <div class="sec-rule">
+    <span class="lbl">§ 05 · <Bi text={t.eyebrow} /></span>
+    <span class="lbl">v{latestVersion} · {t.channel}</span>
   </div>
-  <h2 class="sec-h">
-    <span class="gradient-text"><span data-i18n-zh>{copy.download.h2a.zh}</span><span data-i18n-en>{copy.download.h2a.en}</span></span>
-    <span class="accent-text"><span data-i18n-zh>{copy.download.h2b.zh}</span><span data-i18n-en>{copy.download.h2b.en}</span></span>
-  </h2>
-  <p class="lede">
-    <span data-i18n-zh>{copy.download.lede.zh}</span><span data-i18n-en>{copy.download.lede.en}</span>
-  </p>
-
-  <div class="dl-wrap">
-    <div class="dl-card primary">
-      <h3><span data-i18n-zh>{copy.download.dmgTitle.zh}</span><span data-i18n-en>{copy.download.dmgTitle.en}</span></h3>
-      <p><span data-i18n-zh>{copy.download.dmgDesc.zh}</span><span data-i18n-en>{copy.download.dmgDesc.en}</span></p>
-      <a class="btn-primary" href={dmgUrl} target="_blank" rel="noreferrer">
-        <span set:html={icons.bolt()} style="width:16px;height:16px" aria-hidden="true" />
-        <span data-i18n-zh>{copy.download.dmgBtn.zh}{latestVersion}</span><span data-i18n-en>{copy.download.dmgBtn.en}{latestVersion}</span>
-      </a>
-      <div class="dl-meta">
-        {downloadSizeMB && <span>~{downloadSizeMB} MB</span>}
-        <span>macOS 14+</span>
-        <span>Universal Binary</span>
+  <div class="dl chassis">
+    <span class="screw a"></span><span class="screw b"></span><span class="screw c"></span><span class="screw d"></span>
+    <div class="dl-l">
+      <h2 class="h2"><span class="ln"><Bi text={t.h2a} /></span><span class="ln"><Bi text={t.h2b} /></span></h2>
+      <p class="lede"><Bi text={t.lede} /></p>
+      <div class="dl-cta">
+        <a class="btn btn-sig" href={dmgUrl} rel="noreferrer">
+          <span><Bi text={dmgLabel} /></span>
+          <span class="k">.dmg{downloadSizeMB && <span class="sz"> · {downloadSizeMB} MB</span>}</span>
+        </a>
+        <a class="btn" href={REPO} target="_blank" rel="noreferrer">{t.ghBtn}</a>
       </div>
     </div>
-
-    <div class="dl-card">
-      <h3><span data-i18n-zh>{copy.download.brewTitle.zh}</span><span data-i18n-en>{copy.download.brewTitle.en}</span></h3>
-      <p><span data-i18n-zh>{copy.download.brewDesc.zh}</span><span data-i18n-en>{copy.download.brewDesc.en}</span></p>
-      <div class="dl-cmd">
-        <span class="prompt">$</span>
-        <span>git clone https://github.com/ZingerLittleBee/AnyDoor.git</span>
-        <button class="copy" type="button" data-copy="git clone https://github.com/ZingerLittleBee/AnyDoor.git" aria-label="Copy git clone command">
-          <span data-i18n-zh>{copy.download.copy.zh}</span><span data-i18n-en>{copy.download.copy.en}</span>
-        </button>
+    <div class="dl-r">
+      <h3><Bi text={t.srcTitle} /></h3>
+      <p class="src"><Bi text={t.srcDesc} /></p>
+      <div class="term">
+        <div class="term-bar">
+          <span>{t.termTitle}</span>
+          <button type="button" class="copy" data-copy={command} data-state="idle" {...biAttrs({ 'aria-label': t.copyAria })}>
+            <span data-for="idle"><Bi text={t.copy} /></span>
+            <span data-for="ok"><Bi text={t.copied} /></span>
+            <span data-for="fail"><Bi text={t.copyFail} /></span>
+          </button>
+        </div>
+        <pre>{t.commands.map((line) => <><span class="p">$ </span>{line}{'\n'}</>)}<span class="c">{t.result}</span></pre>
       </div>
-      <div class="dl-cmd">
-        <span class="prompt">$</span>
-        <span>cd AnyDoor && make install</span>
+      <!-- Announces the copy result; the button's accessible name stays fixed. -->
+      <span class="sr-only" role="status" data-copy-status></span>
+      <div class="dl-specs">
+        {t.specs.map((s) => (
+          <div><span><Bi text={s.label} /></span><b><Bi text={s.value} /></b></div>
+        ))}
       </div>
     </div>
   </div>
 </section>
 
 <script>
-  document.querySelectorAll<HTMLElement>('[data-copy]').forEach((el) => {
-    el.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(el.dataset.copy!);
-        const original = el.innerHTML;
-        el.innerHTML = `<span data-i18n-zh>已复制</span><span data-i18n-en>Copied</span>`;
-        setTimeout(() => { el.innerHTML = original; }, 1500);
-      } catch {}
-    });
+  import { download as t } from '../lib/content/end';
+  import { pick } from '../lib/lang-client';
+
+  const RESET_MS = 1600;
+  const btn = document.querySelector<HTMLButtonElement>('#download [data-copy]');
+  const pre = document.querySelector<HTMLElement>('#download .term pre');
+  const status = document.querySelector<HTMLElement>('#download [data-copy-status]');
+  let timer: number | undefined;
+
+  const done = (ok: boolean) => {
+    if (!btn) return;
+    btn.dataset.state = ok ? 'ok' : 'fail';
+    if (status) status.textContent = pick(ok ? t.copied : t.copyFail);
+    // Without clipboard access, select the commands so a manual copy is one keystroke.
+    if (!ok && pre) window.getSelection()?.selectAllChildren(pre);
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      btn.dataset.state = 'idle';
+      if (status) status.textContent = '';
+    }, RESET_MS);
+  };
+
+  btn?.addEventListener('click', () => {
+    try {
+      navigator.clipboard.writeText(btn.dataset.copy ?? '').then(() => done(true), () => done(false));
+    } catch {
+      done(false);
+    }
   });
 </script>
+
+<style>
+  .dl { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); gap: 0; box-shadow: inset 0 1px 0 #fff, 0 2px 0 var(--steel), 0 40px 70px -44px rgba(20, 24, 38, 0.45); overflow: hidden; }
+  .dl-l { padding: clamp(28px, 4vw, 56px); display: flex; flex-direction: column; justify-content: center; gap: 20px; }
+  .dl-r { padding: clamp(20px, 3vw, 40px); border-left: 1px solid var(--rule); display: flex; flex-direction: column; gap: 16px; background: color-mix(in oklch, var(--bone), var(--paper) 40%); }
+  .dl .h2 { font-size: clamp(36px, 5vw, 68px); }
+  .dl-specs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--rule-2); border: 1px solid var(--rule-2); border-radius: 10px; overflow: hidden; margin-top: auto; }
+  .dl-specs > div { background: var(--paper); padding: 10px 12px; display: grid; gap: 3px; }
+  .dl-specs > div > span { font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+  .dl-specs b { font-weight: 600; font-size: 14px; }
+  .dl-cta { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .dl-r h3 { font-size: 19px; font-weight: 600; }
+  .dl-r .src { font-size: 14.5px; color: var(--ink-2); line-height: 1.6; }
+  .term { background: var(--lcd); border-radius: 12px; box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 0 #fff; overflow: hidden; }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); font: 500 11px/1 var(--mono); color: var(--lcd-dim); letter-spacing: 0.06em; }
+  .term pre { margin: 0; padding: 14px 16px 16px; font: 400 13px/1.85 var(--mono); color: oklch(0.93 0.012 255); overflow-x: auto; white-space: pre; }
+  .term pre .p { color: var(--lcd-ink); user-select: none; }
+  .term pre .c { color: var(--lcd-dim); }
+  .copy { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06); color: oklch(0.93 0.012 255); font: 500 11.5px/1 var(--mono); cursor: pointer; }
+  .copy:hover { background: rgba(255, 255, 255, 0.12); }
+  /* The global --sig-ink ring is too dark against the terminal bar. */
+  .copy:focus-visible { outline-color: var(--lcd-ink); }
+  .copy[data-state="ok"] { background: var(--sig); color: var(--on-sig); border-color: var(--sig); }
+  /* One label per copy state; the language spans inside are hidden globally. */
+  .copy:not([data-state="idle"]) [data-for="idle"],
+  .copy:not([data-state="ok"]) [data-for="ok"],
+  .copy:not([data-state="fail"]) [data-for="fail"] { display: none; }
+
+  @media (max-width: 960px) {
+    .dl { grid-template-columns: minmax(0, 1fr); }
+    .dl-r { border-left: 0; border-top: 1px solid var(--rule); }
+    .dl-specs { margin-top: 4px; }
+  }
+  @media (max-width: 560px) {
+    .dl-specs { grid-template-columns: minmax(0, 1fr); }
+    .dl .screw { display: none; }
+    /* The size suffix would push the keycap past the card edge. */
+    .btn .sz { display: none; }
+  }
+  @media (max-width: 380px) {
+    .dl-cta .btn .k { display: none; }
+  }
+</style>

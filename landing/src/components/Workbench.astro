@@ -1,0 +1,442 @@
+---
+// § 02 · Feature workbench: eight live modules on a pegboard (M-01 – M-08).
+// Everything is rendered for the initial state; the script below drives the
+// interactive modules.
+import Bi from './Bi.astro';
+import { biAttrs } from '../lib/i18n';
+import {
+  board,
+  boardActions,
+  boardLayouts,
+  boardToggles,
+  BRIGHTNESS_INITIAL,
+  CLIP_VISIBLE,
+  clipCategories,
+  clipEntries,
+  hostsBody,
+  portRows,
+  type BoardLayout,
+} from '../lib/content/board';
+
+const initialOn = boardToggles.filter((g) => g.initial).length;
+const { rows: initialRows, matches: initialMatches } = portRows('', 'flat', 'zh');
+const initialLayout = boardLayouts[0];
+const rectVars = (r: BoardLayout) => `--x: ${r.x}; --y: ${r.y}; --w: ${r.w}; --h: ${r.h}`;
+const litBars = Math.round(BRIGHTNESS_INITIAL / 10);
+---
+
+<section class="sec wrap" id="board">
+  <div class="sec-rule"><span class="lbl">§ 02 · <Bi text={board.eyebrow} /></span><span class="lbl">M-01 – M-08</span></div>
+  <div class="sec-head">
+    <h2 class="h2"><span class="ln"><Bi text={board.h2a} /></span><span class="ln"><Bi text={board.h2b} /></span></h2>
+    <p class="lede"><Bi text={board.lede} /></p>
+  </div>
+  <div class="board">
+    <div class="bgrid">
+      <article class="plate s7" id="toggles">
+        <div class="plate-hd"><span class="pn">M-01</span><span class="nm"><Bi text={board.togName} /></span><span class="end"><span class="tag"><span data-on-count>{initialOn}</span> / {boardToggles.length} <Bi text={board.togOn} /></span></span></div>
+        <div class="plate-bd">
+          <h3><Bi text={board.togH} /></h3>
+          <p class="desc"><Bi text={board.togLede} /></p>
+          <div class="tgrid">
+            {boardToggles.map((g, i) => (
+              <button type="button" class:list={['tu', { on: g.initial }]} role="switch" aria-checked={String(g.initial)} aria-labelledby={`tog-${i}-n`} aria-describedby={`tog-${i}-d`} data-toggle>
+                <span class="r1"><span class="tn" id={`tog-${i}-n`}><Bi text={g.name} /></span><span class="sw"></span></span>
+                <span class="td" id={`tog-${i}-d`}><Bi text={g.desc} /></span>
+                {/* aria-checked already conveys the state. */}
+                <span class="ts" aria-hidden="true"><span class="st-on"><Bi text={g.on} /></span><span class="st-off"><Bi text={g.off} /></span></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article class="plate s5" id="ports">
+        <div class="plate-hd"><span class="pn">M-02</span><span class="nm"><Bi text={board.portName} /></span><span class="end"><span class="tag"><Bi text={board.live} /></span></span></div>
+        <div class="plate-bd">
+          <h3><Bi text={board.portH} /></h3>
+          <p class="desc"><Bi text={board.portLede} /></p>
+          <div class="pctl">
+            <input class="field" type="search" spellcheck="false" autocomplete="off" data-port-q {...biAttrs({ placeholder: board.ph, 'aria-label': board.ph })} />
+            <div class="seg" role="group" {...biAttrs({ 'aria-label': board.viewAria })}>
+              <button type="button" class="on" aria-pressed="true" data-view="flat"><Bi text={board.flat} /></button>
+              <button type="button" aria-pressed="false" data-view="tree"><Bi text={board.tree} /></button>
+            </div>
+          </div>
+          <div class="plist">
+            <div role="list" data-port-list>
+              {initialRows.map((p) => (
+                <div class:list={['prow', p.cls]} role="listitem"><span class="po">{p.a}</span><span>{p.b}</span><span class="pid">{p.c}</span></div>
+              ))}
+            </div>
+            <div class="pempty" hidden data-port-empty><Bi text={board.noMatch} /></div>
+          </div>
+          <template data-port-row><div class="prow" role="listitem"><span class="po"></span><span></span><span class="pid"></span></div></template>
+          <div class="pfoot"><span role="status"><span data-port-count>{initialMatches}</span><Bi text={board.ports} /></span><span>lsof · LISTEN</span></div>
+        </div>
+      </article>
+
+      <article class="plate s5" id="actions">
+        <div class="plate-hd"><span class="pn">M-03</span><span class="nm"><Bi text={board.actName} /></span><span class="end"><span class="tag"><Bi text={board.toClip} /></span></span></div>
+        <div class="plate-bd">
+          <h3><Bi text={board.actH} /></h3>
+          <p class="desc"><Bi text={board.actLede} /></p>
+          <div class="acts">
+            {boardActions.map((a) => (
+              <div class="act">
+                <button type="button" class="bigkey" data-act={a.key} {...biAttrs({ 'aria-label': a.name })}><span class="cap">{a.glyph}</span></button>
+                <span class="an"><Bi text={a.name} /></span>
+                <span class="ad"><Bi text={a.desc} /></span>
+              </div>
+            ))}
+          </div>
+          <div class="readout" role="status" aria-live="polite">
+            <span class="swatch" hidden data-act-swatch></span>
+            <span><span data-act-out1>▸ <Bi text={board.idleOut} /></span> <span class="dim" data-act-out2></span></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="plate s4" id="clipboard">
+        <div class="plate-hd"><span class="pn">M-04</span><span class="nm"><Bi text={board.clipName} /></span><span class="end kcs"><span class="kc">⌘</span><span class="kc">⇧</span><span class="kc">V</span></span></div>
+        <div class="plate-bd">
+          <h3><Bi text={board.clipH} /></h3>
+          <p class="desc"><Bi text={board.clipDesc} /></p>
+          <div class="chips" role="group" {...biAttrs({ 'aria-label': board.clipName })}>
+            {clipCategories.map((c, i) => (
+              <button type="button" class:list={['chip', { on: i === 0 }]} aria-pressed={String(i === 0)} data-clip-cat={c.key}><Bi text={c.label} /></button>
+            ))}
+          </div>
+          <div class="clipstack">
+            {clipEntries.map((c, i) => (
+              <div class="clip" data-cat={c.cat} data-fav={c.fav ? '' : undefined} hidden={i >= CLIP_VISIBLE}>
+                <span class="ty"><Bi text={c.ty} /></span>
+                <span class="vl">{c.img && <span class="ph striped"></span>}{c.col && <span class="sq"></span>}{c.v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article class="plate s3" id="brightness">
+        <div class="plate-hd"><span class="pn">M-05</span><span class="nm">DDC</span><span class="end"><span class="tag">VCP 0x10</span></span></div>
+        <div class="plate-bd">
+          <h3><Bi text={board.briH} /></h3>
+          <div class="fader">
+            <div class="meter" aria-hidden="true">
+              {Array.from({ length: 10 }, (_, i) => <i class:list={{ on: 9 - i < litBars }}></i>)}
+            </div>
+            <div class="fcol">
+              <span class="pct"><span data-bri-pct>{BRIGHTNESS_INITIAL}</span>%</span>
+              <p class="desc"><Bi text={board.briDesc} /></p>
+              <input class="range" type="range" min="0" max="100" step="5" value={BRIGHTNESS_INITIAL} style={`--p: ${BRIGHTNESS_INITIAL}%`} data-bri {...biAttrs({ 'aria-label': board.briH })} />
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="plate s4" id="layout">
+        <div class="plate-hd"><span class="pn">M-06</span><span class="nm"><Bi text={board.layName} /></span><span class="end"><span class="tag"><Bi text={board.layTag} /></span></span></div>
+        <div class="plate-bd">
+          <p class="desc"><Bi text={board.layDesc} /></p>
+          <div class="screen" aria-hidden="true"><span class="lwin" style={rectVars(initialLayout)} data-lwin></span></div>
+          <div class="lays" role="group" {...biAttrs({ 'aria-label': board.layName })}>
+            {boardLayouts.map((l) => (
+              <button type="button" class:list={['lay', { on: l.key === initialLayout.key }]} aria-pressed={String(l.key === initialLayout.key)} data-lay={l.key}>
+                <span class="ic"><i style={rectVars(l)}></i></span><Bi text={l.label} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article class="plate s4" id="hosts">
+        <div class="plate-hd"><span class="pn">M-07</span><span class="nm"><Bi text={board.hostName} /></span><span class="end"><span class="tag"><Bi text={board.hostTag} /></span></span></div>
+        <div class="plate-bd">
+          <p class="desc"><Bi text={board.hostDesc} /></p>
+          <pre class="code"><span class="c"># /etc/hosts</span>{'\n' + hostsBody}</pre>
+        </div>
+      </article>
+
+      <article class="plate s4" id="palette">
+        <div class="plate-hd"><span class="pn">M-08</span><span class="nm"><Bi text={board.palName} /></span><span class="end"><span class="tag"><Bi text={board.palTag} /></span></span></div>
+        <div class="plate-bd">
+          <p class="desc"><Bi text={board.palDesc} /></p>
+          <div class="pal" aria-hidden="true">
+            <div class="pal-in"><span>base64 anydoor</span><span class="caret"></span></div>
+            <div class="pal-row pick"><span class="v">YW55ZG9vcg==</span><span class="k">base64</span></div>
+            <div class="pal-row"><span class="v">2^10 = 1024</span><span class="k"><Bi text={board.palCalc} /></span></div>
+            <div class="pal-row"><span class="v">12 km = 7.46 mi</span><span class="k"><Bi text={board.palConv} /></span></div>
+            <div class="pal-row"><span class="v">:3000 node</span><span class="k"><Bi text={board.palPort} /></span></div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { currentLang, onLangChange, pick } from '../lib/lang-client';
+  import { board, boardActions, boardLayouts, CLIP_VISIBLE, portRows, type BoardActionKey } from '../lib/content/board';
+
+  const root = document.getElementById('board');
+  if (root) {
+    const $ = <T extends Element = HTMLElement>(sel: string) => root.querySelector<T>(sel);
+    const $$ = <T extends Element = HTMLElement>(sel: string) => [...root.querySelectorAll<T>(sel)];
+
+    // M-01 ─ toggles
+    const toggles = $$<HTMLButtonElement>('[data-toggle]');
+    const onCount = $('[data-on-count]');
+    toggles.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const on = !btn.classList.contains('on');
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-checked', String(on));
+        if (onCount) onCount.textContent = String(toggles.filter((b) => b.classList.contains('on')).length);
+      });
+    });
+
+    // M-02 ─ port manager
+    const portQ = $<HTMLInputElement>('[data-port-q]');
+    const portList = $('[data-port-list]');
+    const portEmpty = $('[data-port-empty]');
+    const portCount = $('[data-port-count]');
+    const rowTpl = $<HTMLTemplateElement>('[data-port-row]');
+    const viewBtns = $$<HTMLButtonElement>('[data-view]');
+    let view: 'flat' | 'tree' = 'flat';
+    const renderPorts = () => {
+      const proto = rowTpl?.content.firstElementChild;
+      if (!portList || !proto) return;
+      const { rows, matches } = portRows(portQ?.value ?? '', view, currentLang());
+      portList.replaceChildren(
+        ...rows.map((r) => {
+          // Cloned from the <template> so rows keep this component's scoped styles.
+          const row = proto.cloneNode(true) as HTMLElement;
+          if (r.cls) row.classList.add(...r.cls.split(' '));
+          const [a, b, c] = row.children;
+          a.textContent = r.a;
+          b.textContent = r.b;
+          c.textContent = r.c;
+          return row;
+        }),
+      );
+      if (portEmpty) portEmpty.hidden = rows.length > 0;
+      if (portCount) portCount.textContent = String(matches);
+    };
+    portQ?.addEventListener('input', renderPorts);
+    viewBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        view = btn.dataset.view === 'tree' ? 'tree' : 'flat';
+        viewBtns.forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('on', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+        renderPorts();
+      });
+    });
+
+    // M-03 ─ built-in actions: the last key pressed stays lit and its result
+    // shows on the readout.
+    const actKeys = $$<HTMLButtonElement>('[data-act]');
+    const swatch = $('[data-act-swatch]');
+    const out1 = $('[data-act-out1]');
+    const out2 = $('[data-act-out2]');
+    let act: BoardActionKey | null = null;
+    let downTimer: ReturnType<typeof setTimeout> | undefined;
+    const renderReadout = () => {
+      if (!act || !out1 || !out2) return;
+      const def = boardActions.find((a) => a.key === act);
+      out1.textContent = def?.out ?? '';
+      out2.textContent = '· ' + pick(board.copied);
+      if (swatch) swatch.hidden = act !== 'color';
+    };
+    actKeys.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        act = btn.dataset.act as BoardActionKey;
+        actKeys.forEach((b) => {
+          b.classList.toggle('hot', b === btn);
+          b.classList.remove('down');
+        });
+        btn.classList.add('down');
+        clearTimeout(downTimer);
+        downTimer = setTimeout(() => btn.classList.remove('down'), 200);
+        renderReadout();
+      });
+    });
+
+    // M-04 ─ clipboard wall categories
+    const chips = $$<HTMLButtonElement>('[data-clip-cat]');
+    const clips = $$('.clip');
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const cat = chip.dataset.clipCat;
+        chips.forEach((c) => {
+          const on = c === chip;
+          c.classList.toggle('on', on);
+          c.setAttribute('aria-pressed', String(on));
+        });
+        let shown = 0;
+        clips.forEach((el) => {
+          const match = cat === 'all' || (cat === 'fav' ? el.hasAttribute('data-fav') : el.dataset.cat === cat);
+          const visible = match && shown < CLIP_VISIBLE;
+          if (visible) shown++;
+          el.hidden = !visible;
+        });
+      });
+    });
+
+    // M-05 ─ brightness fader
+    const bri = $<HTMLInputElement>('[data-bri]');
+    const briPct = $('[data-bri-pct]');
+    const bars = $$('.meter i');
+    bri?.addEventListener('input', () => {
+      const v = Number(bri.value);
+      bri.style.setProperty('--p', v + '%');
+      if (briPct) briPct.textContent = String(v);
+      const lit = Math.round(v / 10);
+      bars.forEach((bar, i) => bar.classList.toggle('on', bars.length - 1 - i < lit));
+    });
+
+    // M-06 ─ window layout
+    const lwin = $('[data-lwin]');
+    const lays = $$<HTMLButtonElement>('[data-lay]');
+    lays.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const l = boardLayouts.find((x) => x.key === btn.dataset.lay);
+        if (!l) return;
+        lays.forEach((b) => {
+          const on = b === btn;
+          b.classList.toggle('on', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+        if (lwin) for (const k of ['x', 'y', 'w', 'h'] as const) lwin.style.setProperty('--' + k, String(l[k]));
+      });
+    });
+
+    // Script-rendered text (port group counts, the readout) follows the language.
+    onLangChange(() => {
+      renderPorts();
+      renderReadout();
+    });
+  }
+</script>
+
+<style>
+  .board { background-color: var(--bone-2); background-image: radial-gradient(circle, color-mix(in oklch, var(--steel-2), transparent 35%) 1px, transparent 1.4px); background-size: 18px 18px; border: 1px solid var(--rule); border-radius: 20px; padding: clamp(10px, 1.6vw, 22px); box-shadow: inset 0 2px 6px rgba(20, 24, 38, 0.08); }
+  .bgrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: clamp(10px, 1.4vw, 18px); }
+  .s3 { grid-column: span 3; } .s4 { grid-column: span 4; } .s5 { grid-column: span 5; } .s7 { grid-column: span 7; }
+  .board .plate { scroll-margin-top: 80px; }
+
+  /* toggles */
+  .tgrid { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; border: 1px solid var(--rule-2); border-radius: 10px; overflow: hidden; background: var(--rule-2); gap: 1px; }
+  .tu { background: var(--paper); padding: 14px 14px 13px; display: flex; flex-direction: column; gap: 8px; min-width: 0; cursor: pointer; border: 0; text-align: left; transition: background 120ms var(--ease); }
+  .tu:hover { background: color-mix(in oklch, var(--paper), var(--bone) 50%); }
+  .tu .r1 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tu .tn { font-weight: 600; font-size: 14.5px; line-height: 1.25; }
+  .tu .td { font: 400 11.5px/1.45 var(--mono); color: var(--ink-2); }
+  .tu .ts { display: flex; align-items: center; gap: 7px; font: 500 11.5px/1.2 var(--mono); color: var(--ink-2); margin-top: auto; }
+  .tu .ts::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--steel-2); }
+  .tu.on .ts { color: var(--ink); }
+  .tu.on .ts::before { background: var(--sig); box-shadow: 0 0 6px var(--sig); }
+  .tu.on .st-off, .tu:not(.on) .st-on { display: none; }
+  .sw { position: relative; flex: none; width: 46px; height: 26px; border-radius: 7px; background: var(--bone-2); box-shadow: inset 0 1px 3px rgba(20, 24, 38, 0.28), 0 1px 0 #fff; transition: background 80ms var(--ease); }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 18px; border-radius: 4px; background: linear-gradient(180deg, #fff, var(--steel)); box-shadow: 0 1.5px 0 var(--steel-3), 0 2px 4px rgba(20, 24, 38, 0.25); transition: transform 80ms var(--ease); }
+  .tu.on .sw { background: var(--sig); box-shadow: inset 0 1px 3px rgba(8, 20, 70, 0.4), 0 1px 0 #fff; }
+  .tu.on .sw::after { transform: translateX(20px); }
+
+  /* ports */
+  .pctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .field { flex: 1 1 160px; min-width: 0; height: 36px; border: 1px solid var(--rule); background: var(--bone); border-radius: 8px; padding: 0 11px; font: 500 13px var(--mono); color: var(--ink); box-shadow: inset 0 1px 2px rgba(20, 24, 38, 0.08); }
+  .field::placeholder { color: var(--ink-2); opacity: 1; }
+  .field:focus { outline: 2px solid var(--sig-ink); outline-offset: 1px; }
+  .plist { border: 1px solid var(--rule-2); border-radius: 10px; overflow: auto; max-height: 170px; background: var(--paper); }
+  .prow { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 12px; font: 400 13px/1.3 var(--mono); border-bottom: 1px solid var(--rule-2); }
+  .prow:last-child { border-bottom: 0; }
+  .prow .po { font-weight: 600; }
+  .prow .pid { color: var(--ink-2); font-size: 11.5px; }
+  .prow.hit { background: color-mix(in oklab, var(--sig) 14%, var(--paper)); }
+  .prow.hit .po::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--sig); margin-right: 6px; vertical-align: 2px; }
+  .prow.grp { background: var(--bone); font-size: 12px; grid-template-columns: minmax(0, 1fr) 0 auto; }
+  .prow.child { padding-left: 26px; grid-template-columns: 74px minmax(0, 1fr) auto; }
+  .pempty { padding: 26px 12px; text-align: center; font: 500 12.5px var(--mono); color: var(--ink-2); }
+  .pfoot { display: flex; justify-content: space-between; font: 500 11px var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+
+  /* actions */
+  .acts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .act { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; }
+  .bigkey { --face: var(--paper); --edge: oklch(0.885 0.009 82); --skirt: oklch(0.7 0.012 78); position: relative; width: 100%; aspect-ratio: 1.15; max-height: 96px; border: 0; padding: 0; border-radius: 12px; background: var(--edge); box-shadow: 0 4px 0 var(--skirt), 0 8px 14px -6px rgba(20, 24, 38, 0.35); cursor: pointer; transition: transform 80ms var(--ease), box-shadow 80ms var(--ease); }
+  .bigkey .cap { position: absolute; inset: 2px 5px 8px; border-radius: 9px; background: radial-gradient(130% 95% at 50% 22%, #fff 0%, var(--face) 55%, color-mix(in oklch, var(--face), black 5%) 100%); box-shadow: inset 0 1px 0 #fff; display: grid; place-items: center; font: 600 15px/1 var(--mono); letter-spacing: 0.04em; color: var(--ink); }
+  .bigkey:active, .bigkey.down { transform: translateY(2px); box-shadow: 0 1px 0 var(--skirt), 0 2px 4px -1px rgba(20, 24, 38, 0.35); }
+  .bigkey.hot { --face: var(--sig); --edge: oklch(0.42 0.16 262); --skirt: oklch(0.32 0.13 264); }
+  .bigkey.hot .cap { background: radial-gradient(130% 95% at 50% 22%, var(--sig-hi) 0%, var(--face) 60%, color-mix(in oklch, var(--face), black 6%) 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); color: var(--on-sig); }
+  .act .an { font-weight: 600; font-size: 14px; }
+  .act .ad { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+  .readout { display: flex; align-items: center; gap: 12px; min-height: 46px; background: var(--lcd) var(--lcd-scan); color: var(--lcd-ink); border-radius: 9px; padding: 10px 14px; font: 500 13px/1.35 var(--mono); box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45); }
+  .readout .dim { color: var(--lcd-dim); }
+  .swatch { width: 22px; height: 22px; border-radius: 5px; background: var(--sig); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); flex: none; }
+
+  /* clipboard */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 500 11.5px/1 var(--mono); padding: 7px 9px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bone); color: var(--ink-2); cursor: pointer; }
+  .chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .clipstack { display: grid; gap: 6px; }
+  .clip { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--rule-2); border-radius: 8px; background: var(--paper); font: 400 12px/1.3 var(--mono); }
+  .clip .ty { font-size: 10.5px; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.06em; min-width: 42px; }
+  .clip .vl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px; }
+  .clip .ph { width: 34px; height: 18px; border-radius: 3px; flex: none; }
+  .clip .sq { width: 14px; height: 14px; border-radius: 3px; background: var(--sig); flex: none; }
+
+  /* brightness fader */
+  .fader { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: stretch; }
+  .meter { display: grid; grid-template-rows: repeat(10, 1fr); gap: 3px; width: 26px; padding: 5px; background: var(--lcd); border-radius: 7px; box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45); min-height: 150px; }
+  .meter i { border-radius: 2px; background: oklch(0.36 0.05 262); }
+  .meter i.on { background: var(--glow); box-shadow: 0 0 6px color-mix(in oklch, var(--glow), transparent 40%); }
+  .fcol { display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-width: 0; }
+  .pct { font: 300 40px/1 var(--mono); letter-spacing: -0.04em; }
+  .range { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; cursor: pointer; }
+  .range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--sig) var(--p), var(--bone-2) var(--p)); box-shadow: inset 0 1px 2px rgba(20, 24, 38, 0.25); }
+  .range::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--sig) var(--p), var(--bone-2) var(--p)); }
+  .range::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 26px; margin-top: -10px; border-radius: 5px; background: linear-gradient(180deg, #fff, var(--steel)); border: 1px solid var(--steel-2); box-shadow: 0 2px 0 var(--steel-3), 0 3px 6px rgba(20, 24, 38, 0.25); }
+  .range::-moz-range-thumb { width: 22px; height: 26px; border-radius: 5px; background: linear-gradient(180deg, #fff, var(--steel)); border: 1px solid var(--steel-2); }
+
+  /* window layout */
+  .screen { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; background: var(--lcd); padding: 6px; box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45); }
+  .screen .lwin { position: absolute; left: calc(6px + (100% - 12px) * var(--x)); top: calc(6px + (100% - 12px) * var(--y)); width: calc((100% - 12px) * var(--w) - 3px); height: calc((100% - 12px) * var(--h) - 3px); border-radius: 5px; background: var(--paper); box-shadow: 0 0 0 2px var(--sig); transition: left 160ms var(--ease), top 160ms var(--ease), width 160ms var(--ease), height 160ms var(--ease); }
+  .screen .lwin::before { content: ""; position: absolute; left: 6px; top: 6px; width: 16px; height: 4px; border-radius: 2px; background: var(--steel-2); }
+  .lays { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .lay { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 7px 4px 6px; border: 1px solid var(--rule); border-radius: 7px; background: var(--bone); cursor: pointer; font: 500 10.5px/1.15 var(--mono); color: var(--ink-2); box-shadow: 0 2px 0 var(--steel); transition: transform 80ms var(--ease), box-shadow 80ms var(--ease); text-align: center; }
+  .lay:active { transform: translateY(2px); box-shadow: 0 0 0 var(--steel); }
+  .lay .ic { position: relative; width: 26px; height: 17px; border-radius: 3px; border: 1.5px solid currentColor; }
+  .lay .ic i { position: absolute; left: calc(100% * var(--x)); top: calc(100% * var(--y)); width: calc(100% * var(--w)); height: calc(100% * var(--h)); background: currentColor; }
+  .lay.on { background: var(--ink); color: var(--paper); border-color: var(--ink); box-shadow: 0 2px 0 oklch(0.13 0.016 264); }
+
+  /* hosts + palette */
+  .code { flex: 1; margin: 0; font: 400 12.5px/1.75 var(--mono); background: var(--bone); border: 1px solid var(--rule-2); border-radius: 9px; padding: 12px 14px; overflow-x: auto; white-space: pre; color: var(--ink); }
+  .code .c { color: var(--ink-2); }
+  .pal { flex: 1; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); overflow: hidden; box-shadow: 0 10px 22px -16px rgba(20, 24, 38, 0.4); }
+  .pal-in { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rule-2); font: 500 13.5px var(--mono); }
+  .pal-in .caret { width: 2px; height: 16px; background: var(--sig); animation: blink 1s steps(2, jump-none) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .pal-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px 12px; font: 400 12.5px/1.3 var(--mono); }
+  .pal-row .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
+  .pal-row.pick { background: color-mix(in oklab, var(--sig) 16%, var(--paper)); }
+  .pal-row .v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  @media (max-width: 1180px) {
+    .s7, .s5 { grid-column: span 12; }
+    .s4, .s3 { grid-column: span 6; }
+    .bgrid > .s4:last-child { grid-column: span 12; }
+  }
+  @media (max-width: 760px) {
+    .s3, .s4, .s5, .s7, .bgrid > .s4:last-child { grid-column: span 12; }
+    .tgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .acts { gap: 8px; }
+    .lays { gap: 4px; }
+    .lay { font-size: 9.5px; }
+  }
+  @media (max-width: 520px) {
+    .tgrid { grid-template-columns: minmax(0, 1fr); }
+    .tu { gap: 6px; }
+  }
+</style>

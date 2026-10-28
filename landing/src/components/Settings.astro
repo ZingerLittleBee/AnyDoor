@@ -1,168 +1,357 @@
 ---
-import { icons } from '../lib/icons';
-import { copy } from '../lib/copy';
-import { settingsRows } from '../lib/data';
+// § 04: the settings window. The Panel tab reorders rows (pointer drag or
+// ↑ ↓ on a focused handle), records real key combos inline, and toggles
+// visibility; the General tab shows login, menu bar icon, and permissions.
+import Bi from './Bi.astro';
+import { biAttrs, type Bi as BiText } from '../lib/i18n';
+import { settings as t, settingsBadges, settingsInitial as init, settingsRows } from '../lib/content/studio';
 
-const meta = (type: string) =>
-  type === 'submenu' ? copy.settings.metaSubmenu
-  : type === 'action' ? copy.settings.metaAction
-  : copy.settings.metaSystem;
-const badge = (type: string) =>
-  type === 'submenu' ? copy.settings.badgeSubmenu
-  : type === 'action' ? copy.settings.badgeAction
-  : copy.settings.badgeToggle;
+const cat = (...parts: (BiText | string)[]): BiText => ({
+  zh: parts.map((p) => (typeof p === 'string' ? p : p.zh)).join(''),
+  en: parts.map((p) => (typeof p === 'string' ? p : p.en)).join(''),
+});
+const visible = settingsRows.length - init.hidden.length;
 ---
 
-<section class="section container-x">
-  <div class="eyebrow">
-    <span class="dot" style="background: var(--color-mac-pink); box-shadow: 0 0 12px var(--color-mac-pink)" />
-    <span data-i18n-zh>{copy.settings.eyebrow.zh}</span><span data-i18n-en>{copy.settings.eyebrow.en}</span>
-  </div>
-  <h2 class="sec-h">
-    <span class="gradient-text"><span data-i18n-zh>{copy.settings.h2a.zh}</span><span data-i18n-en>{copy.settings.h2a.en}</span></span><br />
-    <span class="accent-text"><span data-i18n-zh>{copy.settings.h2b.zh}</span><span data-i18n-en>{copy.settings.h2b.en}</span></span>
-  </h2>
-  <p class="lede">
-    <span data-i18n-zh>{copy.settings.lede.zh}</span><span data-i18n-en>{copy.settings.lede.en}</span>
-  </p>
-
-  <div class="settings-mock">
-    <div class="sm-titlebar">
-      <div class="traffic"><span class="r" /><span class="y" /><span class="g" /></div>
-      <div class="ttl">
-        <span data-i18n-zh>{copy.settings.tabPanel.zh}</span><span data-i18n-en>{copy.settings.tabPanel.en}</span>
-      </div>
-      <div style="width:60px" />
+<section class="sec wrap" id="settings">
+  <div class="sec-rule"><span class="lbl">§ 04 · <Bi text={t.eyebrow} /></span><span class="lbl">P-01</span></div>
+  <div class="set-grid">
+    <div class="set-copy">
+      <h2 class="h2"><span class="ln"><Bi text={t.h2a} /></span><span class="ln"><Bi text={t.h2b} /></span></h2>
+      <p class="lede"><Bi text={t.lede} /></p>
+      <ul>
+        <li><span class="kc" aria-hidden="true">⠇</span><Bi text={t.tipDrag} /></li>
+        <li><span class="kc" aria-hidden="true">⏎</span><Bi text={t.tipRec} /></li>
+      </ul>
+      <p class="note"><Bi text={t.hint} /></p>
     </div>
-
-    <div class="sm-tabs">
-      <div class="sm-tab active">
-        <span set:html={icons.clipboard()} />
-        <span><span data-i18n-zh>{copy.settings.tabPanel.zh}</span><span data-i18n-en>{copy.settings.tabPanel.en}</span></span>
+    <div class="setwin">
+      <div class="win-bar">
+        <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="seg" role="tablist" {...biAttrs({ 'aria-label': t.eyebrow })}>
+          <button type="button" role="tab" class="on" id="settings-tab-panel" aria-selected="true" aria-controls="settings-pane-panel" data-tab="panel"><Bi text={t.tabPanel} /></button>
+          <button type="button" role="tab" id="settings-tab-general" aria-selected="false" aria-controls="settings-pane-general" tabindex="-1" data-tab="general"><Bi text={t.tabGeneral} /></button>
+        </div>
+        <span class="ttl">AnyDoor</span>
       </div>
-      <div class="sm-tab">
-        <span set:html={icons.settings()} />
-        <span><span data-i18n-zh>{copy.settings.tabGeneral.zh}</span><span data-i18n-en>{copy.settings.tabGeneral.en}</span></span>
-      </div>
-    </div>
-
-    <div class="sm-body" id="sm-body">
-      {settingsRows.map((r) => {
-        const m = meta(r.type);
-        const b = badge(r.type);
-        return (
-          <div class="sm-row" draggable="true" data-sm-row={r.key}>
-            <div class="grip" set:html={icons.grip()} />
-            <div class="checkbox" set:html={icons.check()} />
-            <div class="ico-cell" set:html={icons[r.icon as keyof typeof icons]?.()} />
-            <div class="text-cell">
-              <span class="name"><span data-i18n-zh>{r.label.zh}</span><span data-i18n-en>{r.label.en}</span></span>
-              <span class="meta"><span data-i18n-zh>{m.zh}</span><span data-i18n-en>{m.en}</span></span>
-            </div>
-            <div class="badge"><span data-i18n-zh>{b.zh}</span><span data-i18n-en>{b.en}</span></div>
-            {r.type === 'submenu' ? (
-              <div class="rec" style="min-width:100px; color:var(--color-text-soft); cursor:default">
-                {r.key === 'shortcuts' ? (
-                  <><span data-i18n-zh>{copy.settings.twoBindings.zh}</span><span data-i18n-en>{copy.settings.twoBindings.en}</span></>
-                ) : (
-                  <><span data-i18n-zh>{copy.settings.portsCount.zh}</span><span data-i18n-en>{copy.settings.portsCount.en}</span></>
-                )}
+      <div role="tabpanel" id="settings-pane-panel" aria-labelledby="settings-tab-panel" data-pane="panel">
+        <div class="rows" role="list" data-rows>
+          {settingsRows.map((r) => {
+            const hidden = init.hidden.includes(r.key);
+            const keys = init.keys[r.key];
+            return (
+              <div class:list={['srow', hidden && 'hiddenrow']} role="listitem" data-key={r.key}>
+                <button type="button" class="handle" data-handle {...biAttrs({ 'aria-label': cat(t.handle, ' · ', r.label) })}><i></i></button>
+                <span class="sl"><b><Bi text={r.label} /></b><span><Bi text={r.meta} /></span></span>
+                <span class={`tb ${r.type}`}><Bi text={settingsBadges[r.type]} /></span>
+                <button type="button" class="recbtn" data-rec data-capture-keys="1" data-state={keys ? 'set' : 'idle'}>
+                  <span class="sr-only"><Bi text={cat(t.hotkeyFor, r.label)} /></span>
+                  <span data-for="idle"><Bi text={t.record} /></span><span data-for="live"><Bi text={t.recording} /></span><span data-for="set" data-keys>{keys ?? ''}</span>
+                </button>
+                <button type="button" class:list={['eye', hidden && 'off']} aria-pressed={String(!hidden)} data-eye {...biAttrs({ 'aria-label': cat(t.show, ' · ', r.label) })}><i></i></button>
               </div>
-            ) : (
-              <button class="rec" data-sm-record={r.key}>
-                <span class="rec-default"><span data-i18n-zh>{copy.settings.record.zh}</span><span data-i18n-en>{copy.settings.record.en}</span></span>
-              </button>
-            )}
-          </div>
-        );
-      })}
-    </div>
-
-    <div style="padding:12px 24px 18px; color:var(--color-text-soft); font-size:12px; text-align:center">
-      <span data-i18n-zh>{copy.settings.hint.zh}</span><span data-i18n-en>{copy.settings.hint.en}</span>
+            );
+          })}
+        </div>
+        <div class="win-foot"><span><Bi text={t.footL} /></span><span><span data-vis-count>{visible} / {settingsRows.length}</span><Bi text={t.visible} /></span></div>
+      </div>
+      <div role="tabpanel" id="settings-pane-general" aria-labelledby="settings-tab-general" data-pane="general" hidden>
+        <div class="rows">
+          <div class="grow"><span><b><Bi text={t.gLogin} /></b><span class="s">SMAppService</span></span><button type="button" class:list={['mini-sw', !init.login && 'off']} role="switch" aria-checked={String(init.login)} data-login {...biAttrs({ 'aria-label': t.gLogin })}></button></div>
+          <div class="grow"><span><b><Bi text={t.gIcon} /></b><span class="s">NSStatusItem</span></span><span class="mbicon"><img src="/menubar-icon.png" alt="" width="14" height="14" />AnyDoor</span></div>
+          <div class="grow"><span><b><Bi text={t.gAx} /></b><span class="s">CGEvent tap</span></span><span class="perm"><Bi text={t.granted} /></span></div>
+          <div class="grow"><span><b><Bi text={t.gAuto} /></b><span class="s">Apple Events</span></span><span class="perm"><Bi text={t.granted} /></span></div>
+        </div>
+      </div>
+      <span class="sr-only" role="status" data-announce></span>
     </div>
   </div>
 </section>
 
 <script>
-  // Drag-to-reorder
-  const body = document.getElementById('sm-body')!;
-  let dragKey: string | null = null;
+  import { settings as t, settingsInitial, settingsRows } from '../lib/content/studio';
+  import { pick } from '../lib/lang-client';
 
-  body.addEventListener('dragstart', (e) => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
-    if (!row) return;
-    dragKey = row.dataset.smRow!;
-    e.dataTransfer!.effectAllowed = 'move';
-    try { e.dataTransfer!.setData('text/plain', dragKey); } catch {}
-    row.classList.add('is-dragging');
-  });
-  body.addEventListener('dragend', (e) => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
-    row?.classList.remove('is-dragging');
-    document.querySelectorAll('.sm-row.drag-hover').forEach((el) => el.classList.remove('drag-hover'));
-    dragKey = null;
-  });
-  body.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
-    if (!target || target.dataset.smRow === dragKey) return;
-    document.querySelectorAll('.sm-row.drag-hover').forEach((el) => el.classList.remove('drag-hover'));
-    target.classList.add('drag-hover');
-  });
-  body.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
-    if (!target || !dragKey) return;
-    const dragged = body.querySelector<HTMLElement>(`[data-sm-row="${dragKey}"]`);
-    if (!dragged || dragged === target) return;
-    body.insertBefore(dragged, target);
-    target.classList.remove('drag-hover');
-  });
+  // Display names for keys whose e.key is not a printable character.
+  const KEYNAME: Record<string, string> = { ' ': 'Space', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: '↩', Backspace: '⌫', Escape: 'Esc' };
+  const MODIFIERS = ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn'];
+  const DRAG_THRESHOLD = 4;
 
-  // Hotkey recorder
-  let recording: HTMLButtonElement | null = null;
-  const stopRec = () => {
-    if (recording) {
-      recording.classList.remove('is-recording');
-      const def = recording.querySelector<HTMLElement>('.rec-default');
-      if (def) def.style.display = '';
-      const lbl = recording.querySelector<HTMLElement>('.rec-recording');
-      lbl?.remove();
-    }
-    recording = null;
-  };
+  // Formats a keydown as a macOS combo, e.g. ⌃⌥D. Letters and digits come
+  // from e.code so Option combos read "⌥D" rather than "⌥∂".
+  function combo(e: KeyboardEvent): string {
+    let mods = '';
+    if (e.ctrlKey) mods += '⌃';
+    if (e.altKey) mods += '⌥';
+    if (e.shiftKey) mods += '⇧';
+    if (e.metaKey) mods += '⌘';
+    const code = e.code ?? '';
+    const key =
+      KEYNAME[e.key] ??
+      (code.startsWith('Key') ? code.slice(3) : code.startsWith('Digit') ? code.slice(5) : e.key.length === 1 ? e.key.toUpperCase() : e.key);
+    return mods + key;
+  }
 
-  document.querySelectorAll<HTMLButtonElement>('[data-sm-record]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      stopRec();
-      recording = btn;
-      btn.classList.add('is-recording');
-      const def = btn.querySelector<HTMLElement>('.rec-default');
-      if (def) def.style.display = 'none';
-      const lbl = document.createElement('span');
-      lbl.className = 'rec-recording';
-      lbl.innerHTML = `<span data-i18n-zh>请按下…（Esc 取消）</span><span data-i18n-en>Press keys… (Esc to cancel)</span>`;
-      btn.appendChild(lbl);
+  const root = document.getElementById('settings');
+  const list = root?.querySelector<HTMLElement>('[data-rows]');
+  if (root && list) {
+    const byKey = new Map(settingsRows.map((r) => [r.key, r]));
+    const hidden = new Set(settingsInitial.hidden);
+    const keys: Record<string, string> = { ...settingsInitial.keys };
+    const rows = () => Array.from(list.querySelectorAll<HTMLElement>('.srow'));
+    const rowOf = (el: EventTarget | null) => (el instanceof Element ? el.closest<HTMLElement>('.srow') : null);
+    const labelOf = (row: HTMLElement) => pick(byKey.get(row.dataset.key ?? '')?.label ?? { zh: '', en: '' });
+    const announcer = root.querySelector<HTMLElement>('[data-announce]');
+    const announce = (msg: string) => {
+      if (announcer) announcer.textContent = msg;
+    };
+
+    // Tabs: click, or ← → Home End within the tablist (roving tabindex).
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-tab]'));
+    const panes = Array.from(root.querySelectorAll<HTMLElement>('[data-pane]'));
+    const selectTab = (tab: HTMLButtonElement) => {
+      tabs.forEach((b) => {
+        const on = b === tab;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-selected', String(on));
+        b.tabIndex = on ? 0 : -1;
+      });
+      panes.forEach((p) => (p.hidden = p.dataset.pane !== tab.dataset.tab));
+    };
+    tabs.forEach((b, i) => {
+      b.addEventListener('click', () => selectTab(b));
+      b.addEventListener('keydown', (e) => {
+        const next =
+          e.key === 'ArrowRight' ? tabs[(i + 1) % tabs.length] :
+          e.key === 'ArrowLeft' ? tabs[(i - 1 + tabs.length) % tabs.length] :
+          e.key === 'Home' ? tabs[0] :
+          e.key === 'End' ? tabs[tabs.length - 1] : null;
+        if (!next) return;
+        e.preventDefault();
+        selectTab(next);
+        next.focus();
+      });
     });
-  });
 
-  window.addEventListener('keydown', (e) => {
-    if (!recording) return;
-    if (e.key === 'Tab') { stopRec(); return; }            // let keyboard focus leave the recorder
-    e.preventDefault();
-    if (e.key === 'Escape') { stopRec(); return; }
-    if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // wait for non-modifier
-    const parts: string[] = [];
-    if (e.shiftKey) parts.push('⇧');
-    if (e.ctrlKey) parts.push('⌃');
-    if (e.altKey) parts.push('⌥');
-    if (e.metaKey) parts.push('⌘');
-    parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
-    const btn = recording;
-    stopRec();
-    btn.classList.add('has-key');
-    btn.innerHTML = `<span>${parts.join(' ')}</span>`;
-  });
+    // Launch-at-login switch.
+    const login = root.querySelector<HTMLElement>('[data-login]');
+    let loginOn = settingsInitial.login;
+    login?.addEventListener('click', () => {
+      loginOn = !loginOn;
+      login.classList.toggle('off', !loginOn);
+      login.setAttribute('aria-checked', String(loginOn));
+    });
+
+    // Visibility toggles.
+    const visCount = root.querySelector<HTMLElement>('[data-vis-count]');
+    list.addEventListener('click', (e) => {
+      const eye = (e.target as Element).closest<HTMLElement>('[data-eye]');
+      const row = rowOf(eye);
+      if (!eye || !row) return;
+      const key = row.dataset.key ?? '';
+      const nowHidden = !hidden.has(key);
+      if (nowHidden) hidden.add(key);
+      else hidden.delete(key);
+      row.classList.toggle('hiddenrow', nowHidden);
+      eye.classList.toggle('off', nowHidden);
+      eye.setAttribute('aria-pressed', String(!nowHidden));
+      if (visCount) visCount.textContent = `${settingsRows.length - hidden.size} / ${settingsRows.length}`;
+    });
+
+    // Keyboard reorder: ↑ ↓ on a focused handle. The neighbour moves rather
+    // than the focused row, so focus never leaves the handle.
+    const announceMove = (row: HTMLElement) => {
+      const all = rows();
+      announce(
+        pick(t.moved)
+          .replace('{label}', labelOf(row))
+          .replace('{n}', String(all.indexOf(row) + 1))
+          .replace('{total}', String(all.length)),
+      );
+    };
+    list.addEventListener('keydown', (e) => {
+      const handle = (e.target as Element).closest('[data-handle]');
+      const row = rowOf(handle);
+      if (!handle || !row || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      e.preventDefault();
+      const prev = row.previousElementSibling;
+      const next = row.nextElementSibling;
+      if (e.key === 'ArrowUp' && prev) list.insertBefore(prev, row.nextElementSibling);
+      else if (e.key === 'ArrowDown' && next) list.insertBefore(next, row);
+      else return;
+      announceMove(row);
+    });
+
+    // Pointer reorder. Mouse drags start anywhere on a row except its buttons;
+    // touch and pen start on the handle (touch-action: none) so the page still
+    // scrolls under a finger elsewhere.
+    let drag: { row: HTMLElement; id: number; y: number; active: boolean; over: HTMLElement | null } | null = null;
+    const setOver = (el: HTMLElement | null) => {
+      if (!drag) return;
+      drag.over?.classList.remove('over');
+      drag.over = el;
+      el?.classList.add('over');
+    };
+    const endDrag = () => {
+      if (!drag) return;
+      drag.row.classList.remove('dragging');
+      setOver(null);
+      if (drag.row.hasPointerCapture(drag.id)) drag.row.releasePointerCapture(drag.id);
+      drag = null;
+    };
+    list.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || drag) return;
+      const target = e.target as Element;
+      const row = rowOf(target);
+      if (!row) return;
+      const onHandle = !!target.closest('[data-handle]');
+      if (!onHandle && (e.pointerType !== 'mouse' || target.closest('button'))) return;
+      drag = { row, id: e.pointerId, y: e.clientY, active: false, over: null };
+    });
+    list.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (!drag.active) {
+        if (Math.abs(e.clientY - drag.y) < DRAG_THRESHOLD) return;
+        drag.active = true;
+        drag.row.classList.add('dragging');
+        drag.row.setPointerCapture(e.pointerId);
+      }
+      const over = rowOf(document.elementFromPoint(e.clientX, e.clientY));
+      if (!over || over === drag.row || !list.contains(over)) return;
+      // Move the rows in between rather than the dragged row: moving the row
+      // that holds pointer capture releases the capture and would end the drag.
+      const row = drag.row;
+      const all = rows();
+      const from = all.indexOf(row);
+      const to = all.indexOf(over);
+      const ref = row.nextElementSibling;
+      if (from < to) all.slice(from + 1, to + 1).forEach((r) => list.insertBefore(r, row));
+      else all.slice(to, from).forEach((r) => list.insertBefore(r, ref));
+      setOver(over);
+    });
+    list.addEventListener('pointerup', endDrag);
+    list.addEventListener('pointercancel', endDrag);
+    list.addEventListener('lostpointercapture', endDrag);
+
+    // Inline hotkey recorder. One row records at a time; Esc, Tab, blur, or a
+    // second click cancels.
+    const recButtons = Array.from(list.querySelectorAll<HTMLElement>('[data-rec]'));
+    let recKey: string | null = null;
+    // A combo recorded with Enter or Space must not re-arm the recorder via
+    // the button's own activation.
+    let swallow: string | null = null;
+    const setRec = (key: string | null) => {
+      recKey = key;
+      recButtons.forEach((b) => {
+        const k = rowOf(b)?.dataset.key ?? '';
+        b.dataset.state = k === key ? 'live' : keys[k] ? 'set' : 'idle';
+      });
+    };
+    recButtons.forEach((b) => {
+      const row = rowOf(b);
+      const key = row?.dataset.key ?? '';
+      const out = b.querySelector<HTMLElement>('[data-keys]');
+      b.addEventListener('click', () => {
+        if (swallow === key) {
+          swallow = null;
+          return;
+        }
+        setRec(recKey === key ? null : key);
+      });
+      b.addEventListener('blur', () => {
+        if (recKey === key) setRec(null);
+      });
+      b.addEventListener('keyup', (e) => {
+        if (swallow !== key) return;
+        e.preventDefault();
+        window.setTimeout(() => (swallow = null), 0);
+      });
+      b.addEventListener('keydown', (e) => {
+        if (recKey !== key) return;
+        if (e.key === 'Tab') {
+          setRec(null);
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Escape') {
+          setRec(null);
+          return;
+        }
+        if (MODIFIERS.includes(e.key)) return;
+        keys[key] = combo(e);
+        if (out) out.textContent = keys[key];
+        swallow = key;
+        setRec(null);
+        if (row) announce(pick(t.recorded).replace('{label}', labelOf(row)).replace('{keys}', keys[key]));
+      });
+    });
+  }
 </script>
+
+<style>
+  .set-grid { display: grid; grid-template-columns: minmax(0, 4.6fr) minmax(0, 7.4fr); gap: clamp(28px, 4vw, 64px); align-items: start; }
+  .set-copy { position: sticky; top: 92px; display: flex; flex-direction: column; gap: 18px; }
+  .set-copy .note { display: flex; gap: 10px; font-size: 14px; line-height: 1.6; color: var(--ink-2); padding-top: 16px; border-top: 1px dashed var(--rule); text-wrap: pretty; }
+  .set-copy .note::before { content: "i"; flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; background: var(--ink); color: var(--paper); font: 600 11px/1 var(--mono); margin-top: 2px; }
+  .set-copy ul { display: grid; gap: 10px; font-size: 14px; color: var(--ink-2); }
+  .set-copy li { display: flex; gap: 10px; align-items: baseline; }
+  .set-copy li .kc { flex: none; }
+  .setwin { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; box-shadow: 0 1px 0 #fff inset, 0 2px 0 var(--steel), 0 40px 70px -40px rgba(20, 24, 38, 0.45); overflow: hidden; }
+  .win-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 10px 14px; background: linear-gradient(180deg, var(--paper), var(--bone)); border-bottom: 1px solid var(--rule); }
+  .dots { display: flex; gap: 7px; }
+  .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--steel); box-shadow: inset 0 0 0 1px rgba(20, 24, 38, 0.14); }
+  .win-bar .ttl { justify-self: end; font: 500 11px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.06em; }
+  .rows { padding: 8px; display: grid; gap: 4px; }
+  .srow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto 34px; align-items: center; gap: 12px; padding: 7px 8px 7px 4px; border-radius: 9px; border: 1px solid transparent; background: var(--paper); transition: background 120ms var(--ease), box-shadow 120ms var(--ease), opacity 120ms; -webkit-user-select: none; user-select: none; }
+  .srow:hover { background: var(--bone); }
+  .srow.dragging { opacity: 0.55; cursor: grabbing; }
+  .srow.over { border-color: var(--sig); background: color-mix(in oklab, var(--sig) 10%, var(--paper)); }
+  .srow.hiddenrow .sl b { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--steel-2); }
+  .handle { width: 28px; height: 30px; border: 0; background: transparent; cursor: grab; display: grid; place-items: center; border-radius: 6px; color: var(--ink-2); touch-action: none; }
+  .handle i { display: block; width: 10px; height: 14px; background-image: radial-gradient(circle, currentColor 1.3px, transparent 1.6px); background-size: 5px 4.67px; }
+  .handle:active { cursor: grabbing; }
+  .sl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .sl b { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sl > span { font: 400 11px/1.2 var(--mono); color: var(--ink-2); }
+  .tb { font: 500 10.5px/1 var(--mono); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--rule); color: var(--ink-2); text-transform: lowercase; }
+  .tb.toggle { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .tb.submenu { background: var(--bone-2); }
+  .recbtn { position: relative; min-width: 116px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px dashed var(--steel-2); background: var(--bone); font: 500 12px/1 var(--mono); color: var(--ink-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+  .recbtn[data-state="set"] { border-style: solid; background: var(--paper); color: var(--ink); box-shadow: 0 2px 0 var(--steel); }
+  .recbtn[data-state="live"] { border: 1.5px solid var(--sig); color: var(--sig-ink); background: color-mix(in oklab, var(--sig) 10%, var(--paper)); }
+  .recbtn[data-state="live"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--sig); animation: pulse 1s steps(2, jump-none) infinite; }
+  /* One label per recorder state; the language spans inside are hidden globally. */
+  .recbtn:not([data-state="idle"]) > [data-for="idle"],
+  .recbtn:not([data-state="live"]) > [data-for="live"],
+  .recbtn:not([data-state="set"]) > [data-for="set"] { display: none; }
+  .eye { width: 34px; height: 30px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; display: grid; place-items: center; }
+  .eye i { width: 16px; height: 9px; border-radius: 50%; border: 1.5px solid var(--ink); position: relative; }
+  .eye i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: var(--ink); }
+  .eye.off i { border-color: var(--steel-2); }
+  .eye.off i::after { background: var(--steel-2); }
+  .eye.off i::before { content: ""; position: absolute; left: -3px; right: -3px; top: 50%; height: 1.5px; background: var(--steel-3); transform: rotate(-28deg); }
+  .win-foot { display: flex; justify-content: space-between; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--rule-2); background: var(--bone); font: 500 11px/1.3 var(--mono); color: var(--ink-2); }
+  .grow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 12px; border-bottom: 1px solid var(--rule-2); }
+  .grow:last-child { border-bottom: 0; }
+  .grow b { font-weight: 600; font-size: 14px; display: block; }
+  .grow .s { font: 400 11.5px/1.3 var(--mono); color: var(--ink-2); }
+  .perm { display: inline-flex; align-items: center; gap: 7px; font: 500 12px/1 var(--mono); }
+  .perm::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--sig); box-shadow: 0 0 6px var(--sig); }
+  .mbicon { display: inline-flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 6px; background: var(--ink); color: var(--paper); font: 500 11.5px/1 var(--mono); }
+  .mbicon img { width: 14px; height: 14px; }
+  .mini-sw { position: relative; width: 40px; height: 22px; border-radius: 6px; background: var(--sig); box-shadow: inset 0 1px 3px rgba(8, 20, 70, 0.4); border: 0; cursor: pointer; }
+  .mini-sw::after { content: ""; position: absolute; top: 3px; left: 21px; width: 16px; height: 16px; border-radius: 4px; background: linear-gradient(180deg, #fff, var(--steel)); box-shadow: 0 1.5px 0 var(--steel-3); transition: left 80ms var(--ease); }
+  .mini-sw.off { background: var(--bone-2); box-shadow: inset 0 1px 3px rgba(20, 24, 38, 0.28); }
+  .mini-sw.off::after { left: 3px; }
+
+  @media (max-width: 1080px) {
+    .set-grid { grid-template-columns: minmax(0, 1fr); }
+    .set-copy { position: static; }
+  }
+  @media (max-width: 760px) {
+    .srow { grid-template-columns: 24px minmax(0, 1fr) auto 30px; gap: 8px; }
+    .srow .tb { display: none; }
+    .recbtn { min-width: 96px; font-size: 11px; }
+  }
+</style>

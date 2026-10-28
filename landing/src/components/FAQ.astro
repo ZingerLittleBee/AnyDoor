@@ -1,44 +1,60 @@
 ---
-import { icons } from '../lib/icons';
-import { copy } from '../lib/copy';
+import Bi from './Bi.astro';
+import { faq as t } from '../lib/content/end';
+
+// Mirrors the reference: the first answer starts open, and at most one is open.
+// Native <details> sharing a `name` gives that without script, so answers stay
+// readable with JavaScript off.
+const INITIAL_OPEN = 0;
+const num = (i: number) => `Q.${String(i + 1).padStart(2, '0')}`;
 ---
 
-<section class="section container-x" id="faq">
-  <div class="eyebrow">
-    <span class="dot" style="background: var(--color-text-dim); box-shadow: none" />
-    <span data-i18n-zh>{copy.faq.eyebrow.zh}</span><span data-i18n-en>{copy.faq.eyebrow.en}</span>
-  </div>
-  <h2 class="sec-h">
-    <span class="gradient-text"><span data-i18n-zh>{copy.faq.h2.zh}</span><span data-i18n-en>{copy.faq.h2.en}</span></span>
-  </h2>
-
-  <div class="faq">
-    {copy.faq.items.map((item, i) => (
-      <div class={`faq-item ${i === 0 ? 'is-open' : ''}`} data-faq role="button" tabindex="0" aria-expanded={i === 0 ? 'true' : 'false'}>
-        <div class="faq-q">
-          <span><span data-i18n-zh>{item.q.zh}</span><span data-i18n-en>{item.q.en}</span></span>
-          <span class="ic" set:html={icons.plus()} style="width:20px;height:20px" aria-hidden="true" />
-        </div>
-        <div class="faq-a">
-          <span data-i18n-zh>{item.a.zh}</span><span data-i18n-en>{item.a.en}</span>
-        </div>
-      </div>
-    ))}
+<section class="sec wrap" id="faq">
+  <div class="sec-rule"><span class="lbl">§ 06 · FAQ</span><span class="lbl">{num(0)} – {num(t.items.length - 1)}</span></div>
+  <div class="faq-grid">
+    <div class="faq-side">
+      <h2 class="h2"><span class="ln"><Bi text={t.h2a} /></span><span class="ln"><Bi text={t.h2b} /></span></h2>
+      <p class="lede"><Bi text={t.lede} /></p>
+    </div>
+    <div class="faq-list">
+      {t.items.map((item, i) => (
+        <details class="qa" name="faq" open={i === INITIAL_OPEN}>
+          <summary class="qbtn">
+            <span class="qn">{num(i)}</span>
+            <span class="qt"><Bi text={item.q} /></span>
+            <span class="pm" aria-hidden="true"></span>
+          </summary>
+          <p class="qans"><Bi text={item.a} /></p>
+        </details>
+      ))}
+    </div>
   </div>
 </section>
 
-<script>
-  document.querySelectorAll<HTMLElement>('[data-faq]').forEach((item) => {
-    const toggle = () => {
-      const open = item.classList.toggle('is-open');
-      item.setAttribute('aria-expanded', String(open));
-    };
-    item.addEventListener('click', toggle);
-    item.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggle();
-      }
-    });
-  });
-</script>
+<style>
+  .faq-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: clamp(24px, 4vw, 64px); align-items: start; }
+  .faq-side { position: sticky; top: 92px; display: flex; flex-direction: column; gap: 16px; }
+  .faq-list { border-top: 1px solid var(--ink); }
+  .qa { border-bottom: 1px solid var(--rule); }
+  .qbtn { list-style: none; display: grid; grid-template-columns: 52px minmax(0, 1fr) 30px; align-items: center; gap: 12px; padding: 18px 0; background: none; border: 0; cursor: pointer; text-align: left; }
+  .qbtn::-webkit-details-marker { display: none; }
+  .qbtn .qn { font: 500 12px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.04em; }
+  .qbtn .qt { font-size: 17px; font-weight: 600; line-height: 1.4; text-wrap: pretty; }
+  .qbtn .pm { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; background: linear-gradient(180deg, #fff, var(--bone)); border: 1px solid var(--rule); box-shadow: 0 2px 0 var(--steel-2); font: 500 15px/1 var(--mono); transition: transform 80ms var(--ease), box-shadow 80ms var(--ease), background 80ms; }
+  .qbtn .pm::before { content: "+"; }
+  .qa[open] .pm::before { content: "−"; }
+  .qbtn:active .pm { transform: translateY(2px); box-shadow: 0 0 0 var(--steel-2); }
+  .qa[open] .pm { background: var(--sig); color: var(--on-sig); border-color: var(--sig-lo); box-shadow: 0 2px 0 var(--sig-lo); }
+  .qans { padding: 0 42px 22px 64px; font-size: 15px; line-height: 1.7; color: var(--ink-2); text-wrap: pretty; max-width: 72ch; }
+  :global(html[data-lang="zh"]) .qans { line-height: 1.85; }
+
+  @media (max-width: 960px) {
+    .faq-grid { grid-template-columns: minmax(0, 1fr); }
+    .faq-side { position: static; }
+  }
+  @media (max-width: 560px) {
+    .qbtn { grid-template-columns: 40px minmax(0, 1fr) 28px; gap: 8px; }
+    .qbtn .qt { font-size: 16px; }
+    .qans { padding: 0 0 20px 48px; }
+  }
+</style>
