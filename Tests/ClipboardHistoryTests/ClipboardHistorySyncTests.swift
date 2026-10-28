@@ -998,6 +998,93 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testResolvedTextConflictKeepsIndependentMetadataAndRejectsLateRecognition() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let recognizer = SyncTestRecognizer(results: [.ocr: ["obsolete composition image"], .qr: ["anydoor://obsolete/composition"]], held: true)
+        let first = makeModule(services: services, keyByte: 0xDB, time: 1_000, recognizer: recognizer)
+        let second = makeModule(services: services, keyByte: 0xDC, time: 2_000)
+        addTeardownBlock { await recognizer.release() }
+        try await first.setAutomaticImageTextIndexingEnabled(true)
+        let board = NSPasteboard(name: .init("dev.bybee.AnyDoor.conflict-metadata.\(UUID())"))
+        defer { board.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString("original editable image", forType: .string)
+        item.setData(try makeSyncBitmap(), forType: .png)
+        XCTAssertTrue(board.writeObjects([item]))
+        let source = ClipboardHistoryCaptureSource(bundleIdentifier: "test.composition.editor", displayName: "Composition Editor")
+        guard case .captured(let capture) = try await first.capture(.init(pasteboard: board), source: source) else {
+            return XCTFail("Expected editable bitmap content")
+        }
+        let shared = try await first.createTagDefinition(named: "Shared composition", assigningTo: capture.entryID).definition
+        let removed = try await first.createTagDefinition(named: "Earlier membership", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(shared.id, selected: true)
+        try await first.setSyncTagSelected(removed.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        for _ in 0..<100 where await recognizer.callCount() == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        let recognitionCalls = await recognizer.callCount()
+        XCTAssertGreaterThan(recognitionCalls, 0, "The obsolete recognition must actually be in flight")
+        let privateTag = try await second.createTagDefinition(named: "Private composition", assigningTo: capture.entryID).definition
+        let recent = try await second.capture(.init(source: .unknown, content: .text("newer local-only history")))
+        await first.suspendSync()
+        await second.suspendSync()
+        _ = try await first.apply(.editText(capture.entryID, "first independent draft"))
+        _ = try await second.apply(.editText(capture.entryID, "chosen second draft"))
+        _ = try await second.apply(.setFavorite(capture.entryID, true))
+        _ = try await second.apply(.setTags(capture.entryID, [shared.id, privateTag.id]))
+        await first.resumeSync()
+        await second.resumeSync()
+        await first.retrySync()
+        let plan = try await first.textEditPlan(for: capture.entryID)
+        XCTAssertEqual(Set(plan.versions.map(\.text)), ["first independent draft", "chosen second draft"])
+        let choice = try XCTUnwrap(plan.versions.first { $0.text == "chosen second draft" })
+        _ = try await first.resolveTextConflict(.init(plan: plan, versionID: choice.id))
+        await first.retrySync()
+        await second.retrySync()
+        await recognizer.release()
+        await first.awaitDerivedJobsForTesting()
+        await first.retrySync()
+        await second.retrySync()
+
+        let expected = ClipboardHistoryMaterialization(items: [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "chosen second draft")
+        ])])
+        let received = try await second.materialize(.init(entryID: capture.entryID, purpose: .normalPaste))
+        XCTAssertEqual(received, expected)
+        let page = try await second.page(.init())
+        let entry = try XCTUnwrap(page.entries.first { $0.id == capture.entryID })
+        XCTAssertEqual(page.entries.first?.id, recent.entryID, "Resolution and metadata do not invent recent use")
+        XCTAssertTrue(entry.isFavorite)
+        XCTAssertEqual(entry.tagIDs, [shared.id, privateTag.id])
+        XCTAssertEqual(entry.source, source)
+        XCTAssertEqual(entry.capturedAt, Date(timeIntervalSince1970: 1_000))
+        XCTAssertFalse(entry.hasTextConflict)
+        let obsolete = try await second.page(.init(text: "obsolete composition"))
+        let qr = try await second.page(.init(facet: .qrCode))
+        XCTAssertTrue(obsolete.entries.isEmpty)
+        XCTAssertTrue(qr.entries.isEmpty)
+
+        await cloud.replayAllChangesInReverseOrder()
+        let late = makeModule(services: services, keyByte: 0xDD, time: 3_000)
+        try await late.setSyncEnabled(true)
+        let replay = try await late.materialize(.init(entryID: capture.entryID, purpose: .normalPaste))
+        XCTAssertEqual(replay, expected)
+        let latePage = try await late.page(.init())
+        let lateEntry = try XCTUnwrap(latePage.entries.first)
+        XCTAssertEqual(latePage.entries.count, 1)
+        XCTAssertTrue(lateEntry.isFavorite)
+        XCTAssertEqual(lateEntry.tagIDs, [shared.id])
+        XCTAssertEqual(lateEntry.source, source)
+        XCTAssertEqual(lateEntry.capturedAt, Date(timeIntervalSince1970: 1_000))
+        XCTAssertFalse(lateEntry.hasTextConflict)
+        let definitions = try await late.tagDefinitions()
+        XCTAssertFalse(definitions.contains { $0.id == privateTag.id })
+        let lateObsolete = try await late.page(.init(text: "obsolete composition"))
+        XCTAssertTrue(lateObsolete.entries.isEmpty)
+    }
+
+    @MainActor
     func testLateRecognitionCannotRestoreResultsAfterTextEditRemovesBitmap() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
