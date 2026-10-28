@@ -9,44 +9,19 @@
 
 ## Problem Statement
 
-AnyDoor users organize useful clipboard content with tags but cannot carry that
-content between their Macs. Existing Config Sync transfers tag definitions
-without the associated history. File history points to original local files
-rather than owning portable contents, so copying the history database or
-transferring paths cannot make those files available on another Mac.
+AnyDoor users organize useful clipboard content with tags but cannot carry that content between their Macs. Existing Config Sync transfers tag definitions without the associated history. File history points to original local files rather than owning portable contents, so copying the history database or transferring paths cannot make those files available on another Mac.
 
-Users need deliberate control over what leaves each device, usable files and
-directories on receiving devices, and predictable behavior when content changes
-or a device is offline. Automatically downloading every large file would consume
-unwanted storage and bandwidth. Silently overwriting edits, reviving deleted
-content, or exposing private tag names through a second synchronization channel
-would undermine that control.
+Users need deliberate control over what leaves each device, usable files and directories on receiving devices, and predictable behavior when content changes or a device is offline. Automatically downloading every large file would consume unwanted storage and bandwidth. Silently overwriting edits, reviving deleted content, or exposing private tag names through a second synchronization channel would undermine that control.
 
 ## Solution
 
-Provide optional native iCloud synchronization of selected Clipboard History
-across Macs using the same Apple Account. Every Mac starts disabled and joins
-only after explicit activation. Participating Devices share one set of Sync
-Tags; an entry matching any selected tag is eligible, including existing tagged
-history. Receiving an entry adds it to AnyDoor history without replacing the
-system pasteboard.
+Provide optional native iCloud synchronization of selected Clipboard History across Macs using the same Apple Account. Every Mac starts disabled and joins only after explicit activation. Participating Devices share one set of Sync Tags; an entry matching any selected tag is eligible, including existing tagged history. Receiving an entry adds it to AnyDoor history without replacing the system pasteboard.
 
-Synchronize supported clipboard content and complete file contents, including
-directories and application packages. Explicit Linked Locations support
-bidirectional changes, while ordinary pasted and separately saved copies remain
-independent. Preserve conflicting content rather than silently choosing a loser.
+Synchronize supported clipboard content and complete file contents, including directories and application packages. Explicit Linked Locations support bidirectional changes, while ordinary pasted and separately saved copies remain independent. Preserve conflicting content rather than silently choosing a loser.
 
-Do not impose an application-level file-size cap. Automatically download each
-top-level object at or below 5,000,000 bytes. Above that threshold, show a File
-Placeholder and require an explicit download for each new version, retaining any
-previous complete version. Count a directory or package by its aggregate
-original file bytes, before compression and encryption.
+Do not impose an application-level file-size cap. Automatically download each top-level object at or below 5,000,000 bytes. Above that threshold, show a File Placeholder and require an explicit download for each new version, retaining any previous complete version. Count a directory or package by its aggregate original file bytes, before compression and encryption.
 
-Protect content, file names, and tag names with application-level end-to-end
-encryption and a separate key distributed through iCloud Keychain. Editable,
-user-visible Linked Working Copies may remain ordinary readable files;
-background storage and transfer staging stay encrypted. Retire the old automatic
-Config Sync tag channel so it cannot bypass the selected-tag privacy boundary.
+Protect content, file names, and tag names with application-level end-to-end encryption and a separate key distributed through iCloud Keychain. Editable, user-visible Linked Working Copies may remain ordinary readable files; background storage and transfer staging stay encrypted. Retire the old automatic Config Sync tag channel so it cannot bypass the selected-tag privacy boundary.
 
 ## User Stories
 
@@ -242,33 +217,13 @@ Config Sync tag channel so it cannot bypass the selected-tag privacy boundary.
 
 ## Further Notes
 
-This specification defines the accepted product behavior. The feature has not
-been implemented or runtime-validated.
+This specification defines the accepted product behavior. The feature has not been implemented or runtime-validated.
 
-Relevant existing decisions are ADR-0012 (tag protection), ADR-0014 (local-history
-encryption), ADR-0015 (original file references), and ADR-0025 (the deep history
-module). The accompanying new decisions are ADR-0026 (sync end-to-end
-encryption), ADR-0027 (bidirectional linked files), and ADR-0028 (tag-sync
-ownership). Their accepted behavior is included above so this issue does not
-depend on unpublished local documents.
+Relevant existing decisions are ADR-0012 (tag protection), ADR-0014 (local-history encryption), ADR-0015 (original file references), and ADR-0025 (the deep history module). The accompanying new decisions are ADR-0026 (sync end-to-end encryption), ADR-0027 (bidirectional linked files), and ADR-0028 (tag-sync ownership). Their accepted behavior is included above so this issue does not depend on unpublished local documents.
 
-Apple documents [CloudKit support for Developer ID distribution](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)
-and the [CloudKit capability setup](https://developer.apple.com/documentation/cloudkit/enabling-cloudkit-in-your-app).
-[Data Protection Keychain access](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
-also requires the appropriate signing and provisioning. Those requirements are
-not yet satisfied or tested by this feature's implementation.
+Apple documents [CloudKit support for Developer ID distribution](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) and the [CloudKit capability setup](https://developer.apple.com/documentation/cloudkit/enabling-cloudkit-in-your-app). [Data Protection Keychain access](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) also requires the appropriate signing and provisioning. Those requirements are not yet satisfied or tested by this feature's implementation.
 
-[Private CloudKit storage](https://developer.apple.com/documentation/cloudkit/ckcontainer/privateclouddatabase)
-uses the user's iCloud quota. [CKAsset](https://developer.apple.com/documentation/cloudkit/ckasset)
-exchanges local files and uses download staging, so its application-supplied
-content must remain encrypted outside the explicit working-copy boundary.
+[Private CloudKit storage](https://developer.apple.com/documentation/cloudkit/ckcontainer/privateclouddatabase) uses the user's iCloud quota. [CKAsset](https://developer.apple.com/documentation/cloudkit/ckasset) exchanges local files and uses download staging, so its application-supplied content must remain encrypted outside the explicit working-copy boundary.
 
-Apple's managed end-to-end protection for encrypted CloudKit fields and assets
-depends on [Advanced Data Protection](https://support.apple.com/guide/security/sec973254c5f/web).
-[iCloud Keychain syncing](https://support.apple.com/guide/security/secure-keychain-syncing-sec0a319b35f/web)
-supplies the separate end-to-end protected key-distribution capability.
-[CKSyncEngine scheduling](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5)
-and [FSEvents reconciliation requirements](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
-do not support promises of fixed delivery time or complete intermediate-edit
-history.
+Apple's managed end-to-end protection for encrypted CloudKit fields and assets depends on [Advanced Data Protection](https://support.apple.com/guide/security/sec973254c5f/web). [iCloud Keychain syncing](https://support.apple.com/guide/security/secure-keychain-syncing-sec0a319b35f/web) supplies the separate end-to-end protected key-distribution capability. [CKSyncEngine scheduling](https://developer.apple.com/documentation/cloudkit/cksyncengine-5sie5) and [FSEvents reconciliation requirements](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html) do not support promises of fixed delivery time or complete intermediate-edit history.
 
