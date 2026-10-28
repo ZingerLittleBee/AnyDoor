@@ -7,7 +7,7 @@ extension ClipboardHistoryModule {
         try database.execute(sql: """
             CREATE TABLE clipboard_sync_file_uploads (
                 record_id TEXT PRIMARY KEY NOT NULL REFERENCES clipboard_sync_outbox(record_id) ON DELETE CASCADE,
-                directory TEXT NOT NULL, completed_bytes INTEGER NOT NULL DEFAULT 0
+                directory TEXT NOT NULL, completed_bytes INTEGER NOT NULL DEFAULT 0, failure TEXT
             );
             CREATE TABLE clipboard_sync_file_downloads (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, version_id TEXT NOT NULL,
@@ -16,6 +16,7 @@ extension ClipboardHistoryModule {
                 PRIMARY KEY(account_id, epoch, object_id, version_id)
             ) WITHOUT ROWID;
             ALTER TABLE clipboard_sync_file_versions ADD COLUMN parents BLOB NOT NULL DEFAULT X'5B5D';
+            ALTER TABLE clipboard_sync_file_versions ADD COLUMN publication_record_id TEXT;
             CREATE TABLE clipboard_sync_file_selections (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL,
                 current_version_id TEXT NOT NULL, complete_version_id TEXT,
@@ -35,6 +36,7 @@ extension ClipboardHistoryModule {
         try syncWrite { database in
             let settings = try syncSettings(in: database)
             guard settings.enabled, let accountID = settings.accountID,
+                  let context = try syncFileContext(in: database), context.control.phase == "active",
                   let row = try Row.fetchOne(database, sql: """
                     SELECT member.epoch, version.descriptor FROM clipboard_sync_file_members AS member
                     JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
@@ -42,9 +44,9 @@ extension ClipboardHistoryModule {
                       AND version.epoch = member.epoch AND version.object_id = member.object_id AND version.version_id = choice.current_version_id
                     JOIN clipboard_representations AS current ON current.entry_id = member.entry_id
                       AND current.item_index = member.item_index AND current.representation_index = member.representation_index
-                    WHERE member.account_id = ? AND member.entry_id = ? AND member.object_id = ?
+                    WHERE member.account_id = ? AND member.epoch = ? AND member.entry_id = ? AND member.object_id = ?
                       AND choice.current_version_id = ? AND current.kind = 'fileReference'
-                    """, arguments: [accountID, entryID.value.uuidString.lowercased(), objectID.uuidString, versionID.uuidString]) else {
+                    """, arguments: [accountID, context.control.epoch.uuidString, entryID.value.uuidString.lowercased(), objectID.uuidString, versionID.uuidString]) else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
@@ -116,7 +118,9 @@ extension ClipboardHistoryModule {
                         completed_chunks = excluded.completed_chunks, completed_bytes = excluded.completed_bytes, failure = NULL
                     """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString,
                         descriptor.versionID.uuidString, index + 1, plainBytes])
+                try Self.bumpHistoryRevision(in: database)
             }
+            publishMutation()
         }
         guard plainBytes == size, encryptedBytes == body.encryptedByteCount,
               Data(plainDigest.finalize()) == descriptor.contentDigest,
@@ -148,8 +152,10 @@ extension ClipboardHistoryModule {
         try await waitForWriteTurn()
         try admitSync(generation)
         try syncWrite { database in
-            try database.execute(sql: "UPDATE clipboard_sync_file_uploads SET completed_bytes = ? WHERE record_id = ?",
+            try database.execute(sql: "UPDATE clipboard_sync_file_uploads SET completed_bytes = ?, failure = NULL WHERE record_id = ?",
                 arguments: [bytes, record.recordID])
+            try Self.bumpHistoryRevision(in: database)
         }
+        publishMutation()
     }
 }
