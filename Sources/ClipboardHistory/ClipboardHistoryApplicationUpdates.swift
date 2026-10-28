@@ -11,7 +11,7 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: context.account, services: services)
         try await recoverLinkedFileApplications(account: context.account, control: context.control, generation: generation)
         let source = try linkedRead { try Self.linkedLocationSource(Self.linkedFileActionRow(selection, in: $0)) }
-        guard source.isApplication || ClipboardApplicationPackage.isApplication(source.url),
+        guard source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url),
               let versions = try syncFileSelection(objectID: source.objectID), versions.latest.versionID != source.baseVersionID else {
             throw ClipboardHistoryApplicationUpdateError.stalePlan
         }
@@ -22,11 +22,22 @@ extension ClipboardHistoryModule {
             let candidate = versions.complete.flatMap { version in
                 try? ClipboardLinkedFileIO.inspect(version.url, expectedIdentity: version.identity)
             }
-            return (sourceProof, candidate)
+            let witnesses = try? ClipboardApplicationWitness.inspect(source.url)
+            return (sourceProof, candidate, witnesses)
         }
         let inspected = await withTaskCancellationHandler { await inspection.value } onCancel: { inspection.cancel() }
         try Task.checkCancellation()
         try await admitSync(generation, account: context.account, services: services)
+        let runningGuard: ClipboardApplicationRunningGuard?
+        if let existing = applicationRunningGuards[source.id], existing.linkedIdentity == source.identity {
+            if let witnesses = inspected.2 { await existing.refreshWitnesses(witnesses) }
+            runningGuard = existing
+        }
+        else if let witnesses = inspected.2 {
+            runningGuard = await ClipboardApplicationRunningGuard(witnesses: witnesses, linkedIdentity: source.identity)
+            applicationRunningGuards[source.id] = runningGuard
+        } else { runningGuard = nil }
+        let runningState = await runningGuard?.state() ?? .identityUncertain
         let state: ClipboardHistoryApplicationUpdateState
         if [.detached, .identityUncertain].contains(source.state) || inspected.0 == nil { state = .identityUncertain }
         else if source.state == .paused || source.hasPendingApplication { state = .unavailable }
@@ -36,7 +47,7 @@ extension ClipboardHistoryModule {
         else if inspected.1?.digest != versions.latest.contentDigest || inspected.1?.byteCount != versions.latest.originalByteCount { state = .unavailable }
         else if try !linkedVersion(versions.latest.versionID, descendsFrom: source.baseVersionID,
             objectID: source.objectID, account: context.account, control: context.control) { state = .conflict }
-        else { state = .ready }
+        else { state = runningState }
         let snapshot = ClipboardApplicationUpdateSnapshot(id: UUID(), accountID: context.account.identifier,
             epoch: context.control.epoch, keyID: context.control.keyID, entryID: selection.entryID.value,
             objectID: source.objectID,
@@ -100,9 +111,18 @@ extension ClipboardHistoryModule {
         let proof = try await withTaskCancellationHandler { try await inspection.value } onCancel: { inspection.cancel() }
         guard proof.digest == source.baseDigest else { throw ClipboardHistoryApplicationUpdateError.localChanges }
         try await admitSync(generation, account: context.account, services: services)
+        let runningGuard: ClipboardApplicationRunningGuard
+        if let existing = applicationRunningGuards[source.id], existing.linkedIdentity == source.identity { runningGuard = existing }
+        else {
+            let witnesses = try ClipboardApplicationWitness.inspect(source.url)
+            runningGuard = await ClipboardApplicationRunningGuard(witnesses: witnesses, linkedIdentity: source.identity)
+            applicationRunningGuards[source.id] = runningGuard
+        }
+        try await runningGuard.assertStopped()
         linkedFileMutationGate.activate(generation)
         try await applyLinkedFileVersion(version, to: source, account: context.account, control: context.control,
-            generation: generation, applicationPlan: snapshot)
+            generation: generation, applicationPlan: snapshot, applicationGuard: runningGuard)
+        applicationRunningGuards.removeValue(forKey: source.id)
         let applied = try linkedRead { try Row.fetchOne($0, sql: "SELECT base_version_id FROM clipboard_sync_linked_locations WHERE id = ?", arguments: [source.id.uuidString]) }
         guard (applied?["base_version_id"] as String?) == snapshot.versionID.uuidString else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
     }

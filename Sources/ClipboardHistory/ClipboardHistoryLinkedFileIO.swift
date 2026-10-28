@@ -98,7 +98,7 @@ enum ClipboardLinkedFileIO {
     /// identifies both inodes if the process stops between exchange and commit.
     static func applyReplacement(_ replacement: ClipboardLinkedFileProof, to source: ClipboardLinkedLocationSource,
         faultInjector: ClipboardHistoryFaultInjector,
-        authorize: @Sendable (_ mutation: () throws -> Bool) throws -> Bool) throws -> ClipboardLinkedFileProof? {
+        authorize: @Sendable (_ mutation: @escaping @Sendable () throws -> Bool) throws -> Bool) throws -> ClipboardLinkedFileProof? {
         var error: NSError?
         var result: Result<ClipboardLinkedFileProof?, any Error>?
         NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: source.url, options: [], error: &error) { destination in

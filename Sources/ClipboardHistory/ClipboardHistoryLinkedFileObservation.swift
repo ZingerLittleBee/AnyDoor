@@ -85,6 +85,7 @@ extension ClipboardHistoryModule {
         linkedFileObservationTasks.removeAll()
         linkedFileObservationRevisions.removeAll()
         linkedFileIdentityEvents.removeAll()
+        applicationRunningGuards.removeAll()
     }
 
     func refreshLinkedFileObservers(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) throws {

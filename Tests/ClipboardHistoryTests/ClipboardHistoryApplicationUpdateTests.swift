@@ -28,8 +28,22 @@ extension ClipboardHistoryLinkedFileTests {
         let readyLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
         let displayed = try XCTUnwrap(readyLocations.first)
 
-        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+        let running = try await old.launch()
+        addTeardownBlock { try await running.stop() }
+        let refused = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
             locationID: displayed.id, expectedRevision: displayed.revision))
+        XCTAssertEqual(refused.state, .running)
+        do {
+            try await fixture.receiver.applyApplicationUpdate(refused)
+            XCTFail("A running associated application must not be replaced")
+        } catch ClipboardHistoryApplicationUpdateError.running { }
+        XCTAssertEqual(try old.contentsSnapshot(), oldSnapshot)
+        try await running.stop()
+
+        let refreshed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let stopped = try XCTUnwrap(refreshed.first)
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: stopped.id, expectedRevision: stopped.revision))
         XCTAssertEqual(plan.state, .ready)
         try await fixture.receiver.applyApplicationUpdate(plan)
 
