@@ -7,6 +7,29 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDamagedCiphertextDoesNotImportAndRetryKeepsTheUnreadCursor() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x14, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x15, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("authenticated history")))
+        let tag = try await first.createTagDefinition(named: "Authenticated", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        await cloud.damageNextDownload()
+        try await second.setSyncEnabled(true)
+        let rejected = await second.syncStatus()
+        let empty = try await second.page(.init())
+        XCTAssertEqual(rejected.phase, .failed(.corruptData))
+        XCTAssertTrue(empty.entries.isEmpty)
+        await second.retrySync()
+        let recovered = try await second.page(.init())
+        XCTAssertEqual(recovered.entries.count, 1)
+        let complete = await second.syncStatus()
+        XCTAssertEqual(complete.phase, .upToDate)
+    }
+
     func testRetryWaitsForProviderDelayBeforeConsultingCloudAgain() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -412,6 +435,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var failsControlCreation = false
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
+    private var damagesDownload = false
 
     func account() throws -> ClipboardSyncAccount {
         reads += 1
@@ -459,6 +483,12 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
+        if damagesDownload {
+            damagesDownload = false
+            var changed = upload.chunks
+            changed[0][0] ^= 1
+            return changed
+        }
         return upload.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount,
@@ -501,6 +531,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     }
     func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
+    func damageNextDownload() { damagesDownload = true }
     func failNextControlCreation() { failsControlCreation = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
