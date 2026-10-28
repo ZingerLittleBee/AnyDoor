@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 struct ClipboardSyncPreservedFileSource: Codable, Sendable {
-    let location: ClipboardLinkedLocationSource
+    var location: ClipboardLinkedLocationSource
     let unpublished: Bool
     let capturedAt: Double
     let lastCapturedAt: Double
@@ -61,16 +61,23 @@ extension ClipboardHistoryModule {
     /// The durable source snapshot survives member cascades and does not require
     /// cloud/key access or implicitly enable synchronization after restart.
     func resumeSyncFilePreservations() async throws {
+        try await recoverLocalLinkedFileApplications()
         let epoch = storeEpoch
         let rows = try linkedRead { try Row.fetchAll($0, sql: "SELECT * FROM clipboard_sync_file_preservations WHERE completed = 0 ORDER BY id") }
         for row in rows {
             let id: String = row["id"]
-            let source = try JSONDecoder().decode(ClipboardSyncPreservedFileSource.self, from: row["source"])
+            var source = try JSONDecoder().decode(ClipboardSyncPreservedFileSource.self, from: row["source"])
+            if source.location.hasPendingApplication, let current = try linkedRead({ try Row.fetchOne($0,
+                sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ? AND account_id = ? AND epoch = ?",
+                arguments: [source.location.id.uuidString, row["account_id"] as String, row["epoch"] as String]) }) {
+                source.location = try Self.linkedLocationSource(current)
+            }
+            let frozenSource = source
             let destination = syncWorkingRoot.appendingPathComponent("Preserved Files", isDirectory: true)
                 .appendingPathComponent(id, isDirectory: true).appendingPathComponent(source.location.url.lastPathComponent)
             let work = Task.detached(priority: .utility) { () -> ClipboardLinkedFileProof? in
-                let proof = try ClipboardLinkedIdentityResolution.inspect(source.location)
-                guard source.unpublished || proof.digest != source.location.baseDigest else { return nil }
+                let proof = try ClipboardLinkedIdentityResolution.inspect(frozenSource.location)
+                guard frozenSource.unpublished || proof.digest != frozenSource.location.baseDigest else { return nil }
                 return try ClipboardLinkedFileIO.preserveIndependent(proof, at: destination)
             }
             let proof: ClipboardLinkedFileProof?

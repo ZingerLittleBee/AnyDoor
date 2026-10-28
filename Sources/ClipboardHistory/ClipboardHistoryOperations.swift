@@ -68,6 +68,7 @@ extension ClipboardHistoryModule {
         if mustWaitForWriteTurn, try resolvesFileReferences(request) {
             try await waitForWriteTurn()
         }
+        try await recoverLocalLinkedFileApplications(entryID: request.entryID)
         return try materialize(request, in: requiredDatabase())
     }
 

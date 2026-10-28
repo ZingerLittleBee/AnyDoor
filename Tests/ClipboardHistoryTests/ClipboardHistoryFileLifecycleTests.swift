@@ -6,6 +6,33 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFileDisableRecoversCompletedLocalSwapWithoutCloudReactivation() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        let remote = Data("a verified remote file already physically installed".utf8)
+        try remote.write(to: fixture.original)
+        try await eventually {
+            await fixture.receiver.retrySync()
+            return (try? Data(contentsOf: working.url)) == remote
+        }
+
+        try await fixture.receiver.setSyncEnabled(false)
+
+        let materialized = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing retained swapped file") }
+        XCTAssertEqual(file.currentURL.resolvingSymlinksInPath(), working.url.resolvingSymlinksInPath())
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), remote)
+        let disabled = await fixture.receiver.syncStatus()
+        XCTAssertFalse(disabled.isEnabled)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        _ = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        let reopenedStatus = await reopened.syncStatus()
+        XCTAssertFalse(reopenedStatus.isEnabled)
+    }
+
+    @MainActor
     func testFileDeletionPreservesUnobservedOfflineWorkOnceWithoutRepublishing() async throws {
         let fixture = try await makeLinkedFixture()
         let page = try await fixture.receiver.page(.init())

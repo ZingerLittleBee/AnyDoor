@@ -120,6 +120,7 @@ extension ClipboardHistoryModule {
         pending?.cancel()
         await syncServices?.transport.cancel()
         await pending?.value
+        if availability == .ready { try? await recoverLocalLinkedFileApplications() }
         return generation
     }
 
@@ -352,21 +353,37 @@ extension ClipboardHistoryModule {
                 // not need another full backfill scan for every uploaded record.
                 let revision = try syncWrite { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
+                    try await prepareSyncFileRejoins(account: account, control: control, key: key, generation: generation)
                     try stageSyncBackfill(account: account, control: control, key: key)
                     stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
                 }
-                if let upload = try nextSyncUpload(account: account, control: control) {
+                let ordinary = try nextSyncUpload(account: account, control: control)
+                let restoration = ordinary == nil ? try nextSyncFileRestoration(account: account, control: control) : nil
+                if let upload = ordinary ?? restoration {
+                    let restoring = restoration != nil
                     do {
                         try await admitSync(generation, account: account, services: services)
-                        guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
-                            arguments: [upload.record.recordID]) ?? false }) else { continue }
+                        guard try syncWrite({ database in
+                            if restoring {
+                                guard try syncFileRestorationIsPending(upload.record, account: account, control: control, in: database) else { return false }
+                                try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 0 WHERE account_id = ? AND epoch = ? AND record_id = ?",
+                                    arguments: [account.identifier, control.epoch.uuidString, upload.record.recordID])
+                                return true
+                            }
+                            return try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
+                                arguments: [upload.record.recordID]) ?? false
+                        }) else { continue }
                         let committed: ClipboardSyncControl
                         switch upload {
                         case .inline(let value):
                             committed = try await services.transport.commit(value, for: account, control: control)
                         case .file(let value):
                             committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
-                                try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                                if restoring {
+                                    try await self.recordSyncFileRestorationProgress(bytes, record: value.record, account: account, generation: generation)
+                                } else {
+                                    try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                                }
                             }
                         }
                         try await admitSync(generation, account: account, services: services)
@@ -378,9 +395,13 @@ extension ClipboardHistoryModule {
                         _ = try await writableDatabase()
                         try admitSync(generation)
                         try syncWrite { database in
-                            try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
-                                arguments: [upload.record.recordID])
-                            try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                            if restoring {
+                                try recordSyncFileRestorationAcknowledged(upload.record, account: account, in: database)
+                            } else {
+                                try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
+                                    arguments: [upload.record.recordID])
+                                try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                            }
                             try saveSyncAccount(state, in: database)
                             if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
                         }
