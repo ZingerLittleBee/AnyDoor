@@ -8,6 +8,91 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testUntaggedRetainedEditsStayLocalWhileAnotherCollectionContinuesSyncing() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xB6, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xB7, time: 2_000)
+        let withdrawn = try await first.capture(.init(source: .unknown, content: .text("original local note")))
+        let active = try await first.capture(.init(source: .unknown, content: .text("still shared note")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: withdrawn.entryID).definition
+        let keep = try await first.createTagDefinition(named: "Keep", assigningTo: active.entryID).definition
+        let privateTag = try await first.createTagDefinition(named: "Private", assigningTo: withdrawn.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(keep.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        _ = try await first.apply(.setTags(withdrawn.entryID, [privateTag.id]))
+        _ = try await first.apply(.editText(withdrawn.entryID, "private edit after untagging"))
+        await first.retrySync()
+        await second.retrySync()
+        let publicOperations = await cloud.publishedUploads()
+        XCTAssertEqual(publicOperations.filter { $0.record.kind == .entry }.count, 2,
+            "The private edit must never be published, even if cleanup would later purge it")
+        let remaining = await cloud.currentUploads()
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        let localPage = try await first.page(.init()).entries
+        let peerPage = try await second.page(.init()).entries
+        XCTAssertEqual(localPage.first { $0.id == withdrawn.entryID }?.previewText, "private edit after untagging")
+        XCTAssertEqual(peerPage.first { $0.id == withdrawn.entryID }?.previewText, "original local note")
+        XCTAssertNotNil(peerPage.first { $0.id == active.entryID })
+    }
+
+    func testWithdrawalMarkerSurvivesRestartWithoutBreakingPeerSynchronization() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = makeModule(services: services, keyByte: 0xB4, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0xB5, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("retained through restart")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        try await first.closeStoreForTesting()
+        let restarted = makeModule(services: services, keyByte: 0xB4, time: 3_000, root: root)
+        await restarted.resumeSync()
+        await second.retrySync()
+        let restartedStatus = await restarted.syncStatus()
+        let peerStatus = await second.syncStatus()
+        XCTAssertEqual(restartedStatus.phase, .upToDate)
+        XCTAssertEqual(peerStatus.phase, .upToDate)
+        let peerTags = try await second.syncTags()
+        XCTAssertFalse(try XCTUnwrap(peerTags.first { $0.id == tag.id }).isSelected)
+        let peerEntries = try await second.page(.init()).entries
+        XCTAssertEqual(peerEntries.map(\.id), [capture.entryID])
+        let uploads = await cloud.currentUploads()
+        XCTAssertTrue(uploads.filter { $0.record.kind == .entry }.isEmpty)
+    }
+
+    func testFinalTagDeselectionWithdrawsCloudContentButRetainsDownloadedCopies() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xB1, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xB2, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("retained after withdrawal")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let privateTag = try await second.createTagDefinition(named: "Private", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        await second.retrySync()
+        let firstPage = try await first.page(.init()).entries
+        let secondPage = try await second.page(.init()).entries
+        XCTAssertEqual(firstPage.map(\.id), [capture.entryID])
+        XCTAssertEqual(secondPage.map(\.id), [capture.entryID])
+        XCTAssertEqual(Set(secondPage[0].tagIDs), [tag.id, privateTag.id])
+        let remaining = await cloud.currentUploads()
+        XCTAssertTrue(remaining.filter { $0.record.kind == .entry }.isEmpty,
+            "Withdrawal must remove cloud content, not merely hide it")
+        let fresh = makeModule(services: services, keyByte: 0xB3, time: 3_000)
+        try await fresh.setSyncEnabled(true)
+        let freshPage = try await fresh.page(.init())
+        XCTAssertTrue(freshPage.entries.isEmpty)
+    }
+
     func testCloudResetStillCompletesWhenLocalHistoryWasAlreadyDeleted() async throws {
         let source = try await recoverySource()
         let page = try await source.sender.page(.init())
@@ -2904,6 +2989,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func switchAccount(to owner: String) {
         currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
     }
+    func publishedUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
     func currentUploads() -> [ClipboardSyncUpload] { (records[currentAccount.identifier] ?? []).filter { !purgedRecords.contains($0.record.recordID) } }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }

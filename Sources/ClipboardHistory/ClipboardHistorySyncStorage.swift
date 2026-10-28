@@ -103,6 +103,8 @@ extension ClipboardHistoryModule {
         let pool = try requiredDatabase()
         try pool.write { database in
             try stageSyncDeletions(account: account, control: control, key: key, in: database)
+            try recordSyncWithdrawals(in: database)
+            try stageSyncWithdrawals(account: account, control: control, key: key, in: database)
             try stageSyncTagMerges(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
@@ -215,12 +217,16 @@ extension ClipboardHistoryModule {
                 try Self.rememberSyncContentRecord(record, subjectID: subject, accountID: account.identifier, in: database)
             }
             if let subject = content.entrySubjectID,
-               try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+               try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+                || Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
                 try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                     arguments: [account.identifier, record.epoch.uuidString, record.recordID])
                 return false
             }
             switch content {
+            case .withdrawal(let value):
+                try saveSyncWithdrawal(value, accountID: account.identifier, epoch: record.epoch.uuidString,
+                    recordID: record.recordID, pending: false, in: database)
             case .deletion(let deletion):
                 try receiveSyncDeletion(deletion, record: record, account: account, in: database)
             case .tag(let tag):

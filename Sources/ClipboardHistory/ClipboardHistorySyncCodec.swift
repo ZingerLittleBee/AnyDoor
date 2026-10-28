@@ -19,6 +19,7 @@ struct ClipboardSyncTextContent: Codable, Equatable, Sendable {
 
 enum ClipboardSyncContent: Codable, Equatable, Sendable {
     case deletion(ClipboardSyncDeletion)
+    case withdrawal(ClipboardSyncWithdrawal)
     case tag(ClipboardSyncTagContent)
     case text(ClipboardSyncTextContent)
     case textEdit(ClipboardSyncTextEditContent)
@@ -43,7 +44,7 @@ enum ClipboardSyncCodec {
         control: ClipboardSyncControl, key: Data, operationID: UUID = UUID()
     ) throws -> ClipboardSyncUpload {
         let kind: ClipboardSyncRecordKind = switch content {
-        case .tag, .tagMembership, .tagState, .tagMerge: .tag
+        case .tag, .tagMembership, .tagState, .tagMerge, .withdrawal: .tag
         case .text, .textEdit, .entry, .metadata, .deletion: .entry
         case .fileBody: .fileBody
         }
@@ -86,7 +87,7 @@ enum ClipboardSyncCodec {
         do {
             let content = try JSONDecoder().decode(ClipboardSyncContent.self, from: plaintext)
             switch (record.kind, content) {
-            case (.entry, .deletion), (.tag, .tag), (.tag, .tagMembership), (.tag, .tagState), (.tag, .tagMerge), (.entry, .text), (.entry, .textEdit), (.entry, .entry), (.entry, .metadata), (.fileBody, .fileBody): return content
+            case (.tag, .withdrawal), (.entry, .deletion), (.tag, .tag), (.tag, .tagMembership), (.tag, .tagState), (.tag, .tagMerge), (.entry, .text), (.entry, .textEdit), (.entry, .entry), (.entry, .metadata), (.fileBody, .fileBody): return content
             default: throw ClipboardSyncServiceError.corruptData
             }
         } catch { throw ClipboardSyncServiceError.corruptData }

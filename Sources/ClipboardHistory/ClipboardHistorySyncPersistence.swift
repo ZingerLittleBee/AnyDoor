@@ -59,6 +59,10 @@ extension ClipboardHistoryModule {
         """
         NOT EXISTS (SELECT 1 FROM clipboard_sync_preserved_edits WHERE local_entry_id = entry.id)
         AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
+            JOIN clipboard_sync_withdrawals AS withdrawal ON withdrawal.account_id = shared.account_id
+                AND withdrawal.epoch = shared.epoch AND withdrawal.shared_id = shared.shared_id
+            WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID) AND withdrawal.withdrawn = 1)
+        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
             JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = shared.account_id
                 AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id
             WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID))

@@ -29,11 +29,15 @@ extension ClipboardHistoryModule {
         try requiredDatabase().read { database in
             let data = try Data.fetchOne(database, sql: """
                 SELECT content.metadata FROM clipboard_sync_subject_records AS content
-                JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = content.account_id
+                LEFT JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = content.account_id
                     AND deleted.epoch = content.epoch AND deleted.shared_id = content.shared_id
+                LEFT JOIN clipboard_sync_withdrawals AS withdrawal ON withdrawal.account_id = content.account_id
+                    AND withdrawal.epoch = content.epoch AND withdrawal.shared_id = content.shared_id
                 WHERE content.account_id = ? AND content.epoch = ? AND content.purged = 0
-                  AND (deleted.origin = 'remote' OR EXISTS (SELECT 1 FROM clipboard_sync_outbox AS deletion
-                    WHERE deletion.record_id = deleted.record_id AND deletion.acknowledged = 1))
+                  AND ((deleted.shared_id IS NOT NULL AND (deleted.origin = 'remote' OR EXISTS (
+                    SELECT 1 FROM clipboard_sync_outbox AS marker WHERE marker.record_id = deleted.record_id AND marker.acknowledged = 1)))
+                    OR (withdrawal.withdrawn = 1 AND (withdrawal.origin = 'remote' OR EXISTS (
+                    SELECT 1 FROM clipboard_sync_outbox AS marker WHERE marker.record_id = withdrawal.record_id AND marker.acknowledged = 1))))
                 ORDER BY content.record_id LIMIT 1
                 """, arguments: [account.identifier, control.epoch.uuidString])
             return try data.map { try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: $0) }
