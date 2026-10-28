@@ -137,7 +137,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
+    func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
                                  account: ClipboardSyncAccount, in database: Database) throws {
         try database.execute(sql: """
             INSERT INTO clipboard_sync_outbox(record_id, account_id, epoch, subject_id, kind, metadata)
@@ -187,6 +187,8 @@ extension ClipboardHistoryModule {
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
             case .text(let text):
                 try importSyncText(text, account: account, record: record, in: database)
+            case .entry, .fileBody:
+                throw ClipboardSyncServiceError.unsupportedVersion
             }
             try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])

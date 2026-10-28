@@ -276,6 +276,7 @@ extension ClipboardHistoryModule {
         for entryID: ClipboardHistoryEntryID,
         from database: DatabasePool
     ) throws -> [Int: ClipboardHistoryMaterializedFileReference] {
+        let synchronized = try materializeSyncFileReferences(for: entryID, in: database)
         let storedID = entryID.value.uuidString.lowercased()
         let rows = try database.read { database in
             try Row.fetchAll(
@@ -291,7 +292,7 @@ extension ClipboardHistoryModule {
                 arguments: [storedID]
             )
         }
-        guard !rows.isEmpty else { return [:] }
+        guard !rows.isEmpty else { return synchronized }
         let ownedCount = rows.count {
             ($0["reference_provenance"] as String) == "legacyOwned"
         }
@@ -419,7 +420,7 @@ extension ClipboardHistoryModule {
             }
             try Self.bumpSearchIndexGeneration(in: database)
         }
-        return Dictionary(
+        let originals = Dictionary(
             uniqueKeysWithValues: resolved.map { file in
                 (
                     file.itemIndex,
@@ -431,6 +432,7 @@ extension ClipboardHistoryModule {
                 )
             }
         )
+        return originals.merging(synchronized) { _, workingCopy in workingCopy }
     }
 
     public func performMaintenance(

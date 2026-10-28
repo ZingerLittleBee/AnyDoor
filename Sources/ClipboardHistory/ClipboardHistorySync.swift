@@ -203,6 +203,9 @@ extension ClipboardHistoryModule {
                 let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
                 try await admitSync(generation, account: account, services: services)
                 for record in page.records where record.epoch == control.epoch {
+                    // A body is discovered without downloading it. Its encrypted
+                    // entry descriptor authorizes a separate version download.
+                    if record.kind == .fileBody { continue }
                     guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
                     let chunks = try await services.transport.download(record, for: account)
                     try await admitSync(generation, account: account, services: services)
@@ -215,6 +218,9 @@ extension ClipboardHistoryModule {
                 try syncWrite { try saveSyncAccount(state, in: $0) }
                 more = page.hasMore
             }
+            try await receivePendingSyncFiles(account: account, control: control, key: key,
+                services: services, generation: generation)
+            try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
             try stageSyncBackfill(account: account, control: control, key: key)
@@ -278,13 +284,13 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func admitSync(_ generation: UInt64) throws {
+    func admitSync(_ generation: UInt64) throws {
         try Task.checkCancellation()
         guard generation == syncGeneration, !syncSuspended, availability == .ready,
               try requiredDatabase().read({ try syncSettings(in: $0).enabled }) else { throw CancellationError() }
     }
 
-    private func admitSync(_ generation: UInt64, account: ClipboardSyncAccount, services: ClipboardSyncServices) async throws {
+    func admitSync(_ generation: UInt64, account: ClipboardSyncAccount, services: ClipboardSyncServices) async throws {
         try admitSync(generation)
         guard try await services.transport.account() == account else { throw ClipboardSyncServiceError.accountChanged }
         try await waitForWriteTurn()
