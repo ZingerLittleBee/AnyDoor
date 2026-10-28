@@ -72,3 +72,20 @@ Use Conventional Commits without attribution trailers or email addresses. See
 Use relevant skills available in the current session; the skill catalog is the source of truth for
 installed skill names. Verification commands and their scope live in [development](docs/development.md)
 and [testing](docs/testing/README.md).
+
+## Agent skills
+
+### Issue tracker
+
+Specs and tickets use GitHub Issues. Before tracker operations, read
+[the issue tracker guide](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Before assigning a triage status, use the five canonical mappings in
+[the triage label guide](docs/agents/triage-labels.md).
+
+### Domain docs
+
+This is a single-context repository. Before introducing domain terms or changing
+architecture, read [the domain documentation guide](docs/agents/domain.md).
