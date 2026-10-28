@@ -1059,7 +1059,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         panel.title = L(.clipboardLinkedFileAssociate)
         panel.message = L(.clipboardLinkedFileAssociateMessage)
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.resolvesAliases = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -1075,7 +1075,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         panel.title = L(.clipboardLinkedFileReassociate)
         panel.message = L(.clipboardLinkedFileReassociateMessage)
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.resolvesAliases = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
