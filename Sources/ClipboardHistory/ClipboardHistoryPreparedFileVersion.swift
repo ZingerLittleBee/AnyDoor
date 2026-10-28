@@ -33,6 +33,13 @@ extension ClipboardHistoryModule {
     func storePreparedFileVersion(_ prepared: ClipboardSyncPreparedFileVersion,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, in database: Database) throws {
         guard let body = prepared.descriptor.body else { throw ClipboardSyncServiceError.corruptData }
+        if try Bool.fetchOne(database, sql: """
+            SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+            """, arguments: [account.identifier, control.epoch.uuidString, prepared.descriptor.objectID.uuidString, prepared.descriptor.versionID.uuidString]) == true {
+            try storeSyncFileDescriptor(prepared.descriptor, account: account, epoch: control.epoch,
+                localPath: nil, bookmark: nil, identity: nil, transferState: "pending", parents: prepared.parents, in: database)
+            return
+        }
         try storeSyncFileUpload(.init(record: body, directory: prepared.uploadDirectory),
             objectID: prepared.descriptor.objectID, account: account, in: database)
         try storeSyncFileDescriptor(prepared.descriptor, account: account, epoch: control.epoch,

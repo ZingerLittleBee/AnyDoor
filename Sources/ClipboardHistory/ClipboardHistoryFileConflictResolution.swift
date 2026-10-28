@@ -13,6 +13,7 @@ struct ClipboardSyncFileResolutionJournal: Codable, Sendable {
     let resultID: UUID
     let publicationID: UUID
     let branches: [ClipboardSyncFileResolutionBranch]
+    let inheritedPlans: [UUID]
     var prepared: [ClipboardSyncPreparedFileVersion]
 }
 
@@ -56,7 +57,8 @@ extension ClipboardHistoryModule {
             try Self.validateConflictBasis(basis, snapshot: snapshot)
             journal = .init(choice: choice, resultID: UUID(), publicationID: UUID(),
                 branches: snapshot.locations.filter { $0.savedDigest != nil && $0.savedDigest != $0.baseDigest }
-                    .map { .init(locationID: $0.id, versionID: UUID(), publicationID: UUID()) }, prepared: [])
+                    .map { .init(locationID: $0.id, versionID: UUID(), publicationID: UUID()) },
+                inheritedPlans: basis.retainedPlanIDs, prepared: basis.versions.compactMap(\.prepared))
             try syncWrite { database in
                 try Self.validateConflictBasis(try fileConflictBasis(entryID: entryID, objectID: snapshot.objectID, in: database), snapshot: snapshot)
                 try database.execute(sql: """
@@ -113,7 +115,9 @@ extension ClipboardHistoryModule {
             if !journal.prepared.contains(where: { $0.descriptor.versionID == journal.resultID }) {
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
                 try linkedRead { try Self.validateConflictBasis(fileConflictBasis(entryID: entryID, objectID: snapshot.objectID, in: $0), snapshot: snapshot) }
-                let nodes = basis.nodes + journal.prepared.map { ClipboardSyncVersionNode(id: $0.descriptor.versionID, parents: Set($0.parents)) }
+                let known = Set(basis.nodes.map(\.id))
+                let nodes = basis.nodes + journal.prepared.filter { !known.contains($0.descriptor.versionID) }
+                    .map { ClipboardSyncVersionNode(id: $0.descriptor.versionID, parents: Set($0.parents)) }
                 let parents = ClipboardSyncVersionGraph.heads(nodes).sorted { $0.uuidString < $1.uuidString }
                 let prepared = try await prepareFileVersion(sourceURL: selected.url, objectID: snapshot.objectID,
                     versionID: journal.resultID, publicationID: journal.publicationID, parents: parents,
@@ -173,6 +177,9 @@ extension ClipboardHistoryModule {
                             same ? journal.resultID.uuidString : nil, location.id.uuidString])
                 }
                 try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET phase = 'staged' WHERE plan_id = ?", arguments: [planID.uuidString])
+                for inherited in journal.inheritedPlans {
+                    try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET phase = 'superseded' WHERE plan_id = ?", arguments: [inherited.uuidString])
+                }
                 try Self.bumpHistoryRevision(in: database)
             }
             try faultInjector.check(.fileConflictAfterStaging)
@@ -252,6 +259,9 @@ extension ClipboardHistoryModule {
                     """, arguments: [account.identifier, control.epoch.uuidString, objectID.uuidString, journal.resultID.uuidString]) == true else { return }
                 try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET phase = 'complete' WHERE plan_id = ?", arguments: [row["plan_id"] as String])
                 try database.execute(sql: "DELETE FROM clipboard_sync_file_conflict_pins WHERE plan_id = ?", arguments: [row["plan_id"] as String])
+                for inherited in journal.inheritedPlans {
+                    try database.execute(sql: "DELETE FROM clipboard_sync_file_conflict_pins WHERE plan_id = ?", arguments: [inherited.uuidString])
+                }
             }
         }
     }

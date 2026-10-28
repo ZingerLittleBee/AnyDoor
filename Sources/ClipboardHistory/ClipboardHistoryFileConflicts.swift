@@ -6,6 +6,8 @@ struct ClipboardSyncConflictVersion: Sendable {
     let parents: [UUID]
     let path: String?
     let identity: Data?
+    var retainedPlanID: UUID? = nil
+    var prepared: ClipboardSyncPreparedFileVersion? = nil
 }
 
 struct ClipboardSyncFileConflictBasis: Sendable {
@@ -13,6 +15,7 @@ struct ClipboardSyncFileConflictBasis: Sendable {
     let control: ClipboardSyncControl
     let versions: [ClipboardSyncConflictVersion]
     let locations: [ClipboardLinkedLocationSource]
+    let retainedPlanIDs: [UUID]
 
     var nodes: [ClipboardSyncVersionNode] { versions.map { .init(id: $0.descriptor.versionID, parents: Set($0.parents)) } }
     var heads: [UUID] { ClipboardSyncVersionGraph.heads(nodes).sorted { $0.uuidString < $1.uuidString } }
@@ -116,16 +119,30 @@ extension ClipboardHistoryModule {
                     AND \(SQL(sql: Self.liveSyncFileMember))
                     AND (\(Self.syncEntryPublicationAuthority(accountID: context.account.identifier))))
                 """)) == true else { throw ClipboardHistoryModuleError.operationUnavailable }
-        let versions = try Row.fetchAll(database, sql: """
+        var versions = try Row.fetchAll(database, sql: """
             SELECT descriptor, parents, local_path, local_identity FROM clipboard_sync_file_versions
             WHERE account_id = ? AND epoch = ? AND object_id = ? ORDER BY version_id
             """, arguments: [context.account.identifier, context.control.epoch.uuidString, objectID.uuidString]).map { row in
                 ClipboardSyncConflictVersion(descriptor: try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"]),
                     parents: try JSONDecoder().decode([UUID].self, from: row["parents"]), path: row["local_path"], identity: row["local_identity"])
             }
+        let retained = try Row.fetchAll(database, sql: """
+            SELECT plan_id, journal FROM clipboard_sync_file_resolutions
+            WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'needsReview' ORDER BY plan_id
+            """, arguments: [context.account.identifier, context.control.epoch.uuidString, objectID.uuidString])
+        for row in retained {
+            guard let id = UUID(uuidString: row["plan_id"]) else { throw ClipboardSyncServiceError.corruptData }
+            let journal = try JSONDecoder().decode(ClipboardSyncFileResolutionJournal.self, from: row["journal"])
+            for prepared in journal.prepared where prepared.descriptor.versionID != journal.resultID
+                && !versions.contains(where: { $0.descriptor.versionID == prepared.descriptor.versionID }) {
+                versions.append(.init(descriptor: prepared.descriptor, parents: prepared.parents,
+                    path: prepared.sourceURL.path, identity: prepared.identity, retainedPlanID: id, prepared: prepared))
+            }
+        }
         let locations = try Self.linkedLocationSources(accountID: context.account.identifier, epoch: context.control.epoch, in: database)
             .filter { $0.objectID == objectID }
-        return .init(account: context.account, control: context.control, versions: versions, locations: locations)
+        return .init(account: context.account, control: context.control, versions: versions, locations: locations,
+            retainedPlanIDs: retained.compactMap { UUID(uuidString: $0["plan_id"]) })
     }
 
     static func conflictLocationFactsMatch(_ expected: [ClipboardSyncFileConflictLocation], sources: [ClipboardLinkedLocationSource]) -> Bool {
@@ -150,6 +167,7 @@ extension ClipboardHistoryModule {
         if ClipboardSyncVersionGraph.heads(nodes).count > 1 || !nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) { return true }
         return try Bool.fetchOne(database, sql: """
             SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations WHERE account_id = ? AND epoch = ? AND object_id = ? AND state = 'conflict')
-            """, arguments: [accountID, epoch, objectID.uuidString]) ?? false
+              OR EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'needsReview')
+            """, arguments: [accountID, epoch, objectID.uuidString, accountID, epoch, objectID.uuidString]) ?? false
     }
 }
