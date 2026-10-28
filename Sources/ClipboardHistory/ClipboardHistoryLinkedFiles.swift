@@ -48,6 +48,7 @@ extension ClipboardHistoryModule {
                 baseVersionID: base.descriptor.versionID, url: proof.url, kind: .associated, state: state)
         }
         publishMutation()
+        if !syncSuspended { await retrySync() }
         return result
     }
 
@@ -147,7 +148,7 @@ extension ClipboardHistoryModule {
         return (accountID, row["epoch"], descriptor)
     }
 
-    private func linkedRead<Value>(_ body: (Database) throws -> Value) throws -> Value {
+    func linkedRead<Value>(_ body: (Database) throws -> Value) throws -> Value {
         try requiredDatabase().read(body)
     }
 }

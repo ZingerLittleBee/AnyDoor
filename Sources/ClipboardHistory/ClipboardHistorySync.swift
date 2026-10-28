@@ -86,6 +86,7 @@ extension ClipboardHistoryModule {
 
     private func stopSyncTasks() async -> UInt64 {
         syncSuspended = true
+        stopLinkedFileObservers()
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
         let generation = syncGeneration
@@ -241,10 +242,13 @@ extension ClipboardHistoryModule {
                 try syncWrite { try saveSyncAccount(state, in: $0) }
                 more = page.hasMore
             }
+            try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await reconcileLinkedFileObservations(account: account, control: control, generation: generation)
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try refreshLinkedFileObservers(account: account, control: control, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
             try stageSyncBackfill(account: account, control: control, key: key)
@@ -310,6 +314,7 @@ extension ClipboardHistoryModule {
             }
             if phase == .failed(.accountChanged) {
                 syncSuspended = true
+                stopLinkedFileObservers()
                 syncAccountBindingGeneration = nil
                 syncPollTask?.cancel()
                 syncPollTask = nil
@@ -320,6 +325,7 @@ extension ClipboardHistoryModule {
         } catch {
             guard generation == syncGeneration, !syncSuspended else { return }
             syncSuspended = true
+            stopLinkedFileObservers()
             setSyncPhase(.failed(.localStorage))
         }
     }

@@ -7,6 +7,47 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testDisabledLocationDefersObservationAndReconcilesSavedBytesAfterRestart() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        try await fixture.sender.setSyncEnabled(false)
+        let saved = Data("saved while this device was disabled".utf8)
+        try saved.write(to: fixture.original)
+        try await Task.sleep(for: .milliseconds(700))
+        let disabled = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(disabled.first?.state, .current)
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+
+        try await reopened.setSyncEnabled(true)
+
+        let restored = try await reopened.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(restored.first?.id, disabled.first?.id)
+        XCTAssertTrue(restored.first?.state == .localChanges || restored.first?.state == .pendingUpload)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), saved)
+    }
+
+    @MainActor
+    func testSavedFileChangeIsObservedWithoutRecaptureOrManualRefresh() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let changed = Data("saved after association".utf8)
+
+        try changed.write(to: fixture.original)
+
+        let deadline = Date().addingTimeInterval(5)
+        var observed: ClipboardHistoryLinkedFileLocationState?
+        repeat {
+            observed = try await fixture.sender.linkedFileLocations(for: fixture.entryID).first?.state
+            if observed == .localChanges || observed == .pendingUpload { break }
+            try await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        XCTAssertTrue(observed == .localChanges || observed == .pendingUpload,
+            "A real filesystem save must be observed without recapture or manual sync")
+        XCTAssertEqual(try Data(contentsOf: fixture.original), changed)
+    }
+
+    @MainActor
     func testExplicitAssociationPreservesChosenContentsAndIndependentExportsStayUnlinked() async throws {
         let fixture = try await makeLinkedFixture()
         let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
@@ -115,6 +156,8 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
+    private var commitsFail = false
+    func failCommits(_ fail: Bool) { commitsFail = fail }
 
     func account() -> ClipboardSyncAccount { identity }
     func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? { currentControl }
@@ -133,6 +176,7 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
         return content.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        if commitsFail { throw ClipboardSyncServiceError.network(retryAfter: nil) }
         guard let currentControl, account == identity, currentControl.epoch == control.epoch else {
             throw ClipboardSyncServiceError.accountChanged
         }
