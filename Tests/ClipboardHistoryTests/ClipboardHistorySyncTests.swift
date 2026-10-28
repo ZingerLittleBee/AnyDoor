@@ -9,6 +9,48 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testLaterRecognitionResultsSurviveRestartAndReverseDeliveryWithoutReprocessing() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let recognizer = SyncTestRecognizer(results: [.ocr: ["late invoice 9913"], .qr: ["anydoor://late/qr"]], held: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-late-recognition-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x93, time: 1_000, root: root, recognizer: recognizer)
+        let second = makeModule(services: services, keyByte: 0x94, time: 2_000)
+        try await first.setAutomaticImageTextIndexingEnabled(true)
+        let captured = try await first.capture(.init(source: .unknown, content: .bitmap(try makeSyncBitmap(), provenance: .image)))
+        let tag = try await first.createTagDefinition(named: "Images", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncEnabled(false)
+        await recognizer.release()
+        await first.awaitDerivedJobsForTesting()
+        _ = try await first.apply(.setFavorite(captured.entryID, true))
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x93, time: 3_000, root: root)
+        try await reopened.setSyncEnabled(true)
+        await second.retrySync()
+        let ocr = try await second.page(.init(text: "invoice 9913"))
+        let qr = try await second.page(.init(text: "late/qr", facet: .qrCode))
+        XCTAssertEqual(ocr.entries.map(\.id), [captured.entryID])
+        XCTAssertEqual(qr.entries.map(\.id), [captured.entryID])
+        XCTAssertTrue(qr.entries.first?.isFavorite == true)
+        let status = await reopened.syncStatus()
+        XCTAssertEqual(status.uploadedEntryCount, 1)
+        await cloud.reverseDelivery()
+        let receiverRecognizer = SyncTestRecognizer()
+        let third = makeModule(services: services, keyByte: 0x95, time: 4_000, recognizer: receiverRecognizer)
+        try await third.setSyncEnabled(true)
+        let reverseOCR = try await third.page(.init(text: "invoice 9913"))
+        let reverseQR = try await third.page(.init(text: "late/qr", facet: .qrCode))
+        XCTAssertEqual(reverseOCR.entries.map(\.id), [captured.entryID])
+        XCTAssertEqual(reverseQR.entries.map(\.id), [captured.entryID])
+        XCTAssertTrue(reverseQR.entries.first?.isFavorite == true)
+        let calls = await receiverRecognizer.callCount()
+        XCTAssertEqual(calls, 0)
+    }
+
+    @MainActor
     func testCompletedImageRecognitionTransfersAsSearchableResultsWithoutEnablingReceiverRecognition() async throws {
         let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
         let first = makeModule(services: services, keyByte: 0x91, time: 1_000,
@@ -1301,10 +1343,22 @@ final class ClipboardHistorySyncTests: XCTestCase {
 private actor SyncTestRecognizer: ClipboardHistoryVisionRecognizing {
     private var calls = 0
     let results: [ClipboardHistoryDerivedJobKind: [String]]
-    init(results: [ClipboardHistoryDerivedJobKind: [String]] = [:]) { self.results = results }
-    func recognize(_ kind: ClipboardHistoryDerivedJobKind, in bitmaps: [Data]) -> [String] {
+    private var held: Bool
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    init(results: [ClipboardHistoryDerivedJobKind: [String]] = [:], held: Bool = false) {
+        self.results = results
+        self.held = held
+    }
+    func recognize(_ kind: ClipboardHistoryDerivedJobKind, in bitmaps: [Data]) async -> [String] {
         calls += 1
+        if held { await withCheckedContinuation { waiters.append($0) } }
         return results[kind] ?? []
+    }
+    func release() {
+        held = false
+        let pending = waiters
+        waiters = []
+        for waiter in pending { waiter.resume() }
     }
     func callCount() -> Int { calls }
 }

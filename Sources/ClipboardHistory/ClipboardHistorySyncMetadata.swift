@@ -42,15 +42,29 @@ extension ClipboardHistoryModule {
     }
 
     func recordSyncFavoriteChange(_ favorite: Bool, entryID: String, in database: Database) throws {
+        try recordSyncMetadataChange(entryID: entryID, in: database) { _ in .favorite(favorite) }
+    }
+
+    func recordSyncRecognitionChange(_ values: [String], kind: ClipboardHistoryDerivedJobKind,
+                                     entryID: String, in database: Database) throws {
+        try recordSyncMetadataChange(entryID: entryID, in: database) { recordID in
+            .recognition(kind: kind, values: values, basisRecordID: recordID)
+        }
+    }
+
+    private func recordSyncMetadataChange(entryID: String, in database: Database,
+                                          value: (String) -> ClipboardSyncMetadataValue) throws {
         for row in try Row.fetchAll(database, sql: """
-            SELECT account_id, epoch, shared_id FROM clipboard_sync_entries WHERE local_entry_id = ?
+            SELECT account_id, epoch, shared_id, record_id FROM clipboard_sync_entries WHERE local_entry_id = ?
             """, arguments: [entryID]) {
             guard let id = UUID(uuidString: row["shared_id"]) else { throw ClipboardSyncServiceError.corruptData }
             let current = try Int64.fetchOne(database, sql: "SELECT counter FROM clipboard_sync_metadata_clock WHERE id = 1") ?? 0
             guard current < Int64.max - 1 else { throw ClipboardSyncServiceError.localStorage }
+            let value = value(row["record_id"])
+            try validateSyncMetadataValue(value)
             try database.execute(sql: "UPDATE clipboard_sync_metadata_clock SET counter = counter + 1 WHERE id = 1")
             let operation = ClipboardSyncMetadataContent(id: id,
-                revision: .init(counter: current + 1, operationID: UUID().uuidString.lowercased()), value: .favorite(favorite))
+                revision: .init(counter: current + 1, operationID: UUID().uuidString.lowercased()), value: value)
             try saveSyncMetadata(operation, accountID: row["account_id"], epoch: row["epoch"], pending: true, in: database)
         }
     }
