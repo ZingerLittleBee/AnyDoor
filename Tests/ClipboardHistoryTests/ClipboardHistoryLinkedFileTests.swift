@@ -213,7 +213,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
     }
 
     @MainActor
-    private func eventually(_ condition: () async throws -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+    func eventually(_ condition: () async throws -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(6)
         repeat {
             if try await condition() { return }
@@ -317,7 +317,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
     }
 
     @MainActor
-    private func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
+    func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         entryID: ClipboardHistoryEntryID, original: URL, root: URL, receiverRoot: URL,
         services: ClipboardSyncServices, cloud: LinkedFileCloud
@@ -345,7 +345,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         return (sender, receiver, capture.entryID, original, root, receiverRoot, services, cloud)
     }
 
-    private func makeLinkedModule(root: URL, services: ClipboardSyncServices, key: UInt8,
+    func makeLinkedModule(root: URL, services: ClipboardSyncServices, key: UInt8,
         faultInjector: ClipboardHistoryFaultInjector = .init()) -> ClipboardHistoryModule {
         trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
             keyStore: LinkedFileLocalKey(byte: key), faultInjector: faultInjector, syncServices: services))
@@ -372,7 +372,7 @@ private actor LinkedFileKeys: ClipboardSyncKeyStoring {
     }
 }
 
-private actor LinkedFileCloud: ClipboardSyncTransport {
+actor LinkedFileCloud: ClipboardSyncTransport {
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
