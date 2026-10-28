@@ -390,11 +390,18 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private var heldDownload: CheckedContinuation<Void, Never>?
     private var cancellations = 0
     private var fileDownloads: [UUID] = []
+    private var partialFileRecords: [String: ClipboardSyncRemoteRecord] = [:]
+    func partialFileRecordIDs() -> Set<String> { Set(partialFileRecords.keys) }
     func downloadedFileVersions() -> [UUID] { fileDownloads }
     func uploadedRecords() -> [ClipboardSyncUpload] { uploads }
     func visibleRecords() -> [ClipboardSyncRemoteRecord] {
         var seen: Set<String> = []
         return uploads.filter { !purgedRecords.contains($0.record.recordID) && seen.insert($0.record.recordID).inserted }.map(\.record)
+    }
+    func replayLateRecords(_ records: [ClipboardSyncUpload]) {
+        for record in records { purgedRecords.remove(record.record.recordID) }
+        uploads.append(contentsOf: records)
+        if let currentControl { self.currentControl = advanced(currentControl) }
     }
     func moveLastTwoRecordsToFront() {
         guard uploads.count >= 2 else { return }
@@ -452,6 +459,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         guard let currentControl, account == identity, currentControl.epoch == control.epoch else { throw ClipboardSyncServiceError.accountChanged }
         guard currentControl.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }
         purgedRecords.insert(record.recordID)
+        partialFileRecords.removeValue(forKey: record.recordID)
         let updated = advanced(currentControl)
         self.currentControl = updated
         return updated
@@ -459,6 +467,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     func cancellationCount() -> Int { cancellations }
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
         control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        partialFileRecords[upload.record.recordID] = upload.record
         var chunks: [Data] = []
         var bytes: Int64 = 0
         for index in 0..<upload.record.chunkCount {
@@ -467,7 +476,9 @@ actor LinkedFileCloud: ClipboardSyncTransport {
             bytes += Int64(chunk.count)
             try await progress(bytes)
         }
-        return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
+        let result = try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
+        partialFileRecords.removeValue(forKey: upload.record.recordID)
+        return result
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
         fileDownloads.append(record.operationID)

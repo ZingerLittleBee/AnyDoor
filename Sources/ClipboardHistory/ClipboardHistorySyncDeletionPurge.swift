@@ -15,6 +15,7 @@ extension ClipboardHistoryModule {
     /// the deletion journal existed. No encrypted asset is downloaded here.
     func rememberDiscoveredSyncRecord(_ record: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount) throws {
         try syncWrite { database in
+            try Self.rememberDiscoveredSyncFileRecord(record, accountID: account.identifier, in: database)
             guard let subject = try String.fetchOne(database, sql: """
                 SELECT shared_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND record_id = ?
                 UNION SELECT subject_id FROM clipboard_sync_versions WHERE account_id = ? AND epoch = ? AND record_id = ?

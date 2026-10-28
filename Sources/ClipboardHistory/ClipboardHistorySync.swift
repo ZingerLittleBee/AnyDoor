@@ -187,10 +187,10 @@ extension ClipboardHistoryModule {
             for record in page.records where record.epoch == control.epoch {
                 // A body is discovered without downloading it. Its encrypted
                 // entry descriptor authorizes a separate version download.
-                if record.kind == .fileBody { continue }
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try rememberDiscoveredSyncRecord(record, account: account)
+                if record.kind == .fileBody { continue }
                 guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
                 let chunks: [Data]
                 do { chunks = try await services.transport.download(record, for: account) }
@@ -370,8 +370,11 @@ extension ClipboardHistoryModule {
                                     arguments: [account.identifier, control.epoch.uuidString, upload.record.recordID])
                                 return true
                             }
-                            return try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
-                                arguments: [upload.record.recordID]) ?? false
+                            return try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+                                SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox AS outbox
+                                  WHERE outbox.record_id = \(upload.record.recordID) AND outbox.account_id = \(account.identifier)
+                                    AND outbox.acknowledged = 0 AND (\(Self.syncFileOutboxAuthority(accountID: account.identifier))))
+                                """)) ?? false
                         }) else { continue }
                         let committed: ClipboardSyncControl
                         switch upload {
@@ -401,6 +404,9 @@ extension ClipboardHistoryModule {
                                 try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
                                     arguments: [upload.record.recordID])
                                 try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                                if upload.record.kind == .fileBody {
+                                    try recordSyncFileRestorationAcknowledged(upload.record, account: account, in: database)
+                                }
                             }
                             try saveSyncAccount(state, in: database)
                             if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
@@ -461,6 +467,7 @@ extension ClipboardHistoryModule {
                 }
             }
             state.lastCompletedAt = now()
+            try await resumeSyncFilePreservations()
             try acknowledgeLinkedFileVersions(account: account, control: control)
             try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }

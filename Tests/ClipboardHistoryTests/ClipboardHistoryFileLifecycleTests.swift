@@ -6,6 +6,116 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFileDeletionReclaimsEncryptedTransfersButKeepsOrdinaryWorkingFile() async throws {
+        let bytes = Data(repeating: 0x75, count: 20_000_000)
+        let fixture = try await makeLinkedFixture(initialBytes: bytes)
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        let before = try await fixture.receiver.storageUsage()
+
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+
+        let after = try await fixture.receiver.storageUsage()
+        XCTAssertLessThan(after + 15_000_000, before, "The encrypted transfer is reclaimable after its owned work is safely retained")
+        XCTAssertEqual(try Data(contentsOf: working.url), bytes)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), bytes)
+        let notices = try await fixture.receiver.preservedSyncEdits()
+        XCTAssertTrue(notices.isEmpty, "An unchanged already-shared file is not unuploaded local work")
+    }
+
+    @MainActor
+    func testFileDeletionPreservesQueuedVersionAndLaterSaveAndPurgesPartialUploads() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let frozen = Data("immutable pending version with uploaded segments".utf8)
+        try frozen.write(to: fixture.original)
+        try await eventually { !(await fixture.cloud.partialFileRecordIDs()).isEmpty }
+        try await fixture.sender.setSyncEnabled(false)
+        let newer = Data("new local work after the pending version was frozen".utf8)
+        try newer.write(to: fixture.original)
+        await fixture.cloud.failCommits(false)
+        _ = try await fixture.receiver.apply(.delete(fixture.entryID))
+        await fixture.receiver.retrySync()
+
+        try await fixture.sender.setSyncEnabled(true)
+
+        let notices = try await fixture.sender.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let value = try await fixture.sender.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing unpublished branch") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        let partial = await fixture.cloud.partialFileRecordIDs()
+        XCTAssertTrue(partial.isEmpty, "The cleanup ledger must own segments whose manifest never committed")
+    }
+
+    @MainActor
+    func testFileDeletionPreservesInterruptedFrozenBranchAndNewerSavedWork() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]))
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("remote competing published version".utf8).write(to: fixture.original)
+        let frozen = Data("frozen unpublished choice before interruption".utf8)
+        try frozen.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        do { _ = try await fixture.receiver.resolveFileConflict(plan, choosing: .localLocation(working.id)); XCTFail("Expected interruption") }
+        catch ClipboardHistoryStorageError.injected(.fileConflictAfterBranchFreeze) { }
+        try await fixture.receiver.setSyncEnabled(false)
+        let newer = Data("new saved bytes after freezing the earlier branch".utf8)
+        try newer.write(to: working.url)
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+
+        try await fixture.receiver.setSyncEnabled(true)
+
+        let notices = try await fixture.receiver.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let value = try await fixture.receiver.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing preserved branch") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        XCTAssertEqual(try Data(contentsOf: working.url), newer)
+    }
+
+    @MainActor
+    func testLateFileVersionAfterDeletionIsPurgedWithoutRevivingHistory() async throws {
+        let fixture = try await makeLinkedFixture()
+        try await fixture.receiver.setSyncEnabled(false)
+        let initialRecords = Set(await fixture.cloud.uploadedRecords().map { $0.record.recordID })
+        try Data("a version this offline receiver has never seen".utf8).write(to: fixture.original)
+        try await eventually { await fixture.cloud.uploadedRecords().filter { $0.record.kind == .fileBody }.count == 2 }
+        let late = await fixture.cloud.uploadedRecords().filter {
+            !initialRecords.contains($0.record.recordID) && ($0.record.kind == .entry || $0.record.kind == .fileBody)
+        }
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+        let deleted = try await fixture.receiver.page(.init())
+        XCTAssertTrue(deleted.entries.isEmpty)
+
+        await fixture.cloud.replayLateRecords(late)
+        await fixture.receiver.retrySync()
+
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let remaining = await fixture.cloud.visibleRecords()
+        XCTAssertTrue(remaining.allSatisfy { record in !late.contains { $0.record.recordID == record.recordID } },
+            "The retired object identity must still own late version envelopes and their body segments")
+    }
+
+    @MainActor
     func testFileDisableRecoversCompletedLocalSwapWithoutCloudReactivation() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
         let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

@@ -142,6 +142,8 @@ extension ClipboardHistoryModule {
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, sharedID.uuidString.lowercased(), localID, upload.record.recordID])
+                try Self.rememberSyncFileOwnership(sharedID: sharedID.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: control.epoch.uuidString, in: database)
                 try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
                 try seedSyncMemberships(content.tags, sharedID: sharedID.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
@@ -225,6 +227,11 @@ extension ClipboardHistoryModule {
             guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
             try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
+            if try rememberReceivedSyncFileContent(content, record: record, account: account, in: database) {
+                try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
+                    arguments: [account.identifier, record.epoch.uuidString, record.recordID])
+                return false
+            }
             if let subject = content.entrySubjectID {
                 try Self.rememberSyncContentRecord(record, subjectID: subject, accountID: account.identifier, in: database)
             }
