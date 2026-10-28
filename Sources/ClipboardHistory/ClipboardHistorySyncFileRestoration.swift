@@ -77,16 +77,19 @@ extension ClipboardHistoryModule {
         let rows = try syncFileRead { try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for row in rows {
             let files = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: row["journal"])
-            for file in files where !file.acknowledged && file.directory == nil && file.inline == nil {
+            for file in files where !file.acknowledged {
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
                 guard let body = file.descriptor.body,
                       try syncFileRead({ try Self.syncFileRestorationHasMember(file.descriptor, row: row, in: $0) }) else { continue }
                 var recovered = file
+                recovered.directory = nil
+                recovered.inline = nil
                 if file.descriptor.bodyFormat != nil {
                     let uploaded = try syncFileRead { try String.fetchOne($0,
                         sql: "SELECT directory FROM clipboard_sync_file_uploads WHERE record_id = ?", arguments: [body.recordID]) }
                     let downloaded = storeRoot.appendingPathComponent("SyncTransfers/Downloads/\(account.identifier)/\(control.epoch.uuidString)/\(file.descriptor.versionID.uuidString)")
-                    for directory in uploaded.map({ [URL(fileURLWithPath: $0), downloaded] }) ?? [downloaded] {
+                    let candidates = [file.directory, uploaded.map { URL(fileURLWithPath: $0) }, downloaded].compactMap { $0 }
+                    for directory in Set(candidates) {
                         do {
                             try await Self.verifySyncFileRestoration(file.descriptor, directory: directory,
                                 account: account, control: control, key: key)
@@ -95,7 +98,7 @@ extension ClipboardHistoryModule {
                         } catch is CancellationError { throw CancellationError() } catch { continue }
                     }
                 } else {
-                    let chunks = try syncFileRead { try Data.fetchAll($0,
+                    let chunks = try file.inline?.chunks ?? syncFileRead { try Data.fetchAll($0,
                         sql: "SELECT ciphertext FROM clipboard_sync_chunks WHERE record_id = ? ORDER BY chunk_index", arguments: [body.recordID]) }
                     if case .fileBody(let value) = try? ClipboardSyncCodec.open(body, chunks: chunks, account: account, control: control, key: key),
                        value.objectID == file.descriptor.objectID, value.versionID == file.descriptor.versionID,
@@ -105,10 +108,7 @@ extension ClipboardHistoryModule {
                     }
                 }
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-                guard recovered.directory != nil || recovered.inline != nil else {
-                    try await replaceUnrecoverableSyncFile(file, row: row, account: account, control: control, generation: generation)
-                    continue
-                }
+                if recovered.directory == nil && recovered.inline == nil { recovered.completedBytes = 0 }
                 let prepared = recovered
                 try syncWrite { database in
                     guard let active = try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
@@ -121,6 +121,9 @@ extension ClipboardHistoryModule {
                     latest[index] = prepared
                     try Self.saveSyncFileRestorations(latest, row: active, in: database)
                 }
+                if prepared.directory == nil && prepared.inline == nil {
+                    try await replaceUnrecoverableSyncFile(file, row: row, account: account, control: control, key: key, generation: generation)
+                }
             }
         }
     }
@@ -130,8 +133,9 @@ extension ClipboardHistoryModule {
     /// base. The ordinary atomic version/outbox transaction makes retry safe:
     /// once stored, that child is current and this condition no longer matches.
     private func replaceUnrecoverableSyncFile(_ file: ClipboardSyncFileRestoration, row: Row,
-        account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
-        guard try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, generation: UInt64) async throws {
+        guard let services = syncServices,
+              try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID,
               let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier,
                 epoch: control.epoch, in: $0).first { $0.objectID == file.descriptor.objectID
                     && $0.baseVersionID == file.descriptor.versionID && !$0.hasPendingApplication } }) else { return }
@@ -139,14 +143,46 @@ extension ClipboardHistoryModule {
             try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
         }
         guard await inspection.value != nil else { return }
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+        let prepared = try await prepareFileVersion(sourceURL: source.url, objectID: source.objectID,
+            versionID: UUID(), publicationID: UUID(), parents: [source.baseVersionID],
+            expectedSourceIdentity: source.identity, displayName: file.descriptor.displayName,
+            account: account, control: control, key: key)
+        var stored = false
+        defer { if !stored { try? FileManager.default.removeItem(at: prepared.uploadDirectory) } }
+        let faults = faultInjector
+        try await Task.detached { try faults.check(.syncFileRejoinBeforeStaging) }.value
+        let saved = await Task.detached(priority: .utility) {
+            try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
+        }.value
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+        try await waitForWriteTurn()
         try admitSync(generation)
-        guard try syncFileRead({ database in
-            try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
-                .contains { ($0["shared_id"] as String) == (row["shared_id"] as String)
-                    && ($0["activation_id"] as String) == (row["activation_id"] as String) }
-        }), try syncFileSelection(objectID: file.descriptor.objectID)?.latest.versionID == file.descriptor.versionID else { return }
-        _ = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
-            parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
+        stored = try syncWrite { database in
+            guard try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
+                .contains(where: { ($0["shared_id"] as String) == (row["shared_id"] as String)
+                    && ($0["activation_id"] as String) == (row["activation_id"] as String) }),
+                  let current = try Self.linkedLocationSources(accountID: account.identifier,
+                    epoch: control.epoch, id: source.id, in: database).first,
+                  current.revision == source.revision, current.identity == source.identity,
+                  current.baseVersionID == source.baseVersionID, !current.hasPendingApplication,
+                  try String.fetchOne(database, sql: """
+                    SELECT current_version_id FROM clipboard_sync_file_selections
+                    WHERE account_id = ? AND epoch = ? AND object_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]) == file.descriptor.versionID.uuidString,
+                  let digest = prepared.descriptor.contentDigest else { return false }
+            try storePreparedFileVersion(prepared, account: account, control: control, in: database)
+            let state: ClipboardHistoryLinkedFileLocationState = saved.map { $0.digest == digest ? .pendingUpload : .localChanges } ?? .unavailable
+            try database.execute(sql: """
+                UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?, state = ?,
+                    pending_version_id = ?, observed_digest = ? WHERE id = ?
+                """, arguments: [prepared.descriptor.versionID.uuidString, digest, state.rawValue,
+                    prepared.descriptor.versionID.uuidString, saved?.digest, source.id.uuidString])
+            try Self.bumpHistoryRevision(in: database)
+            try Self.bumpSearchIndexGeneration(in: database)
+            return true
+        }
+        if stored { publishMutation() }
     }
 
     func nextSyncFileRestoration(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {

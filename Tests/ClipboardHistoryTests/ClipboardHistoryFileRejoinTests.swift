@@ -5,6 +5,80 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testRestartRechecksPreparedCiphertextAndPreservesLaterWorkingEdits() async throws {
+        let fixture = try await makeLinkedFixture(initialBytes: Data(repeating: 0x61, count: 6 * 1_024 * 1_024))
+        let initial = try await fixture.receiver.page(.init())
+        let file = try XCTUnwrap(initial.entries.first?.syncFiles.first)
+        let working = try XCTUnwrap(initial.entries.first?.linkedFileLocations.first)
+        let tag = try XCTUnwrap(initial.entries.first?.tagIDs.first)
+        try await fixture.sender.setSyncTagSelected(tag, selected: false)
+        await fixture.receiver.retrySync()
+        try await fixture.sender.setSyncEnabled(false)
+        await fixture.cloud.failCommits(true)
+        try await fixture.receiver.setSyncTagSelected(tag, selected: true)
+        let pending = try await fixture.receiver.page(.init())
+        XCTAssertEqual(pending.entries.first?.syncFiles.first?.uploadPending, true,
+            "An earlier download or upload acknowledgement does not complete restoration")
+        try await fixture.receiver.closeStoreForTesting()
+        try FileManager.default.removeItem(at: fixture.receiverRoot.appendingPathComponent("SyncTransfers/Downloads"))
+        let edited = Data("saved while the prepared restoration was offline".utf8)
+        try edited.write(to: working.url)
+        await fixture.cloud.failCommits(false)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+
+        await reopened.resumeSync()
+
+        let status = await reopened.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let page = try await reopened.page(.init())
+        let replacement = try XCTUnwrap(page.entries.first?.syncFiles.first)
+        XCTAssertEqual(replacement.id, file.id)
+        XCTAssertNotEqual(replacement.versionID, file.versionID)
+        XCTAssertFalse(replacement.uploadPending)
+        XCTAssertEqual(try Data(contentsOf: working.url), edited)
+        let fresh = makeLinkedModule(root: fixture.root.appendingPathComponent("Fresh restarted rejoin"), services: fixture.services, key: 0x53)
+        try await fresh.setSyncEnabled(true)
+        let locations = try await fresh.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(locations.first?.url)), edited)
+        let before = await fixture.cloud.uploadCount()
+        await reopened.retrySync()
+        let after = await fixture.cloud.uploadCount()
+        XCTAssertEqual(after, before)
+    }
+
+    @MainActor
+    func testPausingLocationDuringRejoinPreparationRevokesFallbackPublication() async throws {
+        let barrier = LinkedReplacementBarrier()
+        let bytes = Data(repeating: 0x67, count: 6 * 1_024 * 1_024)
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .syncFileRejoinBeforeStaging { barrier.pause() }
+            return false
+        }, initialBytes: bytes)
+        let initial = try await fixture.receiver.page(.init())
+        let original = try XCTUnwrap(initial.entries.first?.syncFiles.first)
+        let tag = try XCTUnwrap(initial.entries.first?.tagIDs.first)
+        try await fixture.sender.setSyncTagSelected(tag, selected: false)
+        await fixture.receiver.retrySync()
+        try await fixture.sender.setSyncEnabled(false)
+        try FileManager.default.removeItem(at: fixture.receiverRoot.appendingPathComponent("SyncTransfers/Downloads"))
+        let rejoin = Task { try await fixture.receiver.setSyncTagSelected(tag, selected: true) }
+        try await eventually { barrier.isWaiting }
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let location = try XCTUnwrap(locations.first)
+        try await fixture.receiver.setFileLocationPaused(.init(entryID: fixture.entryID,
+            locationID: location.id, expectedRevision: location.revision), paused: true)
+        barrier.release()
+        try await rejoin.value
+
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.versionID, original.versionID)
+        XCTAssertEqual(page.entries.first?.linkedFileLocations.first?.state, .paused)
+        let visible = await fixture.cloud.visibleRecords()
+        XCTAssertTrue(visible.filter { $0.kind == .fileBody }.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: location.url), bytes)
+    }
+
+    @MainActor
     func testMissingCiphertextCreatesANewVersionOnTheOriginalObject() async throws {
         let bytes = Data(repeating: 0x64, count: 6 * 1_024 * 1_024)
         let fixture = try await makeLinkedFixture(initialBytes: bytes)
