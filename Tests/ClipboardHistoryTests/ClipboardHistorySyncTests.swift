@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import GRDB
 import XCTest
 import ClipboardHistoryTestSupport
 import os
@@ -7,6 +8,31 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testRemoteTextVersionArrivingBeforeFileRootDoesNotDownloadRemovedFile() async throws {
+        let fixture = try await fileFixture(names: ["Original attachment.txt"], contents: [Data("old attachment".utf8)],
+            exactText: "original file label")
+        let initial = try await fixture.sender.page(.init())
+        let entryID = try XCTUnwrap(initial.entries.first?.id)
+        _ = try await fixture.sender.apply(.editText(entryID, "replacement text"))
+        await fixture.sender.retrySync()
+        await fixture.cloud.replayAllChangesInReverseOrder()
+
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.receiver.retrySync()
+
+        let received = try await fixture.receiver.page(.init())
+        XCTAssertEqual(received.entries.map(\.id), [entryID])
+        XCTAssertEqual(received.entries.first?.syncFiles, [])
+        let content = try await fixture.receiver.materialize(.init(entryID: entryID, purpose: .normalPaste))
+        XCTAssertEqual(content.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "replacement text")])])
+        let downloads = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(downloads, 0)
+        let plan = try await fixture.receiver.textEditPlan(for: entryID)
+        XCTAssertFalse(plan.hasConflict)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.receiverRoot.appendingPathComponent("Linked Working Copies").path))
+    }
+
     @MainActor
     func testEditingFileBearingTextDoesNotReviveItsPendingFile() async throws {
         let fixture = try await fileFixture(names: ["Obsolete.txt"], contents: [Data("obsolete bytes".utf8)],
@@ -242,6 +268,232 @@ final class ClipboardHistorySyncTests: XCTestCase {
         try beforeEnable(urls)
         try await sender.setSyncEnabled(true)
         return (sender, receiver, cloud, services, root, receiverRoot, urls)
+    }
+
+    @MainActor
+    func testSharedRichTextEditKeepsMetadataAndLateInitialContentCannotRestoreOldFormats() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x5A, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x5B, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-rich-edit.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let attributed = NSAttributedString(string: "formatted original")
+        let rtf = try attributed.data(from: .init(location: 0, length: attributed.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let item = NSPasteboardItem()
+        item.setString("formatted original", forType: .string)
+        item.setData(rtf, forType: .rtf)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        let source = ClipboardHistoryCaptureSource(bundleIdentifier: "test.editor", displayName: "Editor")
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: source) else {
+            return XCTFail("Expected rich text capture")
+        }
+        let tag = try await first.createTagDefinition(named: "Rich edits", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let initial = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertTrue(initial.items[0].representations.contains(.data(typeIdentifier: "public.rtf", rtf)))
+        let privateTag = try await second.createTagDefinition(named: "Private context", assigningTo: captured.entryID)
+        _ = try await second.apply(.setFavorite(captured.entryID, true))
+
+        _ = try await first.apply(.editText(captured.entryID, "edited exact text"))
+        await first.retrySync()
+        await second.retrySync()
+        let expected = ClipboardHistoryMaterialization(items: [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "edited exact text")
+        ])])
+        let edited = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(edited, expected)
+        let page = try await second.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertTrue(entry.isFavorite)
+        XCTAssertEqual(entry.tagIDs, [tag.definition.id, privateTag.definition.id])
+        XCTAssertEqual(entry.source, source)
+        XCTAssertEqual(entry.capturedAt, Date(timeIntervalSince1970: 1_000))
+
+        await cloud.replayAllChangesInReverseOrder()
+        let late = makeModule(services: services, keyByte: 0x5C, time: 3_000)
+        try await late.setSyncEnabled(true)
+        await late.retrySync()
+        let replayed = try await late.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(replayed, expected)
+        let plan = try await late.textEditPlan(for: captured.entryID)
+        XCTAssertFalse(plan.hasConflict)
+    }
+
+    func testEditorRetainsItsDisplayedAncestryWhenRemoteTextChangesBeforeSave() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x57, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x58, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("editor basis")))
+        let tag = try await first.createTagDefinition(named: "Editor", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let secondPage = try await second.page(.init())
+        let remote = try XCTUnwrap(secondPage.entries.first)
+        let opened = try await first.textEditPlan(for: captured.entryID)
+        _ = try await second.apply(.editText(remote.id, "remote edit"))
+        await second.retrySync()
+        await first.retrySync()
+
+        let saved = try await first.saveTextEdit("draft from old basis", using: opened)
+        guard case .updated(let entry) = saved else { return XCTFail("Expected saved draft") }
+        XCTAssertTrue(entry.hasTextConflict)
+        let conflict = try await first.textEditPlan(for: captured.entryID)
+        XCTAssertEqual(Set(conflict.versions.map(\.text)), ["remote edit", "draft from old basis"])
+        let choice = try XCTUnwrap(conflict.versions.first { $0.text == "draft from old basis" })
+        _ = try await first.apply(.editText(captured.entryID, "continued draft"))
+        do {
+            _ = try await first.resolveTextConflict(.init(plan: conflict, versionID: choice.id))
+            XCTFail("A stale choice must not discard a newer branch")
+        } catch {
+            XCTAssertEqual(error as? ClipboardHistoryModuleError, .operationUnavailable)
+        }
+        let refreshed = try await first.textEditPlan(for: captured.entryID)
+        XCTAssertEqual(Set(refreshed.versions.map(\.text)), ["remote edit", "continued draft"])
+        let currentChoice = try XCTUnwrap(refreshed.versions.first { $0.text == "continued draft" })
+        let resolved = try await first.resolveTextConflict(.init(plan: refreshed, versionID: currentChoice.id))
+        guard case .updated(let updated) = resolved else { return XCTFail("Expected resolved entry") }
+        XCTAssertFalse(updated.hasTextConflict)
+    }
+
+    func testUpgradeFromV14PreservesAnEditWhoseInitialCiphertextWasReclaimed() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-v14-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x55, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0x56, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("v14 original")))
+        let tag = try await first.createTagDefinition(named: "Upgrade", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        await first.retrySync()
+        try await second.setSyncEnabled(true)
+        await first.suspendSync()
+        _ = try await first.apply(.editText(captured.entryID, "v14 unsent edit"))
+        try await first.makeV14SyncFixtureForTesting()
+        try await first.closeStoreForTesting()
+
+        let upgraded = makeModule(services: services, keyByte: 0x55, time: 3_000, root: root)
+        await upgraded.resumeSync()
+        await second.retrySync()
+        let local = try await upgraded.textEditPlan(for: captured.entryID)
+        let page = try await second.page(.init())
+        let remote = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(local.text, "v14 unsent edit")
+        XCTAssertEqual(remote.previewText, "v14 unsent edit")
+        XCTAssertEqual(local.versions.count, 1)
+    }
+
+    func testOfflineTextBranchesSurviveRestartAndExplicitResolutionConverges() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let firstRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-branches-A-\(UUID())")
+        let secondRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-branches-B-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x53, time: 1_000, root: firstRoot)
+        let second = makeModule(services: services, keyByte: 0x54, time: 2_000, root: secondRoot)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("shared root")))
+        let tag = try await first.createTagDefinition(named: "Branches", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let initial = try await second.page(.init())
+        let received = try XCTUnwrap(initial.entries.first)
+        await first.suspendSync()
+        await second.suspendSync()
+        _ = try await first.apply(.editText(captured.entryID, "offline A"))
+        _ = try await second.apply(.editText(received.id, "offline B"))
+        try await first.closeStoreForTesting()
+        try await second.closeStoreForTesting()
+
+        let reopenedA = makeModule(services: services, keyByte: 0x53, time: 3_000, root: firstRoot)
+        let reopenedB = makeModule(services: services, keyByte: 0x54, time: 4_000, root: secondRoot)
+        await reopenedA.resumeSync()
+        await reopenedB.resumeSync()
+        await reopenedA.retrySync()
+        let conflictA = try await reopenedA.textEditPlan(for: captured.entryID)
+        let conflictB = try await reopenedB.textEditPlan(for: received.id)
+        XCTAssertEqual(Set(conflictA.versions.map(\.text)), ["offline A", "offline B"])
+        XCTAssertEqual(Set(conflictB.versions.map(\.text)), ["offline A", "offline B"])
+        XCTAssertEqual(conflictA.text, "offline A")
+        XCTAssertEqual(conflictB.text, "offline B")
+        let choice = try XCTUnwrap(conflictA.versions.first { $0.text == "offline B" })
+        _ = try await reopenedA.resolveTextConflict(.init(plan: conflictA, versionID: choice.id))
+        await reopenedA.retrySync()
+        await reopenedB.retrySync()
+        let resolvedA = try await reopenedA.textEditPlan(for: captured.entryID)
+        let resolvedB = try await reopenedB.textEditPlan(for: received.id)
+        XCTAssertEqual(resolvedA.text, "offline B")
+        XCTAssertEqual(resolvedB.text, "offline B")
+        XCTAssertFalse(resolvedA.hasConflict)
+        XCTAssertFalse(resolvedB.hasConflict)
+        try await reopenedB.closeStoreForTesting()
+        let finalB = makeModule(services: services, keyByte: 0x54, time: 5_000, root: secondRoot)
+        await finalB.resumeSync()
+        let afterRestart = try await finalB.textEditPlan(for: received.id)
+        XCTAssertEqual(afterRestart.text, "offline B")
+        XCTAssertFalse(afterRestart.hasConflict)
+
+        // A newly joining device receives the resolution before either branch
+        // and the root. Durable pending versions must still converge; replaying
+        // every record again must not restore the resolved conflict.
+        await cloud.replayAllChangesInReverseOrder()
+        let reordered = makeModule(services: services, keyByte: 0x59, time: 6_000)
+        try await reordered.setSyncEnabled(true)
+        await reordered.retrySync()
+        let reorderedPage = try await reordered.page(.init())
+        XCTAssertEqual(reorderedPage.entries.count, 1)
+        let reorderedEntry = try XCTUnwrap(reorderedPage.entries.first)
+        let reorderedPlan = try await reordered.textEditPlan(for: reorderedEntry.id)
+        XCTAssertEqual(reorderedPlan.text, "offline B")
+        XCTAssertFalse(reorderedPlan.hasConflict)
+    }
+
+    func testSharedTextEditUpdatesExistingEntryWithoutMovingLocalOrder() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x51, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x52, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-edit-tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString("current clipboard", forType: .string)
+        let pasteboardGeneration = pasteboard.changeCount
+        let captured = try await first.capture(.init(source: .unknown, content: .text("original")))
+        let tag = try await first.createTagDefinition(named: "Edits", assigningTo: captured.entryID)
+        _ = try await first.apply(.setFavorite(captured.entryID, true))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let before = try await second.page(.init())
+        let received = try XCTUnwrap(before.entries.first)
+        let privateTag = try await second.createTagDefinition(named: "Private", assigningTo: received.id)
+        _ = try await second.apply(.setFavorite(received.id, false))
+        let later = try await second.capture(.init(source: .unknown, content: .text("local newer")))
+
+        _ = try await first.apply(.editText(captured.entryID, "revised"))
+        await first.retrySync()
+        await second.retrySync()
+
+        let after = try await second.page(.init())
+        XCTAssertEqual(after.entries.map(\.id), [later.entryID, received.id])
+        let updated = try XCTUnwrap(after.entries.last)
+        XCTAssertEqual(updated.previewText, "revised")
+        XCTAssertEqual(updated.capturedAt, received.capturedAt)
+        XCTAssertEqual(updated.source, received.source)
+        XCTAssertFalse(updated.isFavorite)
+        XCTAssertEqual(updated.tagIDs, [tag.definition.id, privateTag.definition.id])
+        let content = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        XCTAssertEqual(content.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "revised")])])
+        XCTAssertEqual(pasteboard.changeCount, pasteboardGeneration)
+        XCTAssertEqual(pasteboard.string(forType: .string), "current clipboard")
     }
 
     @MainActor
@@ -1242,6 +1494,19 @@ private actor SyncTestRecognizer: ClipboardHistoryVisionRecognizing {
     func callCount() -> Int { calls }
 }
 
+private extension ClipboardHistoryModule {
+    /// Constructs the on-disk v14 fixture after real capture/edit operations.
+    /// Assertions use the public module interface after the normal upgrade.
+    func makeV14SyncFixtureForTesting() async throws {
+        let pool = try await writableDatabase()
+        try await pool.write { database in
+            try database.execute(sql: "DROP TABLE clipboard_sync_version_selections")
+            try database.execute(sql: "DROP TABLE clipboard_sync_versions")
+            try database.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v18_clipboard_sync_versions'")
+        }
+    }
+}
+
 private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {
     var byte: UInt8 = 0x67
     func load() -> ClipboardHistoryMasterKeyResult {
@@ -1272,6 +1537,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var fileBodyDownloads = 0
     func damageNextFileBodyDownload() { damagesFileBody = true }
     func fileBodyDownloadCount() -> Int { fileBodyDownloads }
+    private var reversesAllChanges = false
     private var reversesDelivery = false
     func reverseDelivery() { reversesDelivery = true }
     private var accountFault: ClipboardSyncServiceError?
@@ -1325,8 +1591,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
-        let page = uploads.dropFirst(offset).map(\.record)
-        return ClipboardSyncChanges(records: reversesDelivery ? page.reversed() : page,
+        let page = reversesAllChanges ? uploads.reversed().map(\.record) : uploads.dropFirst(offset).map(\.record)
+        return ClipboardSyncChanges(records: reversesDelivery ? Array(page.reversed()) : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
@@ -1394,6 +1660,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
+    func replayAllChangesInReverseOrder() { reversesAllChanges = true }
     func failNextControlCreation() { failsControlCreation = true }
     func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }

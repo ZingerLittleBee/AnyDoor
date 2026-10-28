@@ -1124,6 +1124,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
                 "v16_clipboard_sync_recovery",
+                "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]
         )
@@ -1202,6 +1203,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
                 "v16_clipboard_sync_recovery",
+                "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]
         )

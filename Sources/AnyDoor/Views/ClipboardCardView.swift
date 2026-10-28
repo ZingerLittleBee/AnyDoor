@@ -86,8 +86,8 @@ struct ClipboardCardView: View {
         if hostMaterialization?.editableText != nil, let onEdit {
             menu.addItem(
                 ClosureMenuItem(
-                    title: L(.clipboardActionEdit),
-                    systemImage: "pencil",
+                    title: L(entry.hasTextConflict ? .clipboardTextConflict : .clipboardActionEdit),
+                    systemImage: entry.hasTextConflict ? "arrow.triangle.2.circlepath" : "pencil",
                     handler: onEdit
                 )
             )
@@ -218,6 +218,15 @@ struct ClipboardCardView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            if entry.hasTextConflict, let onEdit {
+                Button(action: onEdit) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .help(L(.clipboardTextConflict))
+                .accessibilityLabel(L(.clipboardTextConflict))
+            }
             if entry.isFavorite {
                 Image(systemName: "star.fill")
                     .font(.system(size: 10))
