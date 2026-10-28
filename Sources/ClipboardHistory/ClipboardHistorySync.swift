@@ -9,21 +9,25 @@ extension ClipboardHistoryModule {
             return try database.read { database in
                 let settings = try syncSettings(in: database)
                 let recovery = try syncRecovery(in: database)
-                let phase = syncPhase == .disabled ? recovery.phase ?? .connecting : syncPhase
-                guard settings.enabled else {
-                    return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled)
+                var reset = try cloudReset(in: database)?.status
+                if let current = reset, current.isPending, syncPhase == .failed(.localStorage) {
+                    reset = .init(stage: current.stage, deletedRecordCount: current.deletedRecordCount, failure: syncPhase)
                 }
+                let phase = syncPhase == .disabled ? recovery.phase ?? .connecting : syncPhase
                 let accountID = settings.accountID ?? ""
+                let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
+                let state = try data.map { try JSONDecoder().decode(ClipboardSyncAccountState.self, from: $0) }
+                guard settings.enabled else {
+                    return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled, cloudReset: reset, canClearCloudData: state?.control != nil)
+                }
                 let uploaded = try Int.fetchOne(database, sql: """
                     SELECT COUNT(DISTINCT subject_id) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
                     """, arguments: [accountID]) ?? 0
                 let received = try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_sync_entries WHERE account_id = ? AND origin = 'remote'",
                     arguments: [accountID]) ?? 0
-                let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
-                let state = try data.map { try JSONDecoder().decode(ClipboardSyncAccountState.self, from: $0) }
                 return ClipboardHistorySyncStatus(isEnabled: true,
                     phase: phase,
-                    uploadedEntryCount: uploaded, receivedEntryCount: received, lastCompletedAt: state?.lastCompletedAt)
+                    uploadedEntryCount: uploaded, receivedEntryCount: received, lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
             }
         } catch {
             return ClipboardHistorySyncStatus(isEnabled: true, phase: .failed(.localStorage))
@@ -35,14 +39,27 @@ extension ClipboardHistoryModule {
         guard generation == syncGeneration else { return }
         _ = try await writableDatabase()
         guard generation == syncGeneration else { return }
+        if enabled, let reset = try currentCloudReset(), reset.status.isPending {
+            guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
+            let account = try await services.transport.account()
+            try await waitForWriteTurn()
+            guard generation == syncGeneration else { return }
+            if account == reset.account {
+                syncSuspended = false
+                await retrySync()
+                return
+            }
+        }
         try syncWrite { database in
+            try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = ? WHERE id = 1", arguments: [enabled])
             try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = ? WHERE id = 1", arguments: [enabled])
             try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL WHERE id = 1")
         }
         setSyncPhase(enabled ? .connecting : .disabled)
-        guard enabled else { return }
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
+        guard enabled || pendingReset else { return }
         syncSuspended = false
-        await runSync(allowAccountBinding: true)
+        await runSync(allowAccountBinding: enabled)
     }
 
     public func setSyncTagSelected(_ tagID: String, selected: Bool) async throws {
@@ -62,6 +79,10 @@ extension ClipboardHistoryModule {
                 """, arguments: [accountID, tagID, selected])
             if selected {
                 try database.execute(sql: """
+                    DELETE FROM clipboard_sync_reset_exclusions WHERE account_id = ?
+                      AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
+                    """, arguments: [accountID, tagID])
+                try database.execute(sql: """
                     DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
                       AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
                     """, arguments: [accountID, tagID])
@@ -74,7 +95,9 @@ extension ClipboardHistoryModule {
 
     /// Resumes only stored local consent, after the host has completed migration.
     public func resumeSync() async {
-        guard availability == .ready, syncStatus().isEnabled else { return }
+        guard availability == .ready else { return }
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
+        guard syncStatus().isEnabled || pendingReset else { return }
         syncSuspended = false
         await retrySync()
     }
@@ -84,7 +107,7 @@ extension ClipboardHistoryModule {
         _ = await stopSyncTasks()
     }
 
-    private func stopSyncTasks() async -> UInt64 {
+    func stopSyncTasks() async -> UInt64 {
         syncSuspended = true
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
@@ -118,7 +141,11 @@ extension ClipboardHistoryModule {
         }
         let generation = syncGeneration
         let bindingAuthorized = syncAccountBindingGeneration == generation
-        let task = Task { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
+        let task = Task {
+            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation) }
+            else { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
+        }
         syncTask = task
         await task.value
         guard generation == syncGeneration else { return }
@@ -146,7 +173,47 @@ extension ClipboardHistoryModule {
         await retrySync()
     }
 
-    private func performSync(generation: UInt64, allowAccountBinding: Bool) async {
+    private func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+                                    state initial: ClipboardSyncAccountState, services: ClipboardSyncServices,
+                                    generation: UInt64) async throws -> ClipboardSyncAccountState {
+        var state = initial
+        var more = true
+        while more {
+            let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
+            try await admitSync(generation, account: account, services: services)
+            var unavailableContent = false
+            for record in page.records where record.epoch == control.epoch {
+                // A body is discovered without downloading it. Its encrypted
+                // entry descriptor authorizes a separate version download.
+                if record.kind == .fileBody { continue }
+                try await waitForWriteTurn()
+                try admitSync(generation)
+                try rememberDiscoveredSyncRecord(record, account: account)
+                guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
+                let chunks: [Data]
+                do { chunks = try await services.transport.download(record, for: account) }
+                catch ClipboardSyncServiceError.recordUnavailable {
+                    unavailableContent = true
+                    continue
+                }
+                try await admitSync(generation, account: account, services: services)
+                let content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
+                try await waitForWriteTurn()
+                try admitSync(generation)
+                try importSyncContent(content, record: record, account: account)
+            }
+            // A content operation can disappear after metadata discovery. Apply
+            // available retirement events, but do not acknowledge a missing body.
+            // The next discovery must confirm its removal instead of hiding loss.
+            guard !unavailableContent else { throw ClipboardSyncServiceError.recordUnavailable }
+            state.cursor = page.cursor
+            try syncWrite { try saveSyncAccount(state, in: $0) }
+            more = page.hasMore
+        }
+        return state
+    }
+
+    func performSync(generation: UInt64, allowAccountBinding: Bool) async {
         guard let services = syncServices else {
             await finishSync(.capabilityUnavailable, generation: generation)
             return
@@ -158,6 +225,14 @@ extension ClipboardHistoryModule {
             try admitSync(generation)
             _ = try await writableDatabase()
             try admitSync(generation)
+            if let reset = try currentCloudReset(accountID: account.identifier), reset.status.isPending {
+                try syncWrite { database in
+                    try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ?, enabled = 0 WHERE id = 1",
+                        arguments: [account.identifier])
+                }
+                await performCloudReset(generation: generation)
+                return
+            }
             var state = try syncWrite { database in
                 let previous = try syncSettings(in: database).accountID
                 if let previous, previous != account.identifier, !allowAccountBinding {
@@ -199,12 +274,41 @@ extension ClipboardHistoryModule {
                 control = try await services.transport.createControl(candidate, for: account)
                 try await admitSync(generation, account: account, services: services)
             }
-            guard var control, control.accountID == account.identifier, control.phase == "active" else {
-                throw ClipboardSyncServiceError.missingRemoteState
+            guard var control, control.accountID == account.identifier else { throw ClipboardSyncServiceError.missingRemoteState }
+            let activationAuthorized = try cloudActivationAuthorized()
+            if let previous = state.control, previous.keyID != control.keyID || previous.keyCheck != control.keyCheck {
+                throw ClipboardSyncServiceError.corruptData
             }
-            if let previous = state.control,
-               previous.keyID != control.keyID || previous.epoch != control.epoch {
-                throw ClipboardSyncServiceError.missingRemoteState
+            if control.phase == "resetting" ||
+                (!activationAuthorized && (control.phase != "active" || state.control.map { $0.epoch != control.epoch } == true)) {
+                try stopForRetiredCollection(control, state: &state)
+                return
+            }
+            if control.phase == "stopped" {
+                let key = try await services.keys.load(account: account, keyID: control.keyID)
+                try await admitSync(generation, account: account, services: services)
+                guard let key else { await finishSync(.waitingForKey, generation: generation); return }
+                guard key.count == 32, ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
+                    throw ClipboardSyncServiceError.corruptData
+                }
+                if state.candidate == nil || state.candidate?.epoch == state.control?.epoch {
+                    state.candidate = ClipboardSyncControl(accountID: account.identifier, keyID: control.keyID,
+                        keyCheck: control.keyCheck, epoch: UUID(), phase: "active", serverToken: nil)
+                    try syncWrite { try saveSyncAccount(state, in: $0) }
+                }
+                guard let candidate = state.candidate else { throw ClipboardSyncServiceError.corruptData }
+                control = try await services.transport.transition(control, to: "active", epoch: candidate.epoch, for: account)
+                try await admitSync(generation, account: account, services: services)
+            }
+            guard control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
+            if let previous = state.control, previous.epoch != control.epoch {
+                try syncWrite { try retireLocalSyncCollection(accountID: account.identifier, in: $0) }
+                state.cursor = nil
+            }
+            state.candidate = nil
+            try syncWrite { database in
+                try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
+                try database.execute(sql: "DELETE FROM clipboard_sync_resets WHERE account_id = ?", arguments: [account.identifier])
             }
             state.control = control
             try syncWrite { try saveSyncAccount(state, in: $0) }
@@ -221,26 +325,8 @@ extension ClipboardHistoryModule {
             if try needsSyncTextRootReplay(account: account, control: control) {
                 state.cursor = nil
             }
-            var more = true
-            while more {
-                let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
-                try await admitSync(generation, account: account, services: services)
-                for record in page.records where record.epoch == control.epoch {
-                    // A body is discovered without downloading it. Its encrypted
-                    // entry descriptor authorizes a separate version download.
-                    if record.kind == .fileBody { continue }
-                    guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
-                    let chunks = try await services.transport.download(record, for: account)
-                    try await admitSync(generation, account: account, services: services)
-                    let content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
-                    try await waitForWriteTurn()
-                    try admitSync(generation)
-                    try importSyncContent(content, record: record, account: account)
-                }
-                state.cursor = page.cursor
-                try syncWrite { try saveSyncAccount(state, in: $0) }
-                more = page.hasMore
-            }
+            state = try await receiveSyncChanges(account: account, control: control, key: key,
+                state: state, services: services, generation: generation)
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
@@ -251,6 +337,8 @@ extension ClipboardHistoryModule {
             while let upload = try nextSyncUpload(account: account, control: control) {
                 do {
                     try await admitSync(generation, account: account, services: services)
+                    guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
+                        arguments: [upload.record.recordID]) ?? false }) else { continue }
                     let committed: ClipboardSyncControl
                     switch upload {
                     case .inline(let value):
@@ -286,9 +374,46 @@ extension ClipboardHistoryModule {
                     }
                     try await admitSync(generation, account: account, services: services)
                     control = refreshed
+                    state.control = refreshed
+                    // A new control token may authorize a deletion or withdrawal.
+                    // Import that authority before deciding whether the old outbox still exists.
+                    state = try await receiveSyncChanges(account: account, control: control, key: key,
+                        state: state, services: services, generation: generation)
                 } catch {
                     try recordSyncFileUploadFailure(error, record: upload.record, generation: generation)
                     throw error
+                }
+            }
+            while let retired = try nextDeletedSyncContent(account: account, control: control) {
+                do {
+                    try await admitSync(generation, account: account, services: services)
+                    let cleaned = try await services.transport.purge(retired, for: account, control: control)
+                    try await admitSync(generation, account: account, services: services)
+                    guard cleaned.epoch == control.epoch, cleaned.keyID == control.keyID, cleaned.phase == "active" else {
+                        throw ClipboardSyncServiceError.missingRemoteState
+                    }
+                    control = cleaned
+                    state.control = cleaned
+                    _ = try await writableDatabase()
+                    try admitSync(generation)
+                    try syncWrite { database in
+                        try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 1 WHERE account_id = ? AND epoch = ? AND record_id = ?",
+                            arguments: [account.identifier, control.epoch.uuidString, retired.recordID])
+                        try saveSyncAccount(state, in: database)
+                    }
+                    conflicts = 0
+                } catch ClipboardSyncServiceError.conflict {
+                    conflicts += 1
+                    guard conflicts < 4 else { throw ClipboardSyncServiceError.network(retryAfter: nil) }
+                    guard let refreshed = try await services.transport.control(for: account),
+                          refreshed.epoch == control.epoch, refreshed.keyID == control.keyID, refreshed.phase == "active" else {
+                        throw ClipboardSyncServiceError.missingRemoteState
+                    }
+                    try await admitSync(generation, account: account, services: services)
+                    control = refreshed
+                    state.control = refreshed
+                    state = try await receiveSyncChanges(account: account, control: control, key: key,
+                        state: state, services: services, generation: generation)
                 }
             }
             state.lastCompletedAt = now()
@@ -304,7 +429,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func finishSync(_ phase: ClipboardHistorySyncPhase, generation: UInt64,
+    func finishSync(_ phase: ClipboardHistorySyncPhase, generation: UInt64,
                             retryAfter: TimeInterval? = nil) async {
         do {
             try await waitForWriteTurn()
@@ -349,7 +474,7 @@ extension ClipboardHistoryModule {
         try admitSync(generation)
     }
 
-    private func syncFailurePhase(_ error: Error) -> ClipboardHistorySyncPhase {
+    func syncFailurePhase(_ error: Error) -> ClipboardHistorySyncPhase {
         guard let error = error as? ClipboardSyncServiceError else { return .failed(.localStorage) }
         switch error {
         case .accountUnavailable: return .waitingForAccount
@@ -361,18 +486,19 @@ extension ClipboardHistoryModule {
         case .network, .conflict: return .failed(.network)
         case .quota: return .failed(.quota)
         case .localStorage: return .failed(.localStorage)
+        case .recordUnavailable: return .failed(.network)
         case .missingRemoteState: return .failed(.recoveryRequired)
         case .corruptData: return .failed(.corruptData)
         case .unsupportedVersion: return .failed(.unsupportedVersion)
         }
     }
 
-    private func setSyncPhase(_ phase: ClipboardHistorySyncPhase) {
+    func setSyncPhase(_ phase: ClipboardHistorySyncPhase) {
         syncPhase = phase
         publishSyncStatus()
     }
 
-    private func publishSyncStatus() {
+    func publishSyncStatus() {
         notificationCenter.post(name: .clipboardHistorySyncDidChange, object: nil)
     }
 }

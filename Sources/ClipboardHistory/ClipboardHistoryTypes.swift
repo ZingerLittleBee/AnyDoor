@@ -426,13 +426,16 @@ public struct ClipboardHistoryConfirmationToken: Equatable, Sendable {
 
 public struct ClipboardHistoryDestructivePreview: Equatable, Sendable {
     public let affectedCount: Int
+    public let sharedAffectedCount: Int
     public let token: ClipboardHistoryConfirmationToken
 
     public init(
         affectedCount: Int,
+        sharedAffectedCount: Int = 0,
         token: ClipboardHistoryConfirmationToken
     ) {
         self.affectedCount = affectedCount
+        self.sharedAffectedCount = sharedAffectedCount
         self.token = token
     }
 }

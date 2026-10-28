@@ -7,6 +7,38 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
+    func testCloudResetConfirmationAndRetryRemainAvailableWithSyncOffAndKeysDenied() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let cloud = ResetSettingsSyncTransport()
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: directory, keyStore: SettingsSyncLocalKeyStore(),
+            syncServices: .init(transport: cloud, keys: UnavailableSettingsSyncKeys(), pollingInterval: nil)
+        ))
+        let local = try await module.capture(.init(source: .unknown, content: .text("local history")))
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        await model.prepareReset()
+        XCTAssertNotNil(model.resetConfirmation)
+        model.cancelResetConfirmation()
+        let before = await cloud.currentPhase()
+        XCTAssertEqual(before, "active")
+        await model.prepareReset()
+        let confirmation = try XCTUnwrap(model.resetConfirmation)
+        // SwiftUI dismisses the confirmation binding before the async action
+        // necessarily runs. The selected token must survive that dismissal.
+        model.cancelResetConfirmation()
+        await model.confirmReset(confirmation)
+        XCTAssertFalse(model.status.isEnabled)
+        XCTAssertTrue(model.isResetPending)
+        XCTAssertEqual(model.status.cloudReset?.failure, .failed(.network))
+        await model.retry()
+        XCTAssertEqual(model.status.cloudReset?.stage, .completed)
+        XCTAssertFalse(model.isResetPending)
+        let retained = try await module.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+    }
+
     func testDeniedKeyAccessOffersSystemRecoveryWithoutEnablingASecondAccount() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         removeClipboardHistoryDirectoryAfterTest(directory)
@@ -27,7 +59,35 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         XCTAssertNil(model.recoveryHelpURL)
     }
 
-    func testTagChoiceRequiresActivationAndSurvivesDisablingThisMac()
+    func testSameNameChoicesShowIdentityAndMergeRequiresDisplayedScopeConfirmation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: directory,
+            keyStore: SettingsSyncLocalKeyStore(), syncServices: .init(
+                transport: HeldSettingsSyncTransport(immediatelyAvailable: true), keys: UnavailableSettingsSyncKeys(), pollingInterval: nil)))
+        let entry = try await module.capture(.init(source: .unknown, content: .text("newly enrolled")))
+        _ = try await module.replaceTagDefinitions(with: [
+            .init(id: "same-prefix-a", displayName: "Work"), .init(id: "same-prefix-b", displayName: "Work")])
+        _ = try await module.apply(.setTags(entry.entryID, ["same-prefix-b"]))
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        await model.selectTag("same-prefix-a")
+        XCTAssertEqual(Set(model.tags.map { model.tagTitle($0) }).count, 2)
+        await model.prepareMerge(sourceID: "same-prefix-b", targetID: "same-prefix-a")
+        XCTAssertEqual(model.mergePreview?.newlyEligibleEntryCount, 1)
+        model.cancelMerge()
+        await model.confirmMerge()
+        let cancelled = try await module.tagDefinitions()
+        XCTAssertEqual(cancelled.count, 2)
+        await model.prepareMerge(sourceID: "same-prefix-b", targetID: "same-prefix-a")
+        await model.confirmMerge()
+        XCTAssertNil(model.mergePreview)
+        XCTAssertEqual(model.tags.map(\.id), ["same-prefix-a"])
+        let merged = try await module.page(.init()).entries
+        XCTAssertEqual(merged.first?.tagIDs, ["same-prefix-a"])
+    }
+
+    func testMultipleTagChoicesRequireActivationAndSurviveDisablingThisMac()
         async throws
     {
         let directory = FileManager.default.temporaryDirectory
@@ -43,25 +103,28 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let assignment = try await module.createTagDefinition(
             named: "Work", assigningTo: capture.entryID
         )
+        let other = try await module.createTagDefinition(named: "Other", assigningTo: capture.entryID)
         let model = ClipboardSyncSettingsModel(module: module)
         await model.refresh()
 
         await model.selectTag(assignment.definition.id)
 
-        XCTAssertNil(model.selectedTagID)
+        XCTAssertFalse(model.tags.contains(where: \.isSelected))
         await model.setEnabled(true)
         await model.selectTag(assignment.definition.id)
-        XCTAssertEqual(model.selectedTagID, assignment.definition.id)
-        XCTAssertFalse(model.canSelectTag)
+        XCTAssertEqual(model.tags.filter(\.isSelected).map(\.id), [assignment.definition.id])
+        XCTAssertTrue(model.canSelectTag)
+        await model.selectTag(other.definition.id)
+        XCTAssertEqual(Set(model.tags.filter(\.isSelected).map(\.id)), [assignment.definition.id, other.definition.id])
 
         await model.setEnabled(false)
         let reopenedSettings = ClipboardSyncSettingsModel(module: module)
         await reopenedSettings.refresh()
 
-        XCTAssertEqual(reopenedSettings.selectedTagID, assignment.definition.id)
+        XCTAssertEqual(Set(reopenedSettings.tags.filter(\.isSelected).map(\.id)), [assignment.definition.id, other.definition.id])
         XCTAssertFalse(reopenedSettings.status.isEnabled)
         let entries = try await module.page(ClipboardHistoryQuery()).entries
-        XCTAssertEqual(entries.first?.tagIDs, [assignment.definition.id])
+        XCTAssertEqual(entries.first?.tagIDs, [assignment.definition.id, other.definition.id])
     }
 
     func testDisablingWhileConnectingCancelsTheRequestWithoutEnablingMonitoring()
@@ -257,4 +320,51 @@ private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
         accountRequest?.resume(throwing: CancellationError())
         accountRequest = nil
     }
+}
+
+private actor ResetSettingsSyncTransport: ClipboardSyncTransport {
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+
+    private let scope = ClipboardSyncAccount(container: "test", environment: "test", owner: "reset-settings")
+    private var descriptor: ClipboardSyncControl?
+    private var failCleanup = true
+    func account() -> ClipboardSyncAccount { scope }
+    func currentPhase() -> String? { descriptor?.phase }
+    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? {
+        if descriptor == nil {
+            descriptor = ClipboardSyncControl(accountID: scope.identifier, keyID: UUID(), keyCheck: Data(repeating: 0, count: 32),
+                epoch: UUID(), phase: "active", serverToken: Data([1]))
+        }
+        return descriptor
+    }
+    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
+        .init(records: [], cursor: nil, hasMore: false)
+    }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        guard descriptor == control, account == scope else { throw ClipboardSyncServiceError.conflict }
+        let next = ClipboardSyncControl(accountID: control.accountID, keyID: control.keyID, keyCheck: control.keyCheck,
+            epoch: epoch, phase: phase, serverToken: Data(UUID().uuidString.utf8))
+        descriptor = next
+        return next
+    }
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncCleanupPage {
+        if failCleanup { failCleanup = false; throw ClipboardSyncServiceError.network(retryAfter: nil) }
+        return .init(control: control, cursor: nil, deletedRecordCount: 0, hasMore: false)
+    }
+    func cancel() {}
 }

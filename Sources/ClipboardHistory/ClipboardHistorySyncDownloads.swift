@@ -142,12 +142,25 @@ extension ClipboardHistoryModule {
         let candidate = try await ClipboardSyncFilePublication.construct(descriptor: descriptor,
             encryptedDirectory: directory, root: syncWorkingRoot, account: account, control: control, key: key)
         defer { ClipboardSyncFilePublication.discard(candidate) }
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         try await waitForWriteTurn()
         try admitSync(generation)
         guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { return nil }
         return try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: syncWorkingRoot,
             accountID: account.identifier, faults: faultInjector)
+    }
+
+    func admitSyncFilePublication(_ generation: UInt64, account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, services: ClipboardSyncServices) async throws {
+        try await admitSync(generation, account: account, services: services)
+        guard let current = try await services.transport.control(for: account), current.phase == "active",
+              current.epoch == control.epoch, current.keyID == control.keyID else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        try await admitSync(generation, account: account, services: services)
+        guard let local = try syncFileRead({ try syncFileContext(in: $0) }),
+              local.control.epoch == control.epoch, local.control.keyID == control.keyID,
+              local.control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
     }
 
     func storeSyncFileUpload(_ upload: ClipboardSyncFileUpload, objectID: UUID,

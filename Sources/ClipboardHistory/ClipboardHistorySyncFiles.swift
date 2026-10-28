@@ -136,8 +136,9 @@ extension ClipboardHistoryModule {
                     )
                 }
         }
+        guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
         for source in sources {
-            try admitSync(generation)
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let sampled = await Task.detached(priority: .utility) {
                 ClipboardSyncFileIO.sample(source)
@@ -155,6 +156,7 @@ extension ClipboardHistoryModule {
             } else { frozen = nil }
             var stored = false
             defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             try await waitForWriteTurn()
             try admitSync(generation)
             let body = try sampled.bytes.map { bytes in
@@ -340,6 +342,7 @@ extension ClipboardHistoryModule {
             }
             // Authentication is complete before any ordinary file is created.
             // Publication stays synchronous with final admission and DB commit.
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             try await waitForWriteTurn()
             try admitSync(generation)
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
@@ -395,6 +398,12 @@ extension ClipboardHistoryModule {
                   let body = descriptor.body, body.epoch == epoch, body.keyID == keyID,
                   body.kind == .fileBody, body.operationID == descriptor.versionID,
                   body.chunkCount > 0, body.encryptedByteCount > 0, body.digest.count == 32 else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            // The legacy JSON envelope was only defined for bounded small
+            // files. Larger files use segmentsV1, without an overall size cap.
+            if descriptor.bodyFormat == nil, let size = descriptor.originalByteCount,
+               size > Self.automaticSyncFileDownloadBytes {
                 throw ClipboardSyncServiceError.corruptData
             }
             if descriptor.bodyFormat == .segmentsV1, let size = descriptor.originalByteCount {

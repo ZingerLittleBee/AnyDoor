@@ -102,6 +102,7 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
         let pool = try requiredDatabase()
         try pool.write { database in
+            try stageSyncDeletions(account: account, control: control, key: key, in: database)
             try stageSyncTagMerges(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
@@ -123,16 +124,24 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
                 let memberships = Set(try String.fetchAll(database,
                     sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID]))
-                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) },
+                // A retained local copy can share its old UUID with a newly
+                // imported entry in this epoch. Explicitly publishing that copy
+                // allocates a distinct cloud identity without replacing either.
+                let identityInUse = try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_entries
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ?)
+                    """, arguments: [account.identifier, control.epoch.uuidString, localID]) == true
+                let sharedID = identityInUse ? UUID() : id
+                let content = try syncEntryContent(id: id, sharedID: sharedID, tags: tags.filter { memberships.contains($0.id) },
                     account: account, control: control, key: key, in: database)
                 let upload = try ClipboardSyncCodec.seal(.entry(content), account: account, control: control, key: key)
-                try storeSyncUpload(upload, subjectID: localID, account: account, in: database)
+                try storeSyncUpload(upload, subjectID: sharedID.uuidString.lowercased(), account: account, in: database)
                 try database.execute(sql: """
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
-                    """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
+                    """, arguments: [account.identifier, control.epoch.uuidString, sharedID.uuidString.lowercased(), localID, upload.record.recordID])
                 try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
-                try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
+                try seedSyncMemberships(content.tags, sharedID: sharedID.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
                 try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }
@@ -147,6 +156,10 @@ extension ClipboardHistoryModule {
             VALUES (?, ?, ?, ?, ?, ?)
             """, arguments: [upload.record.recordID, account.identifier, upload.record.epoch.uuidString,
                                subjectID, upload.record.kind.rawValue, try JSONEncoder().encode(upload.record)])
+        if upload.record.kind == .entry,
+           try !Self.isSyncDeleted(subjectID, accountID: account.identifier, epoch: upload.record.epoch.uuidString, in: database) {
+            try Self.rememberSyncContentRecord(upload.record, subjectID: subjectID, accountID: account.identifier, in: database)
+        }
         for (index, chunk) in upload.chunks.enumerated() {
             try database.execute(sql: "INSERT INTO clipboard_sync_chunks(record_id, chunk_index, ciphertext) VALUES (?, ?, ?)",
                 arguments: [upload.record.recordID, index, chunk])
@@ -204,7 +217,18 @@ extension ClipboardHistoryModule {
             guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
             try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
+            if let subject = content.entrySubjectID {
+                try Self.rememberSyncContentRecord(record, subjectID: subject, accountID: account.identifier, in: database)
+            }
+            if let subject = content.entrySubjectID,
+               try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+                try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
+                    arguments: [account.identifier, record.epoch.uuidString, record.recordID])
+                return false
+            }
             switch content {
+            case .deletion(let deletion):
+                try receiveSyncDeletion(deletion, record: record, account: account, in: database)
             case .tag(let tag):
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
             case .text(let text):

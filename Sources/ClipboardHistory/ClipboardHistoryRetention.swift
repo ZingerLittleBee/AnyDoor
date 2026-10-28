@@ -405,6 +405,7 @@ extension ClipboardHistoryModule {
                         displayName: $0["display_name"]
                     )
                 }
+                try Self.markLegacyTagDefinitionsImported(in: database)
                 guard currentDefinitions != normalizedDefinitions else {
                     return TagDefinitionUpdateMutationResult(
                         update: ClipboardHistoryTagDefinitionUpdate(
@@ -674,9 +675,13 @@ extension ClipboardHistoryModule {
                         in: database
                     )
                 }
+                let currentSharedScope: [String]
+                if case .clear = payload.operation {
+                    currentSharedScope = try Self.syncDeletionScope(entryIDs: currentIDs, in: database)
+                } else { currentSharedScope = [] }
                 let sortedCurrentIDs = currentIDs.sorted()
                 guard currentRevision == payload.revision,
-                    sortedCurrentIDs == payload.entryIDs
+                    sortedCurrentIDs == payload.entryIDs, currentSharedScope == payload.sharedScope
                 else {
                     return ConfirmationApplyResult(
                         outcome: .stale(
@@ -693,6 +698,9 @@ extension ClipboardHistoryModule {
                 }
 
                 let expiredIDs = try expiredEntryIDs(at: date, in: database)
+                if case .clear = payload.operation {
+                    try Self.recordExplicitSyncDeletion(entryIDs: currentIDs, in: database)
+                }
                 let allDeletedIDs = Set(currentIDs).union(expiredIDs)
                 let payloadPaths = try logicallyDelete(
                     entryIDs: Array(allDeletedIDs),
@@ -1382,12 +1390,20 @@ extension ClipboardHistoryModule {
         let payload = ConfirmationPayload(
             operation: operation,
             revision: try Self.historyRevision(in: database),
-            entryIDs: entryIDs.sorted()
+            entryIDs: entryIDs.sorted(),
+            sharedScope: try {
+                guard case .clear = operation else { return [] }
+                return try Self.syncDeletionScope(entryIDs: entryIDs, in: database)
+            }()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return ClipboardHistoryDestructivePreview(
             affectedCount: payload.entryIDs.count,
+            sharedAffectedCount: try {
+                guard case .clear = operation else { return 0 }
+                return try Self.sharedDeletionCount(entryIDs: entryIDs, in: database)
+            }(),
             token: ClipboardHistoryConfirmationToken(
                 data: try encoder.encode(payload)
             )
@@ -1693,4 +1709,5 @@ private struct ConfirmationPayload: Codable {
     let operation: ConfirmationOperation
     let revision: Int64
     let entryIDs: [String]
+    let sharedScope: [String]
 }
