@@ -249,6 +249,7 @@ later final-commit results.
 | `9e3fad1809e61078bfb2b594a2ca5626d452445a` | Actual directory + file-lifecycle integration: all 23 lifecycle/race/rejoin cases, seven tree cases, permissions, migration, and related Host suites | 59 | 59 | 0 | 0 | 0 |
 | `3b34e7fb027407e526477c37e116da020939e48e` | Application implementation broad linked/directory/lifecycle/sync/module/paste/Host regression | 317 | 316 | 1 | 0 | 0 |
 | `daef9ad417bbd39b083a26528c22dad5401ff523` | Final application recovery/admission corrections, native application cases, and affected Host/localization suites | 82 | 82 | 0 | 0 | 0 |
+| `a121c9103cd3b8f8cfb1b033eeaed3c79e1c185b` | Cross-module privacy, production copy, backup/tag identity, metadata/conflict composition, and related core/Host regressions | 395 | 395 | 0 | 0 | 0 |
 
 The one skip is the existing child-only `testProductionKeychainCrossIdentityChildProbe`;
 it is not Keychain-delivery evidence. The final application command was:
@@ -257,12 +258,54 @@ it is not Keychain-delivery evidence. The final application command was:
 scripts/check-swift.sh --allow-toolchain-mismatch -- --filter 'ClipboardHistoryApplicationFixtureTests|ClipboardHistoryLinkedFileTests.*Application|ClipboardApplicationUpdatePresentationTests|ClipboardHistoryPresentationModelTests|ClipboardHistoryLinkedFilePresentationTests|LocalizationCoverageTests|testInterruptedReplacementAdoptsInstalledVersionAndPreservesLaterSave|testFileIdentityPauseRevokesAReplacementAfterItsBytesWereVerified'
 ```
 
-These runs used local Xcode `27A9275` / Swift 6.4 with the explicit toolchain override;
-they do not establish compatibility with pinned CI `27A266a` or the minimum macOS
-runtime. The final cross-module privacy/copy/backup/metadata acceptance run is
-pending and is not represented by these earlier runs.
+The cross-module run used tree `c8a142ccb978459daf2395482d267fbf13863337` at the
+recorded `a121c910` commit, before the subsequent documentation-only edits. Its
+216 core cases comprise 93 linked-file cases, two migration cases, and 121 sync
+cases; 179 Host cases complete the 395 total. The first-party warning gate passed.
+
+`ClipboardHistorySyncPrivacyTests` scans distinctive markers in owned encrypted
+database/WAL and transfer artifacts, including live operation-owned tree inventory
+and parser stores, interrupted downloads, retained frozen/conflict work, restart,
+and cleanup. Readable originals, complete reconstruction/replacement candidates,
+linked outputs, and independent preserved copies are attributed individually;
+the test does not exempt entire working or temporary directories. Pending output
+cannot materialize. These artifact checks do not establish live CKAsset staging.
+
+`ClipboardSyncHostAcceptanceTests` drives actual receipt through the production
+copy service and self-write monitor, preserving ordered representations and the
+pasteboard on pending-copy failure while retaining an older complete version.
+`ClipboardSyncBackupAcceptanceTests` composes manual backup with activation,
+distinct same-name tag identities, explicit merge, and old Config Sync retirement.
+The text-conflict composition preserves independent favorite/tag changes while
+rejecting obsolete recognition after the chosen content removes the bitmap.
+
+The exact cross-module command was:
+
+```sh
+scripts/check-swift.sh --allow-toolchain-mismatch -- --filter 'ClipboardHistorySyncTests|ClipboardHistoryLinkedFileTests|ClipboardHistoryModuleTests.testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks|ClipboardHistoryModuleTests.testExistingFoundationStoreMigratesThroughEveryVersion|ClipboardSyncHostAcceptanceTests|ClipboardSyncBackupAcceptanceTests|ClipboardHistoryPasteServiceTests|ClipboardFileConflictPresentationTests|ClipboardHistoryPortableSettingsTests|BackupServiceTests|BackupCodecTests|SyncEngineTests|SyncCoordinatorTests|ClipboardHistoryPresentationModelTests|ClipboardHistoryPresentationValuesTests|ClipboardSyncSettingsModelTests|ClipboardSyncDeletionSettingsTests|ClipboardHistoryLinkedFilePresentationTests|ClipboardApplicationUpdatePresentationTests|LocalizationCoverageTests'
+```
+
+These local runs used Xcode `27A9275` / Swift 6.4 with the explicit toolchain
+override. They do not establish pinned-CI or minimum-macOS runtime compatibility.
+
+## Separate pinned-CI evidence
+
+The [Swift CI job](https://github.com/ZingerLittleBee/AnyDoor/actions/runs/40685752500/job/122807540264)
+passed its pinned-toolchain warning-gated build and tests at exact commit
+`daef9ad417bbd39b083a26528c22dad5401ff523`: **2,630 executed, 2,618 passed,
+12 skipped, zero failures**, with normal test-step/job success. Clipboard History
+contributed 486 executions (481 passed, five skipped); AnyDoor contributed 2,144
+(2,137 passed, seven skipped). The skips were six Vision-dependent cases unavailable
+in the CI VM, two child-only harness entries, and four opt-in release benchmark
+and GUI fixture/migration/cleanup cases. No new application-package case was skipped.
+
+This CI row belongs to the application integration commit, not the later #181
+test additions or documentation commits. It does not credit actual release
+signing/notarization or signed multi-device service behavior.
 
 Developer ID profile and Production schema configuration are complete as recorded
-above. Signed two-Mac acceptance remains **SKIPPED at the owner's request**. Actual
-CloudKit and synchronizable Keychain delivery, installed application GUI/picker
-interaction, and native privacy/TCC consent are not established by these tests.
+above. Signed two-Mac acceptance remains **SKIPPED at the owner's request**. Live
+CloudKit delivery and cross-device propagation of the synchronizable iCloud
+Keychain content key remain untested. Device-only local-history Keychain regression
+is separate evidence. Installed application GUI/picker
+interaction and native privacy/TCC consent are not established by these tests.

@@ -92,9 +92,9 @@ preserve supported standard representations; ordinary files use independent
 encrypted version descriptors and bodies. `v15_clipboard_sync_tags` adds per-tag
 revisions, selected associations, merge aliases, and account-specific enrollment
 guards; `v19_clipboard_sync_files` stores file versions and ordered membership.
-Versioned text edits and explicit text conflict resolution are supported. Further
-file lifecycle behavior follows the
-[implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+Versioned edits, conflict resolution, complete files/directories/application
+packages, and the shared content lifecycle implement the
+[Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Selected definitions and associations use independent encrypted operations;
 unselected names and memberships remain local. Initial content snapshots seed
