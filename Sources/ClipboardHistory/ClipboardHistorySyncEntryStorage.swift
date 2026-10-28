@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 extension ClipboardHistoryModule {
     struct ClipboardSyncPublishedBitmap {
         let bitmap: ClipboardHistoryPublishedPayload
-        let thumbnail: ClipboardHistoryPublishedPayload
+        let thumbnail: ClipboardHistoryPublishedPayload?
     }
 
     struct ClipboardSyncPreparedEntry {
@@ -25,9 +25,11 @@ extension ClipboardHistoryModule {
             for (representationIndex, representation) in item.representations.enumerated() {
                 guard case .bitmap(let png, let thumbnail) = representation else { continue }
                 let bitmap = try store.publish(png, kind: .bitmap)
-                let preview = try store.publish(thumbnail, kind: .thumbnail)
+                // The local entry owns one preview; later image previews can
+                // be derived from their PNGs when exporting again.
+                let preview = thumbnailID == nil ? try store.publish(thumbnail, kind: .thumbnail) : nil
                 bitmaps[.init(itemIndex: itemIndex, representationIndex: representationIndex)] = .init(bitmap: bitmap, thumbnail: preview)
-                if thumbnailID == nil { thumbnailID = preview.id }
+                if thumbnailID == nil { thumbnailID = preview?.id }
             }
         }
         return .init(identity: identity, bitmaps: bitmaps, thumbnailID: thumbnailID)
@@ -100,7 +102,7 @@ extension ClipboardHistoryModule {
         for tag in content.tags { try importSyncTag(tag, account: account, recordID: record.recordID, in: database) }
         for bitmap in prepared.bitmaps.values {
             try insertPayload(bitmap.bitmap, into: database, at: content.capturedAt)
-            try insertPayload(bitmap.thumbnail, into: database, at: content.capturedAt)
+            if let thumbnail = bitmap.thumbnail { try insertPayload(thumbnail, into: database, at: content.capturedAt) }
         }
         let preview = content.items.flatMap(\.representations).compactMap { representation -> String? in
             if case .text(_, let value) = representation { return value }

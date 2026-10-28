@@ -9,6 +9,37 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testMultipleOwnedImagesKeepOrderAndOnlyPublishTheReferencedEntryPreview() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xA3, time: 1_000)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-multiple-images-\(UUID())")
+        let second = makeModule(services: services, keyByte: 0xA4, time: 2_000, root: root)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-multiple-images.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let firstItem = NSPasteboardItem()
+        firstItem.setData(try makeSyncBitmap(), forType: .png)
+        let secondItem = NSPasteboardItem()
+        secondItem.setData(try makeSyncBitmap(color: NSColor(deviceRed: 0, green: 0.7, blue: 0.2, alpha: 1)), forType: .png)
+        XCTAssertTrue(pasteboard.writeObjects([firstItem, secondItem]))
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected two image members")
+        }
+        let tag = try await first.createTagDefinition(named: "Images", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let original = try await first.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        let received = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(received, original)
+        XCTAssertEqual(received.items.count, 2)
+        let firstPreview = try await first.materialize(.init(entryID: captured.entryID, purpose: .preview))
+        let secondPreview = try await second.materialize(.init(entryID: captured.entryID, purpose: .preview))
+        XCTAssertEqual(firstPreview, secondPreview)
+        let payloads = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("payloads"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(payloads.count, 3, "Two owned images and the one entry preview must have durable owners")
+    }
+
+    @MainActor
     func testCorruptOwnedAssetAndDuplicateFileMembersRejectTheEntireEnvelope() async throws {
         let validPNG = try makeSyncBitmap()
         let file = ClipboardSyncFileDescriptor(objectID: UUID(), versionID: UUID(), displayName: "pending.txt",
@@ -1510,11 +1541,10 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
-    private func makeSyncBitmap() throws -> Data {
+    private func makeSyncBitmap(color: NSColor = NSColor(deviceRed: 1, green: 0.4, blue: 0.1, alpha: 1)) throws -> Data {
         let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 16,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        let color = NSColor(deviceRed: 1, green: 0.4, blue: 0.1, alpha: 1)
         for y in 0..<16 { for x in 0..<32 { image.setColor(color, atX: x, y: y) } }
         return try XCTUnwrap(image.representation(using: .png, properties: [:]))
     }
