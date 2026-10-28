@@ -217,6 +217,11 @@ struct ClipboardCardView: View {
                 actions.addItem(.separator())
                 let selection = ClipboardHistoryFileLocationSelection(entryID: entry.id,
                     locationID: location.id, expectedRevision: location.revision)
+                if location.applicationUpdateVersionID != nil {
+                    actions.addItem(ClosureMenuItem(title: L(.clipboardApplicationUpdateTitle), systemImage: "arrow.down.app") {
+                        Task { await presentation.beginApplicationUpdate(selection) }
+                    })
+                }
                 if location.trackingActions.contains(.pause), let onRevealLinkedLocation {
                     actions.addItem(ClosureMenuItem(title: L(.clipboardActionRevealInFinder), systemImage: "folder") {
                         onRevealLinkedLocation(location.url)

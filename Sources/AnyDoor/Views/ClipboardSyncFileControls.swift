@@ -20,11 +20,29 @@ struct ClipboardSyncFileControls: View {
         }
     }
 
+    private var applicationUpdates: [ClipboardHistoryLinkedFileLocation] {
+        entry.linkedFileLocations.filter { $0.applicationUpdateVersionID != nil }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !pending.isEmpty || !conflicts.isEmpty {
+            if !pending.isEmpty || !conflicts.isEmpty || !applicationUpdates.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
+                        ForEach(applicationUpdates) { location in
+                            HStack {
+                                Text(location.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                                    .help(location.url.path)
+                                Spacer(minLength: 4)
+                                Button(L(.clipboardApplicationUpdateTitle)) {
+                                    Task {
+                                        await presentation.beginApplicationUpdate(.init(entryID: entry.id,
+                                            locationID: location.id, expectedRevision: location.revision))
+                                    }
+                                }
+                                .accessibilityLabel(L(.clipboardApplicationUpdateTitle) + ": " + location.url.path)
+                            }
+                        }
                         ForEach(conflicts) { file in
                             HStack {
                                 Text(file.displayName).lineLimit(1).truncationMode(.middle)
@@ -77,8 +95,15 @@ struct ClipboardSyncFileControls: View {
         )) {
             ClipboardFileConflictSheet(presentation: presentation)
         }
+        .sheet(isPresented: Binding(
+            get: { presentation.applicationUpdateSelection?.entryID == entry.id },
+            set: { if !$0 && presentation.applicationUpdateSelection?.entryID == entry.id { presentation.dismissApplicationUpdate() } }
+        )) {
+            ClipboardApplicationUpdateSheet(presentation: presentation)
+        }
         .onDisappear {
             if presentation.fileConflictEntryID == entry.id { presentation.dismissFileConflict() }
+            if presentation.applicationUpdateSelection?.entryID == entry.id { presentation.dismissApplicationUpdate() }
         }
     }
 

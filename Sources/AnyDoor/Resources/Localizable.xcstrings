@@ -1,6 +1,244 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "clipboard.applicationUpdate.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply Update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用更新"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download Update"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载更新"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This replaces this linked location, including any applications inside it, with the downloaded version."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会用已下载的版本替换此关联位置，包括其中的应用。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.requiresDownload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download this version first. Downloading does not replace the linked location."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先下载此版本。下载不会替换关联位置。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit any applications running from this location, then refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先退出从此位置运行的应用，然后刷新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.identityUncertain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The identity of this location is uncertain. Reassociate it before applying an update."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认此位置的身份。请先重新关联，再应用更新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.localChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This location has local changes. Resolve them before applying an update."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此位置有本地修改。请先处理这些修改，再应用更新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve the file conflict before applying an update."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先解决文件冲突，再应用更新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This update is unavailable. Check the linked location, then refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此更新暂不可用。请检查关联位置，然后刷新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.applied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update applied to this linked location."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新已应用到此关联位置。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The location or update changed. Review the refreshed details before applying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置或更新已发生变化。请检查刷新后的内容，再决定是否应用。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The update could not be completed. Refresh to check the current version before retrying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能完成更新。请刷新并检查当前版本，然后重试。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.downloadPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The download has not finished. Check the file sync status, then retry or refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载尚未完成。请检查文件同步状态，然后重试或刷新。"
+          }
+        }
+      }
+    },
+    "clipboard.applicationUpdate.downloadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The update could not be downloaded. Check the file sync status, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能下载更新。请检查文件同步状态，然后重试。"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.failure.sourceChanged": {
       "extractionState": "manual",
       "localizations": {

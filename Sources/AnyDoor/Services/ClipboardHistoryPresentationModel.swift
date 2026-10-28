@@ -28,6 +28,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
     let requestSyncFileDownload: @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void
     let requestFileConflictDownload: @Sendable (ClipboardHistoryFileConflictPlan, UUID) async throws -> Void
     let resolveFileConflict: @Sendable (ClipboardHistoryFileConflictPlan, ClipboardHistoryFileConflictChoice) async throws -> UUID
+    let linkedFileLocations: @Sendable (ClipboardHistoryEntryID) async throws -> [ClipboardHistoryLinkedFileLocation]
+    let applicationUpdatePlan: @Sendable (ClipboardHistoryFileLocationSelection) async throws -> ClipboardHistoryApplicationUpdatePlan
+    let requestApplicationUpdateDownload: @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void
+    let applyApplicationUpdate: @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void
     let fileConflictPlan: @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan
     let retrySyncFileTransfer: @Sendable () async -> Void
     let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
@@ -105,6 +109,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         requestFileConflictDownload = { try await module.requestFileConflictDownload($0, versionID: $1) }
         resolveFileConflict = { try await module.resolveFileConflict($0, choosing: $1) }
         fileConflictPlan = { try await module.fileConflictPlan(entryID: $0, objectID: $1) }
+        linkedFileLocations = { try await module.linkedFileLocations(for: $0) }
+        applicationUpdatePlan = { try await module.applicationUpdatePlan($0) }
+        requestApplicationUpdateDownload = { try await module.requestApplicationUpdateDownload($0) }
+        applyApplicationUpdate = { try await module.applyApplicationUpdate($0) }
         retrySyncFileTransfer = { await module.retrySync() }
         exportFiles = { entryID, destinations in
             try await module.exportFiles(entryID, to: destinations)
@@ -212,6 +220,16 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         fileConflictPlan: @escaping @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan = { _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
         },
+        linkedFileLocations: @escaping @Sendable (ClipboardHistoryEntryID) async throws -> [ClipboardHistoryLinkedFileLocation] = { _ in [] },
+        applicationUpdatePlan: @escaping @Sendable (ClipboardHistoryFileLocationSelection) async throws -> ClipboardHistoryApplicationUpdatePlan = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        requestApplicationUpdateDownload: @escaping @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        applyApplicationUpdate: @escaping @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
         retrySyncFileTransfer: @escaping @Sendable () async -> Void = {},
         exportFiles: @escaping @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL] = { _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
@@ -240,6 +258,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.requestFileConflictDownload = requestFileConflictDownload
         self.resolveFileConflict = resolveFileConflict
         self.fileConflictPlan = fileConflictPlan
+        self.linkedFileLocations = linkedFileLocations
+        self.applicationUpdatePlan = applicationUpdatePlan
+        self.requestApplicationUpdateDownload = requestApplicationUpdateDownload
+        self.applyApplicationUpdate = applyApplicationUpdate
         self.retrySyncFileTransfer = retrySyncFileTransfer
         self.exportFiles = exportFiles
         self.associateFileLocation = associateFileLocation
@@ -381,6 +403,11 @@ enum ClipboardHistoryActionFailure: Equatable {
     }
 }
 
+enum ClipboardApplicationUpdateNotice: Equatable {
+    case applied, changed, unavailable, applyFailed, downloadPending, downloadFailed
+    case blocked(ClipboardHistoryApplicationUpdateState)
+}
+
 enum ClipboardFileConflictNotice: Equatable {
     case changed, unavailable, resolutionFailed, submitted, downloadPending, downloadFailed
 }
@@ -432,6 +459,12 @@ final class ClipboardHistoryPresentationModel {
     private(set) var query = ClipboardHistoryQuery()
     private(set) var selectedID: ClipboardHistoryEntryID?
     private(set) var contentState: ClipboardHistoryContentState = .loading
+    private(set) var applicationUpdatePlan: ClipboardHistoryApplicationUpdatePlan?
+    private(set) var applicationUpdateNotice: ClipboardApplicationUpdateNotice?
+    private(set) var applicationUpdateSelection: ClipboardHistoryFileLocationSelection?
+    private(set) var isPerformingApplicationUpdateAction = false
+    private var applicationUpdateGeneration = 0
+    var hasFileActionSheet: Bool { applicationUpdateSelection != nil || fileConflictEntryID != nil }
     private(set) var fileConflictNotice: ClipboardFileConflictNotice?
     private(set) var fileConflictEntryID: ClipboardHistoryEntryID?
     private(set) var fileConflictPlan: ClipboardHistoryFileConflictPlan?
@@ -586,7 +619,106 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    func beginApplicationUpdate(_ selection: ClipboardHistoryFileLocationSelection) async {
+        dismissFileConflict()
+        dismissApplicationUpdate()
+        applicationUpdateSelection = selection
+        await refreshApplicationUpdate()
+    }
+
+    func refreshApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, applicationUpdateNotice != .applied else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        await loadApplicationUpdate(generation: generation)
+        guard generation == applicationUpdateGeneration else { return }
+        isPerformingApplicationUpdateAction = false
+    }
+
+    private func loadApplicationUpdate(generation: Int) async {
+        guard let selection = applicationUpdateSelection else { return }
+        do {
+            let locations = try await operations.linkedFileLocations(selection.entryID)
+            guard generation == applicationUpdateGeneration else { return }
+            guard let location = locations.first(where: { $0.id == selection.locationID }) else {
+                throw ClipboardHistoryApplicationUpdateError.stalePlan
+            }
+            let current = ClipboardHistoryFileLocationSelection(entryID: selection.entryID,
+                locationID: location.id, expectedRevision: location.revision)
+            let plan = try await operations.applicationUpdatePlan(current)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdateSelection = current
+            applicationUpdatePlan = plan
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdatePlan = nil
+            applicationUpdateNotice = .unavailable
+        }
+    }
+
+    func dismissApplicationUpdate() {
+        applicationUpdateGeneration += 1
+        applicationUpdatePlan = nil
+        applicationUpdateNotice = nil
+        applicationUpdateSelection = nil
+        isPerformingApplicationUpdateAction = false
+    }
+
+    func downloadApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, let plan = applicationUpdatePlan,
+              plan.state == .requiresDownload else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        do {
+            try await operations.requestApplicationUpdateDownload(plan)
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            if applicationUpdatePlan?.state == .requiresDownload { applicationUpdateNotice = .downloadPending }
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdateNotice = (error as? ClipboardHistoryApplicationUpdateError) == .stalePlan
+                || (error as? ClipboardHistoryModuleError) == .operationUnavailable ? .changed : .downloadFailed
+        }
+        isPerformingApplicationUpdateAction = false
+    }
+
+    func applyApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, let plan = applicationUpdatePlan, plan.state == .ready else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        do {
+            try await operations.applyApplicationUpdate(plan)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdatePlan = nil
+            applicationUpdateNotice = .applied
+            invalidateMaterializations(for: plan.entryID)
+            await reload()
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            switch error as? ClipboardHistoryApplicationUpdateError {
+            case .stalePlan: applicationUpdateNotice = .changed
+            case .running: applicationUpdateNotice = .blocked(.running)
+            case .identityUncertain: applicationUpdateNotice = .blocked(.identityUncertain)
+            case .localChanges: applicationUpdateNotice = .blocked(.localChanges)
+            case nil where (error as? ClipboardHistoryModuleError) == .operationUnavailable:
+                applicationUpdateNotice = .changed
+            default: applicationUpdateNotice = .applyFailed
+            }
+        }
+        guard generation == applicationUpdateGeneration else { return }
+        isPerformingApplicationUpdateAction = false
+    }
+
     func beginFileConflict(entryID: ClipboardHistoryEntryID, objectID: UUID) async {
+        dismissApplicationUpdate()
         dismissFileConflict()
         fileConflictEntryID = entryID
         fileConflictObjectID = objectID
