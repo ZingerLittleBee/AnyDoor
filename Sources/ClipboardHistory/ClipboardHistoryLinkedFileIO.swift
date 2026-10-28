@@ -64,7 +64,7 @@ enum ClipboardLinkedFileIO {
             while written < count {
                 let amount = buffer.withUnsafeBytes { write(output, $0.baseAddress?.advanced(by: written), count - written) }
                 if amount < 0, errno == EINTR { continue }
-                guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(amount == 0 ? EIO : errno) }
                 written += amount
             }
             copied += Int64(count)

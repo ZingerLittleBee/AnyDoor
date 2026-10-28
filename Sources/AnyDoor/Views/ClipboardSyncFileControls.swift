@@ -52,16 +52,6 @@ struct ClipboardSyncFileControls: View {
     }
 
     private func failureText(_ failure: ClipboardHistorySyncFileFailure) -> String {
-        let key: L10n.Key = switch failure {
-        case .network: .settingsClipboardSyncNetworkFailure
-        case .quota: .settingsClipboardSyncQuotaFailure
-        case .localStorage: .settingsClipboardSyncStorageFailure
-        case .corruptData: .settingsClipboardSyncCorruptData
-        case .accessDenied: .settingsClipboardSyncAccessDenied
-        case .accountChanged: .settingsClipboardSyncAccountChanged
-        case .keyUnavailable: .settingsClipboardSyncWaitingForKey
-        case .unavailable: .settingsClipboardSyncCapabilityUnavailable
-        }
-        return L(key)
+        L(failure.presentationMessageKey)
     }
 }

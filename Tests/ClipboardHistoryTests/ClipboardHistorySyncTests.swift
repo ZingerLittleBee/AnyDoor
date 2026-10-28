@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import GRDB
 import XCTest
@@ -1574,8 +1575,111 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkingCopyPermissionFailuresRemainDistinctAndRecoverAfterAccessIsRestored() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        for byteCount in [12, 5_000_001] {
+            for (existingWorkingRoot, immutable) in [(false, false), (true, false), (false, true), (true, true)] {
+                let permissionRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-permission-\(UUID())")
+                removeClipboardHistoryDirectoryAfterTest(permissionRoot)
+                let parent = permissionRoot.appendingPathComponent("Folder")
+                let workingRoot = parent.appendingPathComponent("Working Copies")
+                try FileManager.default.createDirectory(at: existingWorkingRoot ? workingRoot : parent,
+                    withIntermediateDirectories: true)
+                let denied = existingWorkingRoot ? workingRoot : parent
+                if immutable { XCTAssertEqual(chflags(denied.path, UInt32(UF_IMMUTABLE)), 0) }
+                else { XCTAssertEqual(chmod(denied.path, 0o500), 0) }
+                defer {
+                    _ = chflags(denied.path, 0)
+                    _ = chmod(denied.path, 0o700)
+                }
+                let probe = denied.appendingPathComponent("Denied creation")
+                let descriptor = open(probe.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+                let deniedErrno = errno
+                if descriptor >= 0 { close(descriptor) }
+                XCTAssertEqual(descriptor, -1)
+                XCTAssertEqual(deniedErrno, immutable ? EPERM : EACCES)
+                let bytes = Data(repeating: 0x61, count: byteCount)
+                let fixture = try await fileFixture(names: ["Protected.bin"], contents: [bytes],
+                    receiverWorkingRoot: workingRoot)
+                var receiver = fixture.receiver
+                try await receiver.setSyncEnabled(true)
+                let initialPage = try await receiver.page(.init())
+                let entry = try XCTUnwrap(initialPage.entries.first)
+                let file = try XCTUnwrap(entry.syncFiles.first)
+                if byteCount > 5_000_000 {
+                    try await receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+                }
+
+                let failed = try await receiver.page(.init())
+                XCTAssertEqual(failed.entries.first?.syncFiles.first?.transferFailure?.rawValue, "localFileAccessDenied")
+                let status = await receiver.syncStatus()
+                if case .failed(let failure) = status.phase {
+                    XCTAssertEqual(failure.rawValue, "localFileAccessDenied")
+                } else { XCTFail("Expected a distinct local file access failure, got \(status.phase)") }
+                XCTAssertTrue(status.isEnabled)
+
+                let reopen = byteCount == 12 && !existingWorkingRoot && !immutable
+                if reopen {
+                    try await receiver.closeStoreForTesting()
+                    receiver = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000,
+                        root: fixture.receiverRoot, workingRoot: workingRoot)
+                    let retained = try await receiver.page(.init())
+                    XCTAssertEqual(retained.entries.first?.syncFiles.first?.transferFailure, .localFileAccessDenied)
+                    let retainedStatus = await receiver.syncStatus()
+                    XCTAssertEqual(retainedStatus.phase, .failed(.localFileAccessDenied))
+                }
+                XCTAssertEqual(chflags(denied.path, 0), 0)
+                XCTAssertEqual(chmod(denied.path, 0o700), 0)
+                if reopen { await receiver.resumeSync() } else { await receiver.retrySync() }
+                let recovered = try await receiver.page(.init())
+                XCTAssertEqual(recovered.entries.first?.syncFiles.first?.state, .complete)
+                XCTAssertNil(recovered.entries.first?.syncFiles.first?.transferFailure)
+                let materialized = try await receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+                guard case .file(let reference) = materialized.items[0].representations[0] else {
+                    return XCTFail("Missing recovered working copy")
+                }
+                XCTAssertEqual(try Data(contentsOf: reference.currentURL), bytes)
+            }
+        }
+    }
+
+    @MainActor
+    func testDeniedCiphertextReadReportsLocalFileAccessAndResumesTheSameUpload() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let fixture = try await fileFixture(names: ["Upload.bin"], contents: [Data("initial".utf8)])
+        let initialPage = try await fixture.sender.page(.init())
+        let entry = try XCTUnwrap(initialPage.entries.first)
+        let original = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.failFileUploadOnce(after: 0)
+        try Data(repeating: 0x52, count: 5_000_001).write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: original.id)
+        let pendingPage = try await fixture.sender.page(.init())
+        let pending = try XCTUnwrap(pendingPage.entries.first?.syncFiles.first)
+        XCTAssertTrue(pending.uploadPending)
+        let directory = fixture.senderRoot.appendingPathComponent("SyncTransfers/Uploads/\(pending.versionID.uuidString)")
+        let segment = directory.appendingPathComponent("0.ciphertext")
+        XCTAssertEqual(chmod(segment.path, 0), 0)
+        defer { _ = chmod(segment.path, 0o600) }
+
+        await fixture.sender.retrySync()
+
+        let failed = try await fixture.sender.page(.init())
+        XCTAssertEqual(failed.entries.first?.syncFiles.first?.transferFailure, .localFileAccessDenied)
+        let failedStatus = await fixture.sender.syncStatus()
+        XCTAssertEqual(failedStatus.phase, .failed(.localFileAccessDenied))
+        XCTAssertEqual(chmod(segment.path, 0o600), 0)
+        await fixture.sender.retrySync()
+        let complete = try await fixture.sender.page(.init())
+        XCTAssertEqual(complete.entries.first?.syncFiles.first?.versionID, pending.versionID)
+        XCTAssertFalse(try XCTUnwrap(complete.entries.first?.syncFiles.first).uploadPending)
+        XCTAssertNil(complete.entries.first?.syncFiles.first?.transferFailure)
+    }
+
+    @MainActor
     func testLargeDownloadStorageAndQuotaFailuresKeepPreviousVersionUsable() async throws {
-        for fault in [ClipboardSyncServiceError.quota, .localStorage] {
+        let faults: [(ClipboardSyncServiceError, ClipboardHistorySyncFileFailure)] = [
+            (.quota, .quota), (.localStorage, .localStorage), (.accessDenied, .accessDenied)]
+        for (fault, expected) in faults {
             let fixture = try await fileFixture(names: ["Retained.bin"], contents: [Data("old complete".utf8)])
             try await fixture.receiver.setSyncEnabled(true)
             let initial = try await fixture.receiver.page(.init())
@@ -1589,7 +1693,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
             await fixture.cloud.failFileSegmentOnce(at: 1, with: fault)
             try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: newVersion.versionID)
             let failed = try await fixture.receiver.page(.init())
-            XCTAssertEqual(failed.entries.first?.syncFiles.first?.transferFailure, fault == .quota ? .quota : .localStorage)
+            XCTAssertEqual(failed.entries.first?.syncFiles.first?.transferFailure, expected)
             let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
             guard case .file(let old) = content.items[0].representations[0] else { return XCTFail("Missing previous version") }
             XCTAssertEqual(try Data(contentsOf: old.currentURL), Data("old complete".utf8))
@@ -1708,6 +1812,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
     private func fileFixture(names: [String], contents: [Data],
         receiverFaults: ClipboardHistoryFaultInjector = .init(),
+        receiverWorkingRoot: URL? = nil,
         exactText: String? = nil,
         beforeEnable: ([URL]) throws -> Void = { _ in }
     ) async throws -> (
@@ -1722,7 +1827,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let senderRoot = root.appendingPathComponent("Sender")
         let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot)
         let receiverRoot = root.appendingPathComponent("Receiver")
-        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot, faults: receiverFaults)
+        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot,
+            faults: receiverFaults, workingRoot: receiverWorkingRoot)
         let urls = try zip(names, contents).map { name, data in
             let url = root.appendingPathComponent(name)
             try data.write(to: url)
@@ -3353,6 +3459,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
         faults: ClipboardHistoryFaultInjector = .init(),
+        workingRoot: URL? = nil,
         recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
@@ -3364,7 +3471,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
             faultInjector: faults,
             now: clock ?? { Date(timeIntervalSince1970: time) },
             visionRecognizer: recognizer,
-            syncServices: services
+            syncServices: services,
+            testingSyncWorkingRoot: workingRoot
         ))
     }
 

@@ -29,7 +29,7 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
 }
 
 public enum ClipboardHistorySyncFileFailure: String, Codable, Sendable {
-    case network, quota, localStorage, corruptData, accessDenied, accountChanged, keyUnavailable, unavailable
+    case network, quota, localStorage, localFileAccessDenied, corruptData, accessDenied, accountChanged, keyUnavailable, unavailable
 }
 
 struct ClipboardSyncOwnedFileTransfer: Sendable {
