@@ -19,7 +19,7 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertTrue(keys.contains("menuBar.iconVisible"))
         XCTAssertTrue(keys.contains("hyperKey.trigger"))
         XCTAssertTrue(keys.contains("dev.bybee.AnyDoor.language"))
-        XCTAssertTrue(keys.contains("clipboard.customTags"))
+        XCTAssertFalse(keys.contains("clipboard.customTags"))
         XCTAssertTrue(keys.contains("clipboard.categoryOrder"))
         XCTAssertTrue(keys.contains("clipboard.excludedBundleIDs"))
         XCTAssertTrue(keys.contains("commandPalette.hiddenAppBundleIDs"))

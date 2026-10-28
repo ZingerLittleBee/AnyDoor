@@ -63,9 +63,10 @@ server. Notes:
 
 ### Clipboard tags after upgrading
 
-Config Sync no longer transfers clipboard tags. The new Clipboard Sync design
-owns sharing selected tags; its native iCloud workflow is being implemented
-separately. Existing local tags and their history associations stay in place,
+Config Sync no longer transfers clipboard tags. Native Clipboard Sync owns shared
+selection, tag identities, and selected associations through its encrypted channel.
+Its remaining content and lifecycle workflows are being implemented separately.
+Existing local tags and their history associations stay in place,
 and explicit Config Backup export/import still includes tag definitions.
 
 When Config Sync starts, it removes the retired tag record from its local sync
@@ -74,8 +75,13 @@ this Mac's state file without tags. An unavailable sync location delays that
 rewrite. Other devices' files, historical cloud copies, and older clients may
 still contain plaintext tag names; upgrading does not erase those copies.
 
-Ordinary configuration updates no longer restore a local tag mirror over the
-history module. Manual backup imports still apply their tag definitions.
+Ordinary configuration updates never restore a local tag mirror over the history
+module. Startup imports the old preferences mirror once into encrypted storage
+without replacing existing identities or memberships, then removes it only after
+success. Failure preserves the old value for retry; restarting cannot replay a stale
+mirror. New tag operations do not write plaintext tag preferences. Manual exports
+read current definitions into the explicit backup file, and manual imports apply
+them directly to the module, preserving distinct IDs even when names match.
 See [ADR-0028](adr/0028-move-tag-sync-out-of-config-sync.md) for the ownership
 decision.
 

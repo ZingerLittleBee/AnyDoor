@@ -202,7 +202,7 @@ struct SyncSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button { exportConfig() } label: {
+                Button { Task { await exportConfig() } } label: {
                     LocalizedText(.settingsSyncExportButton)
                 }
                 Button { importConfig() } label: {
@@ -224,13 +224,13 @@ struct SyncSettingsView: View {
         BackupService(context: modelContext, defaults: .standard)
     }
 
-    private func exportConfig() {
+    private func exportConfig() async {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "AnyDoor-Backup.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let snapshot = try makeService().exportSnapshot()
+            let snapshot = try await makeService().exportCurrentSnapshot()
             let data = try BackupCodec.encode(snapshot)
             // Synchronous on purpose: the modal panel already blocked the main
             // thread, and the backup file is small.

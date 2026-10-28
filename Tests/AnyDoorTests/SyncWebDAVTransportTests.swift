@@ -169,7 +169,7 @@ final class SyncWebDAVTransportTests: XCTestCase {
                 transport: makeTransport(server: server),
                 stateStore: SyncLocalStateStore(url: stateDir.appendingPathComponent("\(id).json")),
                 appPathResolver: { _ in nil },
-                reconcileRuntime: { _ in },
+                reconcileRuntime: {},
                 wallNow: { wall }
             )
             return (engine, container)

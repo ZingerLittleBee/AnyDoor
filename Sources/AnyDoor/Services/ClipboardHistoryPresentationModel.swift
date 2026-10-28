@@ -95,9 +95,6 @@ struct ClipboardHistoryPresentationOperations: Sendable {
                 named: name,
                 assigningTo: entryID
             )
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
-            )
             return assignment
         }
         renameTagDefinition = { id, name in
@@ -105,16 +102,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
                 id: id,
                 to: name
             )
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
-            )
             return definition
         }
         deleteTagDefinition = { id in
             let update = try await module.deleteTagDefinition(id: id)
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
-            )
             return update
         }
         legacyFileRestorePlan = { entryID in
