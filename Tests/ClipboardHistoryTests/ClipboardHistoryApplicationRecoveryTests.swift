@@ -5,6 +5,60 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testDisablingSyncDuringApplicationPreparationKeepsTheOldPackageAcrossRestart() async throws {
+        let barrier = LinkedReplacementBarrier()
+        defer { barrier.release() }
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        }, prepareSource: { url in
+            try FileManager.default.removeItem(at: url)
+            _ = try ClipboardApplicationTestFixture.create(at: url,
+                bundleIdentifier: "dev.bybee.AnyDoor.tests.disabled-apply.\(UUID().uuidString)",
+                resource: "retained while disabled", signed: false)
+        }, sourceName: "Disabled Update.app")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let installed = ClipboardApplicationTestFixture(url: working.url)
+        let baseline = try installed.contentsSnapshot()
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("cancelled application candidate".utf8).write(to: fixture.original.appendingPathComponent("Contents/Resources/Resource.txt"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(displayed.first)
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        XCTAssertEqual(plan.state, .ready)
+        let application = Task { try await fixture.receiver.applyApplicationUpdate(plan) }
+        try await eventually { barrier.isWaiting }
+        let previousCancellations = await fixture.cloud.cancellationCount()
+
+        let disable = Task { try await fixture.receiver.setSyncEnabled(false) }
+        try await eventually { await fixture.cloud.cancellationCount() > previousCancellations }
+        barrier.release()
+        try await disable.value
+        do {
+            try await application.value
+            XCTFail("Disabling participation must revoke an application not yet exchanged")
+        } catch {}
+
+        XCTAssertEqual(try installed.contentsSnapshot(), baseline)
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        let page = try await reopened.page(.init())
+        let materialized = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing retained old application") }
+        XCTAssertEqual(page.entries.first?.linkedFileLocations.first?.baseVersionID, working.baseVersionID)
+        XCTAssertEqual(try ClipboardApplicationTestFixture(url: file.currentURL).contentsSnapshot(), baseline)
+        let restartedStatus = await reopened.syncStatus()
+        XCTAssertFalse(restartedStatus.isEnabled)
+    }
+
+    @MainActor
     func testReplacingApplicationIdentityDuringPreparationPreservesBothCompletePackages() async throws {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
