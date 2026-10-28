@@ -1,53 +1,87 @@
 ---
-import { icons } from '../lib/icons';
-import { copy } from '../lib/copy';
+import Bi from './Bi.astro';
+import { nav } from '../lib/content/nav';
+import { biAttrs } from '../lib/i18n';
+import { latestVersion } from '../lib/version';
 ---
 
-<nav class="nav">
-  <div class="nav-brand">
-    <img class="logo" src="/icon.png" alt="" width="26" height="26" />
-    <span>AnyDoor</span>
-  </div>
-  <div class="nav-links">
-    <a href="#demo"><span data-i18n-zh>{copy.nav.demo.zh}</span><span data-i18n-en>{copy.nav.demo.en}</span></a>
-    <a href="#why"><span data-i18n-zh>{copy.nav.why.zh}</span><span data-i18n-en>{copy.nav.why.en}</span></a>
-    <a href="#features"><span data-i18n-zh>{copy.nav.features.zh}</span><span data-i18n-en>{copy.nav.features.en}</span></a>
-    <a href="#capture"><span data-i18n-zh>{copy.nav.capture.zh}</span><span data-i18n-en>{copy.nav.capture.en}</span></a>
-    <a href="#faq"><span data-i18n-zh>{copy.nav.faq.zh}</span><span data-i18n-en>{copy.nav.faq.en}</span></a>
-    <a href="#download"><span data-i18n-zh>{copy.nav.download.zh}</span><span data-i18n-en>{copy.nav.download.en}</span></a>
-  </div>
-  <div class="nav-cta">
-    <div class="lang-toggle" role="group" aria-label="Language / 语言">
-      <button type="button" data-lang-btn="zh" aria-pressed="false" lang="zh">中</button>
-      <button type="button" data-lang-btn="en" aria-pressed="false" lang="en">EN</button>
-    </div>
-    <a class="gh" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer" aria-label="GitHub">
-      <span set:html={icons.github()} style="width:14px;height:14px" aria-hidden="true" />
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="AnyDoor">
+      <img src="/icon.png" alt="" width="28" height="28" />
+      <span>AnyDoor</span>
+      <span class="pn"><Bi text={nav.pn} /></span>
     </a>
+    <nav class="nav-links" {...biAttrs({ 'aria-label': nav.navAria })}>
+      {nav.links.map((l) => <a href={l.href}><Bi text={l.label} /></a>)}
+    </nav>
+    <div class="nav-act">
+      <div class="seg" role="group" data-lang-switch {...biAttrs({ 'aria-label': nav.langAria })}>
+        <button type="button" data-lang-btn="zh" aria-pressed="false" lang="zh-CN">中</button>
+        <button type="button" data-lang-btn="en" aria-pressed="false" lang="en">EN</button>
+      </div>
+      <!-- Mark the active language before first paint; the module script below
+           only runs after parsing. -->
+      <script is:inline>
+        (function () {
+          var lang = document.documentElement.getAttribute('data-lang') === 'en' ? 'en' : 'zh';
+          document.querySelectorAll('[data-lang-btn]').forEach(function (b) {
+            var on = b.getAttribute('data-lang-btn') === lang;
+            b.classList.toggle('on', on);
+            b.setAttribute('aria-pressed', String(on));
+          });
+        })();
+      </script>
+      <a class="btn btn-sig btn-sm nav-dl" href="#download"><span class="t"><Bi text={nav.download} /></span><span class="k">v{latestVersion}</span></a>
+    </div>
   </div>
-</nav>
+</header>
 
 <script>
-  // Language toggle — persists to localStorage, swaps data-lang on <html>.
-  const KEY = 'anydoor.lang';
-  const setLang = (lang: 'zh' | 'en') => {
-    document.documentElement.setAttribute('data-lang', lang);
-    document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
-    document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {
-      const active = b.dataset.langBtn === lang;
-      b.classList.toggle('is-active', active);
-      b.setAttribute('aria-pressed', String(active));
+  import { applyBiAttrs, currentLang, onLangChange, setLang } from '../lib/lang-client';
+  import type { Lang } from '../lib/i18n';
+
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]');
+  const sync = (lang: Lang) => {
+    buttons.forEach((b) => {
+      const on = b.dataset.langBtn === lang;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
     });
-    try { localStorage.setItem(KEY, lang); } catch {}
   };
 
-  // The <head> inline script already resolved data-lang (localStorage ||
-  // navigator.language) before paint — read it back as the source of truth and
-  // persist it so the choice sticks for return visits.
-  const initial = (document.documentElement.getAttribute('data-lang') || 'zh') as 'zh' | 'en';
-  setLang(initial);
-
-  document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {
-    b.addEventListener('click', () => setLang(b.dataset.langBtn as 'zh' | 'en'));
+  // The <head> script resolved data-lang before paint; bring the attributes
+  // rendered by biAttrs() in line with it.
+  applyBiAttrs();
+  onLangChange(sync);
+  buttons.forEach((b) => {
+    b.addEventListener('click', () => {
+      const lang = b.dataset.langBtn as Lang;
+      if (lang !== currentLang()) setLang(lang);
+    });
   });
 </script>
+
+<style>
+  .nav { position: sticky; top: 0; z-index: 50; background: color-mix(in oklch, var(--bone) 90%, transparent); backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2); border-bottom: 1px solid var(--rule); }
+  .nav-in { display: flex; align-items: center; gap: clamp(12px, 2vw, 28px); height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
+  .brand:hover { color: var(--ink); }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; box-shadow: 0 1px 0 var(--steel-2), 0 2px 6px rgba(20, 24, 38, 0.18); }
+  .brand .pn { font: 500 10.5px/1 var(--mono); color: var(--ink-2); padding: 4px 6px; border: 1px solid var(--rule); border-radius: 4px; letter-spacing: 0.04em; }
+  .nav-links { display: flex; gap: clamp(14px, 1.8vw, 26px); margin-left: auto; }
+  .nav-links a { font-size: 14px; text-decoration: none; color: var(--ink-2); font-weight: 500; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-act { display: flex; align-items: center; gap: 12px; }
+
+  @media (max-width: 900px) {
+    .nav-links { display: none; }
+    .nav-act { margin-left: auto; }
+  }
+  @media (max-width: 640px) {
+    .nav-dl .k { display: none; }
+  }
+  @media (max-width: 520px) {
+    .brand .pn { display: none; }
+  }
+</style>
