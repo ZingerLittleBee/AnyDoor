@@ -2,6 +2,22 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    /// Uses the shared content authority at dispatch time as well as freezing
+    /// time. Retained outbox metadata remains available to the cleanup ledger.
+    static func syncFileOutboxAuthority(accountID: String) -> SQL {
+        """
+        ((outbox.kind != 'fileBody' AND NOT EXISTS (SELECT 1 FROM clipboard_sync_file_versions AS version
+            WHERE version.publication_record_id = outbox.record_id))
+          OR EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
+            JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+            JOIN clipboard_representations AS representation ON representation.entry_id = member.entry_id
+              AND representation.item_index = member.item_index AND representation.representation_index = member.representation_index
+            WHERE member.account_id = outbox.account_id AND member.epoch = outbox.epoch
+              AND member.object_id = outbox.subject_id AND representation.kind = 'fileReference'
+              AND (\(Self.syncEntryPublicationAuthority(accountID: accountID)))))
+        """
+    }
+
     static func syncFileTransferSummary(_ descriptor: ClipboardSyncFileDescriptor, accountID: String, epoch: String,
         in database: Database) throws -> (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool) {
         if let body = descriptor.body, let upload = try Row.fetchOne(database, sql: """
@@ -56,7 +72,7 @@ extension ClipboardHistoryModule {
         case .accessDenied: .accessDenied
         case .accountChanged, .accountUnavailable: .accountChanged
         case .keyLocked, .keyUnavailable: .keyUnavailable
-        case .capabilityUnavailable, .missingRemoteState, .unsupportedVersion, .recordUnavailable: .unavailable
+        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion: .unavailable
         case .localStorage, nil: .localStorage
         }
     }

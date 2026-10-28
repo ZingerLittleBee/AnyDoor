@@ -71,6 +71,57 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置已与另一个文件关联。" } }
       }
     },
+  "clipboard.sync.fileDownload": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Download"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "下载"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileUpdateAvailable": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Update available; the previous version is ready to use"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "有可用更新，仍可使用上一个完整版本"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileProgress": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ of %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ / %@"
+        }
+      }
+    }
+  },
     "settings.clipboard.sync.authorizeRetained": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Include this Mac’s retained history for %@ in the current account"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "将本机为 %@ 保留的历史纳入当前账户同步"}}}},
     "settings.clipboard.sync.merge.title": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge Tags…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并标签…"}}}},
     "settings.clipboard.sync.merge.with": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge with %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "与 %@ 合并"}}}},

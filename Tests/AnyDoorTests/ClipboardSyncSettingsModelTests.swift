@@ -324,12 +324,13 @@ private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
 
 private actor ResetSettingsSyncTransport: ClipboardSyncTransport {
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
-        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) throws -> ClipboardSyncControl {
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
         throw ClipboardSyncServiceError.capabilityUnavailable
     }
-    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
         throw ClipboardSyncServiceError.capabilityUnavailable
     }
+
     private let scope = ClipboardSyncAccount(container: "test", environment: "test", owner: "reset-settings")
     private var descriptor: ClipboardSyncControl?
     private var failCleanup = true

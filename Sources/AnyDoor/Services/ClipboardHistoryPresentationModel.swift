@@ -25,6 +25,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         @Sendable (
             ClipboardHistoryMaterializationRequest
         ) async throws -> ClipboardHistoryMaterialization
+    let requestSyncFileDownload: @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void
+    let retrySyncFileTransfer: @Sendable () async -> Void
     let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
     let associateFileLocation: @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation
     let tagDefinitions:
@@ -92,6 +94,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         materialize = { request in
             try await module.materialize(request)
         }
+        requestSyncFileDownload = { entryID, objectID, versionID in
+            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID)
+        }
+        retrySyncFileTransfer = { await module.retrySync() }
         exportFiles = { entryID, destinations in
             try await module.exportFiles(entryID, to: destinations)
         }
@@ -184,6 +190,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome = { _ in
                 throw ClipboardHistoryModuleError.operationUnavailable
             },
+        requestSyncFileDownload: @escaping @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void = { _, _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        retrySyncFileTransfer: @escaping @Sendable () async -> Void = {},
         exportFiles: @escaping @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL] = { _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
         },
@@ -201,6 +211,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.count = count
         self.apply = apply
         self.materialize = materialize
+        self.requestSyncFileDownload = requestSyncFileDownload
+        self.retrySyncFileTransfer = retrySyncFileTransfer
         self.exportFiles = exportFiles
         self.associateFileLocation = associateFileLocation
         self.tagDefinitions = tagDefinitions
@@ -531,6 +543,20 @@ final class ClipboardHistoryPresentationModel {
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
             return false
+        }
+    }
+
+    func transferSyncFile(_ file: ClipboardHistorySyncFileSummary, entryID: ClipboardHistoryEntryID) async {
+        actionFailure = nil
+        do {
+            if file.uploadPending {
+                await operations.retrySyncFileTransfer()
+            } else {
+                try await operations.requestSyncFileDownload(entryID, file.id, file.versionID)
+            }
+            invalidateMaterializations(for: entryID)
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
         }
     }
 

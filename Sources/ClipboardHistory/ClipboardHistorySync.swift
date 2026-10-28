@@ -370,7 +370,9 @@ extension ClipboardHistoryModule {
                             arguments: [upload.record.recordID])
                         try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
                         try saveSyncAccount(state, in: database)
+                        if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
                     }
+                    if upload.record.kind == .fileBody { publishMutation() }
                     conflicts = 0
                 } catch ClipboardSyncServiceError.conflict {
                     conflicts += 1

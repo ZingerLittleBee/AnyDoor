@@ -23,10 +23,23 @@ enum ClipboardSyncFileTransfer {
     }
 
     static func readSegment(in directory: URL, index: Int) throws -> Data {
-        let url = segmentURL(in: directory, index: index)
+        let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        defer { close(parent) }
+        let descriptor = openat(parent, "\(index).ciphertext", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        defer { close(descriptor) }
+        return try readEncryptedDescriptor(descriptor)
+    }
+
+    static func readAsset(at url: URL) throws -> Data {
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
         defer { close(descriptor) }
+        return try readEncryptedDescriptor(descriptor)
+    }
+
+    private static func readEncryptedDescriptor(_ descriptor: Int32) throws -> Data {
         var status = stat()
         guard fstat(descriptor, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
               status.st_size >= 28, status.st_size <= maximumEncryptedSegmentBytes else {
@@ -111,10 +124,13 @@ enum ClipboardSyncFileTransfer {
         guard bytes.count >= 28, bytes.count <= maximumEncryptedSegmentBytes else {
             throw ClipboardSyncServiceError.corruptData
         }
-        let destination = segmentURL(in: directory, index: index)
-        let descriptor = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        defer { close(parent) }
+        let temporary = "\(UUID().uuidString).partial"
+        let descriptor = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
-        defer { close(descriptor) }
+        defer { close(descriptor); _ = unlinkat(parent, temporary, 0) }
         try bytes.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {
@@ -125,6 +141,15 @@ enum ClipboardSyncFileTransfer {
             }
         }
         guard fsync(descriptor) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard linkat(parent, temporary, parent, "\(index).ciphertext", 0) == 0,
+              fsync(parent) == 0 else { throw ClipboardSyncServiceError.localStorage }
+    }
+
+    static func removeSegment(in directory: URL, index: Int) throws {
+        let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        defer { close(parent) }
+        guard unlinkat(parent, "\(index).ciphertext", 0) == 0 || errno == ENOENT else { throw ClipboardSyncServiceError.localStorage }
     }
 
     static func syncDirectory(_ directory: URL) throws {

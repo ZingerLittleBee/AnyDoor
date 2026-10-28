@@ -50,6 +50,7 @@ extension ClipboardHistoryModule {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+            try validateSyncFileDescriptor(descriptor, epoch: context.control.epoch, keyID: context.control.keyID)
             guard descriptor.state == .available else { throw ClipboardHistoryModuleError.operationUnavailable }
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_file_downloads(account_id, epoch, object_id, version_id, authorized)
@@ -88,15 +89,29 @@ extension ClipboardHistoryModule {
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else { return nil }
             let url = ClipboardSyncFileTransfer.segmentURL(in: directory, index: index)
-            let encrypted: Data
+            var cached: (Data, Data)?
             if FileManager.default.fileExists(atPath: url.path) {
-                encrypted = try ClipboardSyncFileTransfer.readSegment(in: directory, index: index)
+                do {
+                    let bytes = try ClipboardSyncFileTransfer.readSegment(in: directory, index: index)
+                    let plaintext = try ClipboardSyncCodec.openFileSegment(bytes, descriptor: descriptor,
+                        account: account, control: control, key: key, index: index)
+                    cached = (bytes, plaintext)
+                } catch {
+                    // Only authenticated units can satisfy a durable cursor.
+                    // A torn or damaged cache unit is fetched again on retry.
+                    try ClipboardSyncFileTransfer.removeSegment(in: directory, index: index)
+                }
+            }
+            let encrypted: Data
+            let plaintext: Data
+            if let cached {
+                (encrypted, plaintext) = cached
             } else {
                 encrypted = try await services.transport.downloadFileSegment(body, index: index, for: account)
                 try await admitSync(generation, account: account, services: services)
+                plaintext = try ClipboardSyncCodec.openFileSegment(encrypted, descriptor: descriptor,
+                    account: account, control: control, key: key, index: index)
             }
-            let plaintext = try ClipboardSyncCodec.openFileSegment(encrypted, descriptor: descriptor,
-                account: account, control: control, key: key, index: index)
             guard plaintext.count == Int(min(Int64(ClipboardSyncCodec.chunkByteCount), size - plainBytes)) else {
                 throw ClipboardSyncServiceError.corruptData
             }
@@ -128,12 +143,25 @@ extension ClipboardHistoryModule {
         let candidate = try await ClipboardSyncFilePublication.construct(descriptor: descriptor,
             encryptedDirectory: directory, root: syncWorkingRoot, account: account, control: control, key: key)
         defer { ClipboardSyncFilePublication.discard(candidate) }
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         try await waitForWriteTurn()
         try admitSync(generation)
         guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { return nil }
         return try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: syncWorkingRoot,
             accountID: account.identifier, faults: faultInjector)
+    }
+
+    func admitSyncFilePublication(_ generation: UInt64, account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, services: ClipboardSyncServices) async throws {
+        try await admitSync(generation, account: account, services: services)
+        guard let current = try await services.transport.control(for: account), current.phase == "active",
+              current.epoch == control.epoch, current.keyID == control.keyID else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        try await admitSync(generation, account: account, services: services)
+        guard let local = try syncFileRead({ try syncFileContext(in: $0) }),
+              local.control.epoch == control.epoch, local.control.keyID == control.keyID,
+              local.control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
     }
 
     func storeSyncFileUpload(_ upload: ClipboardSyncFileUpload, objectID: UUID,
@@ -152,7 +180,14 @@ extension ClipboardHistoryModule {
         try await waitForWriteTurn()
         try admitSync(generation)
         try syncWrite { database in
-            try database.execute(sql: "UPDATE clipboard_sync_file_uploads SET completed_bytes = ?, failure = NULL WHERE record_id = ?",
+            guard let context = try syncFileContext(in: database), context.control.epoch == record.epoch,
+                  context.control.keyID == record.keyID, context.control.phase == "active",
+                  try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox AS outbox
+                      WHERE outbox.record_id = \(record.recordID) AND outbox.account_id = \(context.account.identifier)
+                        AND (\(Self.syncFileOutboxAuthority(accountID: context.account.identifier))))
+                    """)) == true else { throw ClipboardSyncServiceError.accessDenied }
+            try database.execute(sql: "UPDATE clipboard_sync_file_uploads SET completed_bytes = MAX(completed_bytes, ?), failure = NULL WHERE record_id = ?",
                 arguments: [bytes, record.recordID])
             try Self.bumpHistoryRevision(in: database)
         }

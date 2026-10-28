@@ -168,11 +168,12 @@ extension ClipboardHistoryModule {
 
     func nextSyncUpload(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {
         try requiredDatabase().read { database in
-            guard let row = try Row.fetchOne(database, sql: """
-                SELECT record_id, metadata FROM clipboard_sync_outbox
-                WHERE account_id = ? AND epoch = ? AND acknowledged = 0
+            guard let row = try Row.fetchOne(database, SQLRequest<Row>(literal: """
+                SELECT record_id, metadata FROM clipboard_sync_outbox AS outbox
+                WHERE account_id = \(account.identifier) AND epoch = \(control.epoch.uuidString) AND acknowledged = 0
+                  AND (\(Self.syncFileOutboxAuthority(accountID: account.identifier)))
                 ORDER BY CASE kind WHEN 'tag' THEN 0 ELSE 1 END, rowid LIMIT 1
-                """, arguments: [account.identifier, control.epoch.uuidString]) else { return nil }
+                """)) else { return nil }
             let id: String = row["record_id"]
             let metadata: Data = row["metadata"]
             let record = try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: metadata)

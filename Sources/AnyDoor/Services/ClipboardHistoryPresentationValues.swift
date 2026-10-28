@@ -13,6 +13,7 @@ extension ClipboardHistoryEntry {
         if syncFiles.contains(where: { $0.state == .localUnavailable }) { return L(.clipboardSyncFileLocalUnavailable) }
         if syncFiles.contains(where: { $0.state == .sourceUnavailable }) { return L(.clipboardSyncFileSourceUnavailable) }
         if syncFiles.contains(where: { $0.state == .unsupportedKind }) { return L(.clipboardSyncFileUnsupportedKind) }
+        if syncFiles.contains(where: { $0.state == .updateAvailable }) { return L(.clipboardSyncFileUpdateAvailable) }
         if syncFiles.contains(where: { $0.state == .waitingForUpload }) { return L(.clipboardSyncFileWaitingForUpload) }
         if syncFiles.contains(where: { $0.state == .waitingForDownload }) { return L(.clipboardSyncFileWaitingForDownload) }
         return L(.clipboardSyncFileAvailable)

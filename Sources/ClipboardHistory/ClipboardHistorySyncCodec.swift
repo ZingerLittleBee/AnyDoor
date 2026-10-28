@@ -78,7 +78,7 @@ enum ClipboardSyncCodec {
     ) throws -> ClipboardSyncUpload {
         let kind: ClipboardSyncRecordKind = switch content {
         case .tag, .tagMembership, .tagState, .tagMerge: .tag
-        case .text, .textEdit, .entry, .metadata, .fileVersion, .deletion: .entry
+        case .text, .textEdit, .entry, .metadata, .deletion, .fileVersion: .entry
         case .fileBody: .fileBody
         }
         let plaintext = try JSONEncoder().encode(content)

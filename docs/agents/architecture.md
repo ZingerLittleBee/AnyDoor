@@ -181,19 +181,32 @@ for isolated real-store coverage; those tests do not establish live iCloud deliv
 
 `ClipboardHistorySyncFiles` prepares currently accessible ordinary-file bytes
 before staging an entry envelope. Source paths and bookmarks remain local.
-The small-file path automatically fetches at most 5,000,000 original bytes;
-larger files retain explicit pending-upload metadata until the streaming slice.
+Each top-level file at or below 5,000,000 original bytes downloads automatically;
+larger versions require an exact-version download action. Uploads are automatic
+for eligible files of any size. A previously complete local version remains
+usable until the requested replacement is ready. Preview, copy, Open, and Reveal
+never authorize a pending download.
 Directory/package/symlink content is not flattened into an ordinary file.
 Metadata discovery skips file-body assets; only an authenticated entry descriptor
 authorizes a version download. Normal paste and host actions require every file
 member to be available and never silently return a subset.
 
-`ClipboardSyncFileIO` verifies authentication, complete length, and digest in
-memory before writing any plaintext. It publishes into the visible
+`ClipboardSyncFileTransfer` freezes coordinated source reads into 4 MiB
+authenticated encrypted segments, with no whole-file allocation or application
+size ceiling. `ClipboardSyncFilePublication` verifies the full segment sequence,
+length, and digest before a second bounded pass builds a visible working file.
+The earlier bounded small-file envelope remains readable through
+`ClipboardSyncFileIO`. These paths publish into the visible
 `~/Documents/AnyDoor/Clipboard/` working root, under account/object/version folders,
 with no-follow directory traversal, a synced ordinary pending output, and atomic
 non-overwriting publication. This visible working location is the plaintext
 exception; encrypted transfer/outbox storage has no plaintext download cache.
+The v23 transfer journal persists per-version consent, completed bytes, failures,
+and upload operation ownership across relaunch. Retry authenticates cached units
+and fetches missing or damaged units. Card and list controls display progress and
+typed failures. Completed upload metadata remains available to withdrawal cleanup,
+including segment ranges whose remote manifest was never committed. Final file
+publication rechecks account, active epoch, local generation, and live membership.
 The version descriptor is durable before publication, so interrupted publication
 retries only adopt identical complete bytes and refuse an unrelated existing file.
 Missing or replaced working files are unavailable, not a complete-looking path.

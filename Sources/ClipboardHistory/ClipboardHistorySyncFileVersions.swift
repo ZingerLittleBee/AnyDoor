@@ -66,7 +66,7 @@ extension ClipboardHistoryModule {
         }
         let account = context.account
         let control = context.control
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         guard !parents.isEmpty, Set(parents).count == parents.count,
               try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents),
               let displayName = try syncFileSelection(objectID: objectID)?.latest.displayName else {
@@ -76,7 +76,7 @@ extension ClipboardHistoryModule {
               ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
             throw ClipboardSyncServiceError.keyUnavailable
         }
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         let bookmark = try sourceURL.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil)
         let versionID = UUID()
         let frozen = try await ClipboardSyncFileTransfer.freeze(url: sourceURL, bookmark: bookmark, identity: expectedSourceIdentity,
@@ -84,7 +84,7 @@ extension ClipboardHistoryModule {
             account: account, control: control, key: key, objectID: objectID, versionID: versionID)
         var stored = false
         defer { if !stored { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         guard try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
