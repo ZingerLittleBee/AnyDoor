@@ -137,7 +137,7 @@ extension ClipboardHistoryModule {
         }
         let path: String = row["path"]
         let available = ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: row["identity"], nativeIdentity: row["native_identity"])
-        let isApplication = (row["is_application"] as Bool? ?? false) || ClipboardApplicationPackage.isApplication(URL(fileURLWithPath: path))
+        let isApplication = (row["is_application"] as Bool? ?? false) || ClipboardApplicationPackage.requiresExplicitUpdate(URL(fileURLWithPath: path))
         let applicationVersion = row.hasColumn("application_update_version")
             ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,

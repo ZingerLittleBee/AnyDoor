@@ -27,7 +27,7 @@ extension ClipboardHistoryModule {
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
             try await admitSync(generation, account: account, services: services)
-            let isApplication = source.isApplication || ClipboardApplicationPackage.isApplication(source.url)
+            let isApplication = source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url)
             if isApplication, !source.isApplication {
                 try syncWrite { try $0.execute(sql: "UPDATE clipboard_sync_linked_locations SET is_application = 1 WHERE id = ?",
                     arguments: [source.id.uuidString]) }
@@ -145,9 +145,10 @@ extension ClipboardHistoryModule {
 
     func applyLinkedFileVersion(_ version: ClipboardSyncVerifiedFileVersion, to source: ClipboardLinkedLocationSource,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64,
-        applicationPlan: ClipboardApplicationUpdateSnapshot? = nil) async throws {
+        applicationPlan: ClipboardApplicationUpdateSnapshot? = nil,
+        applicationGuard: ClipboardApplicationRunningGuard? = nil) async throws {
         guard let services = syncServices else { return }
-        guard applicationPlan != nil || !(source.isApplication || ClipboardApplicationPackage.isApplication(source.url)) else {
+        guard applicationPlan != nil || !(source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url)) else {
             throw ClipboardHistoryApplicationUpdateError.stalePlan
         }
         let preparation = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.prepareReplacement(version, at: source.url) }
@@ -169,7 +170,8 @@ extension ClipboardHistoryModule {
         let database = try requiredDatabase()
         let application = Task.detached(priority: .utility) {
             try ClipboardLinkedFileIO.applyReplacement(replacement, to: source, faultInjector: faults) { mutation in
-                try gate.perform(generation: generation) {
+                let authorizedMutation: @Sendable () throws -> Bool = {
+                    try gate.perform(generation: generation) {
                     // Serialize the last authority read with deletion, withdrawal,
                     // and reset writes. No hashing or network I/O holds this turn.
                     try database.write { database in
@@ -182,7 +184,10 @@ extension ClipboardHistoryModule {
                         }
                         return try mutation()
                     }
+                    }
                 }
+                if let applicationGuard { return try applicationGuard.perform(authorizedMutation) }
+                return try authorizedMutation()
             }
         }
         let proof = try await withTaskCancellationHandler { try await application.value } onCancel: { application.cancel() }

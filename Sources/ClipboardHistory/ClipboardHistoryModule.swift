@@ -110,6 +110,7 @@ public actor ClipboardHistoryModule {
     var linkedFileObservationTasks: [UUID: Task<Void, Never>] = [:]
     var linkedFileObservationRevisions: [UUID: UInt64] = [:]
     var linkedFileIdentityEvents: [UUID: ClipboardLinkedFileIdentityEvent] = [:]
+    var applicationRunningGuards: [UUID: ClipboardApplicationRunningGuard] = [:]
     var syncSuspended = true
     var syncAccountBindingGeneration: UInt64?
 

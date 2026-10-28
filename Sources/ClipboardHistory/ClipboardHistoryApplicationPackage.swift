@@ -2,6 +2,33 @@ import Darwin
 import Foundation
 
 enum ClipboardApplicationPackage {
+    /// A whole-root exchange also replaces applications nested in a folder.
+    /// Symbolic links are content, never authority to inspect another tree.
+    static func applicationURLs(in root: URL) throws -> [URL] {
+        var status = stat()
+        guard lstat(root.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { return [] }
+        var result = isApplication(root) ? [root] : []
+        var failure: (any Error)?
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
+            options: [], errorHandler: { _, error in failure = error; return false }) else {
+            throw ClipboardHistoryApplicationUpdateError.identityUncertain
+        }
+        for case let url as URL in enumerator {
+            try Task.checkCancellation()
+            guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            if status.st_mode & mode_t(S_IFMT) == mode_t(S_IFLNK) { enumerator.skipDescendants(); continue }
+            if status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR), isApplication(url) { result.append(url) }
+        }
+        if let failure { throw failure }
+        return result
+    }
+
+    static func requiresExplicitUpdate(_ url: URL) -> Bool {
+        // A failed classification must not silently authorize a background swap.
+        (try? !applicationURLs(in: url).isEmpty) ?? true
+    }
+
     static func isApplication(_ url: URL) -> Bool {
         var status = stat()
         guard lstat(url.path, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { return false }
