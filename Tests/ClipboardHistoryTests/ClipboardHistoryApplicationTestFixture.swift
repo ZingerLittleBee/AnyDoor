@@ -50,7 +50,8 @@ struct ClipboardApplicationTestFixture: Sendable {
 
     @MainActor
     func launch() async throws -> ClipboardApplicationTestProcess {
-        let control = url.deletingLastPathComponent().appendingPathComponent("fixture-process-\(UUID())")
+        // Keep process channels outside any synchronized parent directory too.
+        let control = FileManager.default.temporaryDirectory.appendingPathComponent("fixture-process-\(UUID())")
         let manager = FileManager.default
         try manager.createDirectory(at: control, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let home = control.appendingPathComponent("Home")
