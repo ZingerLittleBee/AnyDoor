@@ -8,6 +8,93 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDeletionCleanupResumesAfterLostProviderResponseAndRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-purge-retry-\(UUID())")
+        let module = makeModule(services: services, keyByte: 0x9C, time: 1_000, root: root)
+        let shared = try await module.capture(.init(source: .unknown, content: .text("purge after restart")))
+        let tag = try await module.createTagDefinition(named: "Cleanup", assigningTo: shared.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        try await module.setSyncEnabled(true)
+        _ = try await module.apply(.editText(shared.entryID, "published version"))
+        await module.retrySync()
+        await cloud.loseNextPurgeResponse()
+        _ = try await module.apply(.delete(shared.entryID))
+        await module.retrySync()
+        let failed = await module.syncStatus()
+        XCTAssertEqual(failed.phase, .failed(.network))
+        try await module.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x9C, time: 2_000, root: root)
+        await reopened.resumeSync()
+        let status = await reopened.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let remaining = await cloud.currentUploads()
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        let page = try await reopened.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+    }
+
+    func testInterruptedDeletionRollsBackPreservationAndRetriesExactlyOnce() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-delete-rollback-\(UUID())")
+        let shouldFail = OSAllocatedUnfairLock(initialState: false)
+        let first = makeModule(services: services, keyByte: 0x9D, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x9E, time: 2_000, root: root,
+            faults: .init(shouldFail: { point in point == .databaseTransaction && shouldFail.withLock { $0 } }))
+        let shared = try await first.capture(.init(source: .unknown, content: .text("rollback root")))
+        let tag = try await first.createTagDefinition(named: "Rollback", assigningTo: shared.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        _ = try await second.apply(.editText(shared.entryID, "transactional offline edit"))
+        _ = try await first.apply(.delete(shared.entryID))
+        await first.retrySync()
+        shouldFail.withLock { $0 = true }
+        await second.resumeSync()
+        let unchanged = try await second.page(.init())
+        XCTAssertEqual(unchanged.entries.map(\.id), [shared.entryID])
+        XCTAssertEqual(unchanged.entries.first?.previewText, "transactional offline edit")
+        let failedNotices = try await second.preservedSyncEdits()
+        XCTAssertTrue(failedNotices.isEmpty)
+        try await second.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x9E, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let saved = try await reopened.page(.init())
+        XCTAssertEqual(saved.entries.count, 1)
+        XCTAssertNotEqual(saved.entries.first?.id, shared.entryID)
+        XCTAssertEqual(saved.entries.first?.previewText, "transactional offline edit")
+        await cloud.replayAllChangesInReverseOrder()
+        await reopened.retrySync()
+        let replay = try await reopened.page(.init())
+        XCTAssertEqual(replay.entries.map(\.id), saved.entries.map(\.id))
+    }
+
+    func testDeletionReclaimsPublishedRootAndEditCiphertextButKeepsReplayFence() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0x9A, time: 1_000)
+        let shared = try await module.capture(.init(source: .unknown, content: .text("cloud secret")))
+        let tag = try await module.createTagDefinition(named: "Purge", assigningTo: shared.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        try await module.setSyncEnabled(true)
+        _ = try await module.apply(.editText(shared.entryID, "updated cloud secret"))
+        await module.retrySync()
+        let contentRecords = await cloud.currentUploads().filter { $0.record.kind == .entry }.map(\.record.recordID)
+        XCTAssertEqual(contentRecords.count, 2)
+        _ = try await module.apply(.delete(shared.entryID))
+        await module.retrySync()
+        let remaining = await cloud.currentUploads()
+        XCTAssertTrue(Set(contentRecords).isDisjoint(with: remaining.map(\.record.recordID)))
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        let peer = makeModule(services: services, keyByte: 0x9B, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let page = try await peer.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+    }
+
     func testDeletionWinsWhenAnOfflineUploadLosesItsControlRace() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -1880,6 +1967,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
+    private var losesPurgeResponse = false
+    private var purgedRecords = Set<String>()
     private var revision = 0
     private var holdsEntryCommit = false
     private var heldEntryCommit: CheckedContinuation<Void, Never>?
@@ -1958,7 +2047,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
-        let page = reversesAllChanges ? uploads.reversed().map(\.record) : uploads.dropFirst(offset).map(\.record)
+        let page = (reversesAllChanges ? uploads.reversed().map(\.record) : uploads.dropFirst(offset).map(\.record)).filter { !purgedRecords.contains($0.recordID) }
         return ClipboardSyncChanges(records: reversesDelivery ? Array(page.reversed()) : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
@@ -2003,6 +2092,20 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             losesEntryResponse = false
             throw ClipboardSyncServiceError.network(retryAfter: nil)
         }
+        return result
+    }
+    func loseNextPurgeResponse() { losesPurgeResponse = true }
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        try checkAccount(account)
+        guard let current = descriptors[account.identifier], current == control else { throw ClipboardSyncServiceError.conflict }
+        guard current.phase == "active", current.epoch == record.epoch, current.keyID == record.keyID else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        purgedRecords.insert(record.recordID)
+        let result = advanced(current)
+        descriptors[account.identifier] = result
+        if losesPurgeResponse { losesPurgeResponse = false; throw ClipboardSyncServiceError.network(retryAfter: nil) }
         return result
     }
     func holdNextEntryCommit() { holdsEntryCommit = true }
@@ -2075,7 +2178,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func switchAccount(to owner: String) {
         currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
     }
-    func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
+    func currentUploads() -> [ClipboardSyncUpload] { (records[currentAccount.identifier] ?? []).filter { !purgedRecords.contains($0.record.recordID) } }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }

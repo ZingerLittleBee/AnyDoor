@@ -18,12 +18,26 @@ extension ClipboardHistoryModule {
                 record_id TEXT, origin TEXT NOT NULL,
                 PRIMARY KEY(account_id, epoch, shared_id)
             ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_subject_records (
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, shared_id TEXT NOT NULL,
+                record_id TEXT NOT NULL, metadata BLOB NOT NULL, purged INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account_id, epoch, record_id)
+            ) WITHOUT ROWID;
+            INSERT INTO clipboard_sync_subject_records(account_id, epoch, shared_id, record_id, metadata)
+                SELECT account_id, epoch, subject_id, record_id, metadata FROM clipboard_sync_outbox WHERE kind = 'entry';
             CREATE TABLE clipboard_sync_preserved_edits (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, shared_id TEXT NOT NULL, version_id TEXT NOT NULL,
                 local_entry_id TEXT NOT NULL UNIQUE, dismissed INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(account_id, epoch, shared_id, version_id)
             ) WITHOUT ROWID;
             """)
+        for row in try Row.fetchAll(database, sql: "SELECT id, state FROM clipboard_sync_accounts") {
+            let data: Data = row["state"]
+            var state = try JSONDecoder().decode(ClipboardSyncAccountState.self, from: data)
+            state.cursor = nil
+            try database.execute(sql: "UPDATE clipboard_sync_accounts SET state = ? WHERE id = ?",
+                arguments: [try JSONEncoder().encode(state), row["id"] as String])
+        }
     }
 
     static func isSyncDeleted(_ sharedID: String, accountID: String, epoch: String, in database: Database) throws -> Bool {

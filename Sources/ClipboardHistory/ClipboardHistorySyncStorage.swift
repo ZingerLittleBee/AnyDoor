@@ -149,6 +149,10 @@ extension ClipboardHistoryModule {
             VALUES (?, ?, ?, ?, ?, ?)
             """, arguments: [upload.record.recordID, account.identifier, upload.record.epoch.uuidString,
                                subjectID, upload.record.kind.rawValue, try JSONEncoder().encode(upload.record)])
+        if upload.record.kind == .entry,
+           try !Self.isSyncDeleted(subjectID, accountID: account.identifier, epoch: upload.record.epoch.uuidString, in: database) {
+            try Self.rememberSyncContentRecord(upload.record, subjectID: subjectID, accountID: account.identifier, in: database)
+        }
         for (index, chunk) in upload.chunks.enumerated() {
             try database.execute(sql: "INSERT INTO clipboard_sync_chunks(record_id, chunk_index, ciphertext) VALUES (?, ?, ?)",
                 arguments: [upload.record.recordID, index, chunk])
@@ -200,6 +204,9 @@ extension ClipboardHistoryModule {
             guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
             try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
+            if let subject = content.entrySubjectID {
+                try Self.rememberSyncContentRecord(record, subjectID: subject, accountID: account.identifier, in: database)
+            }
             if let subject = content.entrySubjectID,
                try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
                 try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
