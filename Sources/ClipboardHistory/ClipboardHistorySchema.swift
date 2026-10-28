@@ -226,6 +226,9 @@ extension ClipboardHistoryModule {
                 ) WITHOUT ROWID;
                 """)
         }
+        migrator.registerMigration("v22_clipboard_sync_deletion") { database in
+            try Self.createSyncDeletionSchema(in: database)
+        }
         return migrator
     }
 

@@ -202,7 +202,10 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 guard let result = fetched[id] else { throw ClipboardSyncServiceError.corruptData }
                 let chunk: CKRecord
                 do { chunk = try result.get() }
-                catch { throw Self.failure(error) }
+                catch {
+                    if Self.hasCode(error, .unknownItem) { throw ClipboardSyncServiceError.recordUnavailable }
+                    throw Self.failure(error)
+                }
                 try validateChunk(chunk, remote: record, index: start + offset)
                 guard let asset = chunk["asset"] as? CKAsset, let url = asset.fileURL else {
                     throw ClipboardSyncServiceError.corruptData
@@ -418,6 +421,62 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             let token = try NSKeyedArchiver.archivedData(withRootObject: fetched.token, requiringSecureCoding: true)
             return ClipboardSyncCleanupPage(control: advanced, cursor: token, deletedRecordCount: ids.count,
                 hasMore: fetched.moreComing || !ids.isEmpty)
+        } catch {
+            try checkCancellation(generation)
+            throw Self.failure(error)
+        }
+    }
+
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        let generation = cancellationGeneration
+        let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
+        try validateControl(control, account: account)
+        try validateMetadata(record)
+        guard record.epoch == control.epoch, record.keyID == control.keyID else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        var current = control
+        do {
+            // Keep the manifest until every chunk batch has been removed. A
+            // lost response can repeat each batch without losing its identity.
+            for start in stride(from: 0, to: record.chunkCount, by: Self.batchSize) {
+                let end = start + min(Self.batchSize, record.chunkCount - start)
+                let ids = (start..<end).map { chunkID(record, index: $0, account: account) }
+                let fetched = try await fetchRecords(ids, desiredKeys: Self.chunkMetadataKeys, database: database)
+                try checkCancellation(generation)
+                var present: [CKRecord.ID] = []
+                for (offset, id) in ids.enumerated() {
+                    guard let result = fetched[id] else { throw ClipboardSyncServiceError.corruptData }
+                    switch result {
+                    case .success(let chunk):
+                        try validateChunk(chunk, remote: record, index: start + offset)
+                        present.append(id)
+                    case .failure(let error):
+                        guard Self.hasCode(error, .unknownItem) else { throw error }
+                    }
+                }
+                if !present.isEmpty {
+                    let fence = try controlRecord(current, account: account)
+                    let saved = try await saveAtomically([fence], deleting: present, database: database)
+                    try checkCancellation(generation)
+                    guard let authoritative = saved[fence.recordID] else { throw ClipboardSyncServiceError.corruptData }
+                    current = try decodeControl(authoritative, account: account)
+                }
+            }
+            let id = CKRecord.ID(recordName: record.recordID, zoneID: zoneID(account))
+            let manifest = try await fetchOptionalRecord(id, desiredKeys: ["metadata"], database: database)
+            try checkCancellation(generation)
+            if let manifest {
+                guard try decodeMetadata(manifest) == record else { throw ClipboardSyncServiceError.corruptData }
+                let fence = try controlRecord(current, account: account)
+                let saved = try await saveAtomically([fence], deleting: [id], database: database)
+                try checkCancellation(generation)
+                guard let authoritative = saved[fence.recordID] else { throw ClipboardSyncServiceError.corruptData }
+                current = try decodeControl(authoritative, account: account)
+            }
+            return current
         } catch {
             try checkCancellation(generation)
             throw Self.failure(error)
@@ -680,16 +739,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                     let deleteErrors = deleted.values.compactMap { result -> Error? in
                         if case .failure(let error) = result { return error }; return nil
                     }
-                    let errors = deleteErrors + collected.values.compactMap { result -> Error? in
+                    let saveErrors = collected.values.compactMap { result -> Error? in
                         if case .failure(let error) = result { return error }
                         return nil
                     }
-                    if let conflict = errors.first(where: { Self.hasCode($0, .serverRecordChanged) }) {
-                        throw conflict
-                    }
-                    if let substantive = errors.first(where: { !Self.hasCode($0, .batchRequestFailed) }) {
-                        throw substantive
-                    }
+                    if let error = Self.atomicModificationFailure(saveErrors: saveErrors, deleteErrors: deleteErrors) { throw error }
                     try outcome.get()
                     guard collected.count == records.count, deleted.count == ids.count else { throw ClipboardSyncServiceError.corruptData }
                     continuation.resume(returning: try collected.mapValues { try $0.get() })
@@ -801,6 +855,24 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         }
         try checkCancellation(generation)
         return value
+    }
+
+    nonisolated static func atomicModificationFailure(saveErrors: [Error], deleteErrors: [Error]) -> Error? {
+        let saveFailures = saveErrors.filter { !hasCode($0, .batchRequestFailed) }
+        let deleteFailures = deleteErrors.filter { !hasCode($0, .batchRequestFailed) }
+        // Missing authority and access failures cannot be hidden by an already
+        // absent deletion target. Atomic failure has not acknowledged the CAS.
+        if let failure = saveFailures.first(where: { !hasCode($0, .serverRecordChanged) }) { return Self.failure(failure) }
+        if let failure = deleteFailures.first(where: { !hasCode($0, .unknownItem) && !hasCode($0, .serverRecordChanged) }) {
+            return Self.failure(failure)
+        }
+        if (saveFailures + deleteFailures).contains(where: { hasCode($0, .serverRecordChanged) }) {
+            return ClipboardSyncServiceError.conflict
+        }
+        if deleteFailures.contains(where: { hasCode($0, .unknownItem) }) {
+            return ClipboardSyncServiceError.conflict
+        }
+        return nil
     }
 
     private nonisolated static func hasCode(_ error: Error, _ code: CKError.Code) -> Bool {

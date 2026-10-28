@@ -57,7 +57,12 @@ extension ClipboardHistoryModule {
     /// bound inside the literal so callers never manage this predicate's slots.
     static func syncEntryPublicationAuthority(accountID: String) -> SQL {
         """
-        NOT EXISTS (SELECT 1 FROM clipboard_sync_reset_exclusions AS retired
+        NOT EXISTS (SELECT 1 FROM clipboard_sync_preserved_edits WHERE local_entry_id = entry.id)
+        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
+            JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = shared.account_id
+                AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id
+            WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID))
+        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_reset_exclusions AS retired
                     WHERE retired.account_id = \(accountID) AND retired.local_entry_id = entry.id)
         AND NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
                     WHERE blocked.account_id = \(accountID) AND blocked.local_entry_id = entry.id)
@@ -72,7 +77,8 @@ extension ClipboardHistoryModule {
 
     /// Admission is for the whole entry, never a filtered representation subset.
     static let syncEntryEligibility = """
-        EXISTS (SELECT 1 FROM clipboard_items WHERE entry_id = entry.id)
+        NOT EXISTS (SELECT 1 FROM clipboard_sync_preserved_edits WHERE local_entry_id = entry.id)
+        AND EXISTS (SELECT 1 FROM clipboard_items WHERE entry_id = entry.id)
         AND NOT EXISTS (SELECT 1 FROM clipboard_items AS item
             WHERE item.entry_id = entry.id AND NOT EXISTS (
                 SELECT 1 FROM clipboard_representations AS representation

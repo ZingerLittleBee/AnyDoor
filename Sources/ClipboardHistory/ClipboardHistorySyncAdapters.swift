@@ -74,6 +74,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case localStorage
     case conflict
     case missingRemoteState
+    case recordUnavailable
     case corruptData
     case unsupportedVersion
 }
@@ -101,6 +102,10 @@ protocol ClipboardSyncTransport: Sendable {
         for account: ClipboardSyncAccount,
         control: ClipboardSyncControl
     ) async throws -> ClipboardSyncControl
+    /// Removes a retired content operation and its chunks, with active control
+    /// CAS on every bounded batch. Only authenticated domain receipts qualify.
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl
     func cancel() async
     /// Conditional phase transition on the permanent authority record.
     func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
@@ -112,6 +117,11 @@ protocol ClipboardSyncTransport: Sendable {
 }
 
 extension ClipboardSyncTransport {
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+
     func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
                     for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl {
         throw ClipboardSyncServiceError.capabilityUnavailable

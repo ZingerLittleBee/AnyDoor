@@ -8,238 +8,65 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
-    func testCloudResetPreservesLocalHistoryAndKeyButRetiresSharedAuthority() async throws {
+    func testCloudResetStillCompletesWhenLocalHistoryWasAlreadyDeleted() async throws {
         let source = try await recoverySource()
-        let account = try await source.cloud.account()
-        let before = try await source.cloud.control(for: account)
         let page = try await source.sender.page(.init())
+        let id = try XCTUnwrap(page.entries.first?.id)
+        _ = try await source.sender.apply(.delete(id))
         let confirmation = try await source.sender.prepareCloudReset()
         try await source.sender.clearCloudDataAndStopSync(confirmation)
         let status = await source.sender.syncStatus()
-        XCTAssertFalse(status.isEnabled)
         XCTAssertEqual(status.cloudReset?.stage, .completed)
-        let after = try await source.cloud.control(for: account)
-        XCTAssertEqual(after?.phase, "stopped")
-        XCTAssertNotEqual(after?.epoch, before?.epoch)
-        XCTAssertEqual(after?.keyID, before?.keyID)
         let uploads = await source.cloud.currentUploads()
         XCTAssertTrue(uploads.isEmpty)
-        let keyCount = await source.keys.count()
-        XCTAssertEqual(keyCount, 1)
-        let retained = try await source.sender.page(.init())
-        XCTAssertEqual(retained.entries.map(\.id), page.entries.map(\.id))
-        await source.sender.resumeSync()
-        let stillStopped = try await source.cloud.control(for: account)
-        XCTAssertEqual(stillStopped, after)
     }
 
-    func testCloudResetRequiresManualNewEpochAndTagSelectionOnBothDevices() async throws {
+    func testCloudResetDiscardsAQueuedTagMergeWithoutChangingLocalTags() async throws {
         let source = try await recoverySource()
-        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x21, time: 2_000)
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x29, time: 2_000)
+        let sourceTag = try await source.sender.syncTags().first { $0.id == source.tag }
+        let local = try await peer.capture(.init(source: .unknown, content: .text("locally merged before reset")))
+        let localTag = try await peer.createTagDefinition(named: try XCTUnwrap(sourceTag).displayName, assigningTo: local.entryID).definition
         try await peer.setSyncEnabled(true)
         await peer.suspendSync()
-        let account = try await source.cloud.account()
-        let old = try await source.cloud.control(for: account)
-        let replay = await source.cloud.currentUploads().last!
-        let confirmation = try await source.sender.prepareCloudReset()
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        do {
-            _ = try await source.cloud.commit(replay, for: account, control: old!)
-            XCTFail("A delayed writer must lose retired authority")
-        } catch ClipboardSyncServiceError.missingRemoteState { }
-        await peer.resumeSync()
-        let peerStatus = await peer.syncStatus()
-        XCTAssertFalse(peerStatus.isEnabled)
-        let retained = try await peer.page(.init())
-        XCTAssertEqual(retained.entries.count, 1)
-        try await source.sender.setSyncEnabled(true)
-        let active = try await source.cloud.control(for: account)
-        XCTAssertEqual(active?.phase, "active")
-        XCTAssertEqual(active?.keyID, old?.keyID)
-        XCTAssertNotEqual(active?.epoch, old?.epoch)
-        let empty = await source.cloud.currentUploads()
-        XCTAssertTrue(empty.isEmpty)
-        let tags = try await source.sender.syncTags()
-        XCTAssertTrue(tags.allSatisfy { !$0.isSelected })
-        try await source.sender.setSyncTagSelected(source.tag, selected: true)
-        let newUploads = await source.cloud.currentUploads()
-        XCTAssertEqual(newUploads.filter { $0.record.kind == .entry }.count, 1)
-        XCTAssertTrue(newUploads.allSatisfy { $0.record.epoch == active?.epoch })
-        await peer.resumeSync()
-        let unchanged = await peer.syncStatus()
-        XCTAssertFalse(unchanged.isEnabled)
-    }
-
-    func testCloudResetLostResponsesResumeAcrossReopenWithoutReplacingKey() async throws {
-        for lostPhase in ["resetting", "cleanup", "stopped"] {
-            let cloud = SyncTestCloud()
-            let keys = SyncTestKeys()
-            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
-            let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-reset-\(UUID())")
-            let first = makeModule(services: services, keyByte: 0x23, time: 1_000, root: root)
-            let entry = try await first.capture(.init(source: .unknown, content: .text("retained after interrupted cloud reset")))
-            let tag = try await first.createTagDefinition(named: "Reset", assigningTo: entry.entryID)
-            try await first.setSyncTagSelected(tag.definition.id, selected: true)
-            try await first.setSyncEnabled(true)
-            let confirmation = try await first.prepareCloudReset()
-            await cloud.loseNextResetResponse(at: lostPhase)
-            try await first.clearCloudDataAndStopSync(confirmation)
-            let failed = await first.syncStatus()
-            XCTAssertFalse(failed.isEnabled)
-            XCTAssertNotEqual(failed.cloudReset?.stage, .completed)
-            XCTAssertEqual(failed.cloudReset?.failure, .failed(.network))
-            if lostPhase == "stopped" { XCTAssertGreaterThan(failed.cloudReset?.deletedRecordCount ?? 0, 0) }
-            try await first.closeStoreForTesting()
-            let reopened = makeModule(services: services, keyByte: 0x23, time: 2_000, root: root)
-            await reopened.resumeSync()
-            let completed = await reopened.syncStatus()
-            XCTAssertEqual(completed.cloudReset?.stage, .completed)
-            XCTAssertGreaterThanOrEqual(completed.cloudReset?.deletedRecordCount ?? 0, failed.cloudReset?.deletedRecordCount ?? 0)
-            let uploads = await cloud.currentUploads()
-            XCTAssertTrue(uploads.isEmpty)
-            let keyCount = await keys.count()
-            XCTAssertEqual(keyCount, 1)
-            let local = try await reopened.page(.init())
-            XCTAssertEqual(local.entries.map(\.id), [entry.entryID])
-        }
-    }
-
-    func testCloudResetConfirmationCannotRetargetAnotherAccount() async throws {
-        let source = try await recoverySource()
-        let account = try await source.cloud.account()
-        let before = try await source.cloud.control(for: account)
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.switchAccount(to: "other-account")
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        let status = await source.sender.syncStatus()
-        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
-        let other = try await source.cloud.account()
-        let untouched = try await source.cloud.control(for: other)
-        XCTAssertNil(untouched)
-        await source.cloud.switchAccount(to: account.owner)
-        let unchanged = try await source.cloud.control(for: account)
-        XCTAssertEqual(unchanged, before)
-        await source.sender.retrySync()
-        let completed = await source.sender.syncStatus()
-        XCTAssertEqual(completed.cloudReset?.stage, .completed)
-    }
-
-    func testCloudResetRetryAfterDisablingRetainsThePendingClear() async throws {
-        let source = try await recoverySource()
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.loseNextResetResponse(at: "resetting")
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        try await source.sender.setSyncEnabled(false)
-        await source.sender.retrySync()
-        let status = await source.sender.syncStatus()
-        XCTAssertEqual(status.cloudReset?.stage, .completed)
-        XCTAssertFalse(status.isEnabled)
-    }
-
-    func testCloudResetAccountSwitchDuringCleanupDoesNotTouchTheNewAccount() async throws {
-        let source = try await recoverySource()
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.holdNextClear()
-        let reset = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
-        await source.cloud.waitForHeldClear()
-        await source.cloud.switchAccount(to: "changed-during-clear")
-        await source.cloud.releaseClear()
-        try await reset.value
-        let status = await source.sender.syncStatus()
-        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
-        let other = try await source.cloud.account()
-        let otherControl = try await source.cloud.control(for: other)
-        XCTAssertNil(otherControl)
-        let uploads = await source.cloud.currentUploads()
-        XCTAssertTrue(uploads.isEmpty)
-    }
-
-    func testCloudResetLateCleanupCannotPersistIntoAReplacementLocalStore() async throws {
-        let source = try await recoverySource()
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.holdNextClear()
-        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
-        await source.cloud.waitForHeldClear()
-        let cancellation = await source.cloud.cancellationCount()
-        let localReset = Task { try await source.sender.reset(confirmation: .confirmed) }
-        await source.cloud.waitForCancellation(after: cancellation)
-        await source.cloud.releaseClear()
-        try await clearing.value
-        try await localReset.value
-        let status = await source.sender.syncStatus()
-        XCTAssertNil(status.cloudReset)
-        XCTAssertFalse(status.isEnabled)
-        let page = try await source.sender.page(.init())
-        XCTAssertTrue(page.entries.isEmpty)
-        let keyCount = await source.keys.count()
-        XCTAssertEqual(keyCount, 1)
-        let account = try await source.cloud.account()
-        let control = try await source.cloud.control(for: account)
-        XCTAssertEqual(control?.phase, "resetting")
-    }
-
-    func testCloudResetFailureBeforeRetirementNeverBootstrapsMissingControl() async throws {
-        let source = try await recoverySource()
-        let confirmation = try await source.sender.prepareCloudReset()
-        let initialAttempts = await source.cloud.controlCreationAttempts()
-        await source.cloud.removeControl()
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        let status = await source.sender.syncStatus()
-        XCTAssertEqual(status.cloudReset?.failure, .failed(.recoveryRequired))
-        XCTAssertNotEqual(status.cloudReset?.stage, .completed)
-        let attempts = await source.cloud.controlCreationAttempts()
-        XCTAssertEqual(attempts, initialAttempts)
-        let local = try await source.sender.page(.init())
-        XCTAssertEqual(local.entries.count, 1)
-        let uploads = await source.cloud.currentUploads()
-        XCTAssertFalse(uploads.isEmpty)
-    }
-
-    func testCloudResetRetirementPreventsNewWritesBeforeCleanupCompletes() async throws {
-        let source = try await recoverySource()
-        let account = try await source.cloud.account()
-        let observed = try await source.cloud.control(for: account)
-        let old = try XCTUnwrap(observed)
-        let observedUploads = await source.cloud.currentUploads()
-        let upload = try XCTUnwrap(observedUploads.last)
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.holdNextClear()
-        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
-        await source.cloud.waitForHeldClear()
-        do {
-            _ = try await source.cloud.commit(upload, for: account, control: old)
-            XCTFail("An old writer cannot publish while cleanup is pending")
-        } catch ClipboardSyncServiceError.missingRemoteState { }
-        let inProgress = await source.sender.syncStatus()
-        XCTAssertEqual(inProgress.cloudReset?.stage, .clearing)
-        XCTAssertNil(inProgress.cloudReset?.failure)
-        await source.cloud.releaseClear()
-        try await clearing.value
-        let complete = await source.sender.syncStatus()
-        XCTAssertEqual(complete.cloudReset?.stage, .completed)
-    }
-
-    func testCloudResetLateRetryCannotClearANewManuallyActivatedCollection() async throws {
-        let source = try await recoverySource()
-        let confirmation = try await source.sender.prepareCloudReset()
-        await source.cloud.loseNextResetResponse(at: "stopped")
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x26, time: 2_000)
+        let preview = try await peer.prepareSyncTagMerge(sourceID: localTag.id, targetID: source.tag)
+        try await peer.mergeSyncTags(preview)
+        let before = try await peer.syncTags().map { ($0.id, $0.displayName) }
+        let confirmation = try await peer.prepareCloudReset()
+        try await peer.clearCloudDataAndStopSync(confirmation)
         try await peer.setSyncEnabled(true)
-        let account = try await source.cloud.account()
-        let active = try await source.cloud.control(for: account)
-        await source.sender.retrySync()
-        let after = try await source.cloud.control(for: account)
-        XCTAssertEqual(after, active)
-        let stopped = await source.sender.syncStatus()
-        XCTAssertFalse(stopped.isEnabled)
-        XCTAssertNotEqual(stopped.cloudReset?.stage, .completed)
-        try await source.sender.setSyncEnabled(true)
-        let enabled = await source.sender.syncStatus()
-        XCTAssertTrue(enabled.isEnabled)
-        XCTAssertEqual(enabled.phase, .upToDate)
         let uploads = await source.cloud.currentUploads()
         XCTAssertTrue(uploads.isEmpty)
+        let after = try await peer.syncTags().map { ($0.id, $0.displayName) }
+        XCTAssertEqual(after.map(\.0), before.map(\.0))
+        XCTAssertEqual(after.map(\.1), before.map(\.1))
+    }
+
+    func testNewRemoteTagSelectionCannotRepublishRetainedPreResetCopies() async throws {
+        let source = try await recoverySource()
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x28, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        await peer.suspendSync()
+        let confirmation = try await source.sender.prepareCloudReset()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        await peer.resumeSync()
+        try await source.sender.setSyncEnabled(true)
+        try await source.sender.setSyncTagSelected(source.tag, selected: true)
+        let before = await source.cloud.currentUploads()
+        XCTAssertEqual(before.filter { $0.record.kind == .entry }.count, 1)
+        try await peer.setSyncEnabled(true)
+        let after = await source.cloud.currentUploads()
+        let peerStatus = await peer.syncStatus()
+        XCTAssertEqual(peerStatus.phase, .upToDate)
+        XCTAssertEqual(after.filter { $0.record.kind == .entry }.count, 1)
+        let fresh = try await peer.capture(.init(source: .unknown, content: .text("new local text after reset")))
+        _ = try await peer.apply(.setTags(fresh.entryID, [source.tag]))
+        await peer.retrySync()
+        let withFresh = await source.cloud.currentUploads()
+        XCTAssertEqual(withFresh.filter { $0.record.kind == .entry }.count, 2)
+        try await peer.setSyncTagSelected(source.tag, selected: true)
+        let explicitlyShared = await source.cloud.currentUploads()
+        XCTAssertEqual(explicitlyShared.filter { $0.record.kind == .entry }.count, 3)
     }
 
     func testInterruptedCloudClearsRemainIndependentAcrossAccountSwitches() async throws {
@@ -279,31 +106,236 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(local.entries.count, 2)
     }
 
-    func testNewRemoteTagSelectionCannotRepublishRetainedPreResetCopies() async throws {
-        let source = try await recoverySource()
-        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x28, time: 2_000)
+    func testClearConfirmationRefreshesWhenLocalHistoryBecomesShared() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0x9F, time: 1_000)
+        let captured = try await module.capture(.init(source: .unknown, content: .text("share after preview")))
+        let tag = try await module.createTagDefinition(named: "Scope change", assigningTo: captured.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        let localPreview = try await module.previewClearHistory(scope: .includingProtected)
+        XCTAssertEqual(localPreview.sharedAffectedCount, 0)
+        try await module.setSyncEnabled(true)
+        let outcome = try await module.confirm(localPreview.token)
+        guard case .stale(let updated) = outcome else { return XCTFail("Sharing changes the disclosed deletion scope") }
+        XCTAssertEqual(updated.sharedAffectedCount, 1)
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [captured.entryID])
+    }
+
+    func testDeletionCleanupResumesAfterLostProviderResponseAndRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-purge-retry-\(UUID())")
+        let module = makeModule(services: services, keyByte: 0x9C, time: 1_000, root: root)
+        let shared = try await module.capture(.init(source: .unknown, content: .text("purge after restart")))
+        let tag = try await module.createTagDefinition(named: "Cleanup", assigningTo: shared.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        try await module.setSyncEnabled(true)
+        _ = try await module.apply(.editText(shared.entryID, "published version"))
+        await module.retrySync()
+        await cloud.loseNextPurgeResponse()
+        _ = try await module.apply(.delete(shared.entryID))
+        await module.retrySync()
+        let failed = await module.syncStatus()
+        XCTAssertEqual(failed.phase, .failed(.network))
+        try await module.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x9C, time: 2_000, root: root)
+        await reopened.resumeSync()
+        let status = await reopened.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let remaining = await cloud.currentUploads()
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        let page = try await reopened.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+    }
+
+    func testInterruptedDeletionRollsBackPreservationAndRetriesExactlyOnce() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-delete-rollback-\(UUID())")
+        let shouldFail = OSAllocatedUnfairLock(initialState: false)
+        let first = makeModule(services: services, keyByte: 0x9D, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x9E, time: 2_000, root: root,
+            faults: .init(shouldFail: { point in point == .databaseTransaction && shouldFail.withLock { $0 } }))
+        let shared = try await first.capture(.init(source: .unknown, content: .text("rollback root")))
+        let tag = try await first.createTagDefinition(named: "Rollback", assigningTo: shared.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        _ = try await second.apply(.editText(shared.entryID, "transactional offline edit"))
+        _ = try await first.apply(.delete(shared.entryID))
+        await first.retrySync()
+        shouldFail.withLock { $0 = true }
+        await second.resumeSync()
+        let unchanged = try await second.page(.init())
+        XCTAssertEqual(unchanged.entries.map(\.id), [shared.entryID])
+        XCTAssertEqual(unchanged.entries.first?.previewText, "transactional offline edit")
+        let failedNotices = try await second.preservedSyncEdits()
+        XCTAssertTrue(failedNotices.isEmpty)
+        try await second.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x9E, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let saved = try await reopened.page(.init())
+        XCTAssertEqual(saved.entries.count, 1)
+        XCTAssertNotEqual(saved.entries.first?.id, shared.entryID)
+        XCTAssertEqual(saved.entries.first?.previewText, "transactional offline edit")
+        await cloud.replayAllChangesInReverseOrder()
+        await reopened.retrySync()
+        let replay = try await reopened.page(.init())
+        XCTAssertEqual(replay.entries.map(\.id), saved.entries.map(\.id))
+    }
+
+    func testDeletionReclaimsPublishedRootAndEditCiphertextButKeepsReplayFence() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0x9A, time: 1_000)
+        let shared = try await module.capture(.init(source: .unknown, content: .text("cloud secret")))
+        let tag = try await module.createTagDefinition(named: "Purge", assigningTo: shared.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        try await module.setSyncEnabled(true)
+        _ = try await module.apply(.editText(shared.entryID, "updated cloud secret"))
+        await module.retrySync()
+        let contentRecords = await cloud.currentUploads().filter { $0.record.kind == .entry }.map(\.record.recordID)
+        XCTAssertEqual(contentRecords.count, 2)
+        _ = try await module.apply(.delete(shared.entryID))
+        await module.retrySync()
+        let remaining = await cloud.currentUploads()
+        XCTAssertTrue(Set(contentRecords).isDisjoint(with: remaining.map(\.record.recordID)))
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        let peer = makeModule(services: services, keyByte: 0x9B, time: 2_000)
         try await peer.setSyncEnabled(true)
-        await peer.suspendSync()
-        let confirmation = try await source.sender.prepareCloudReset()
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        await peer.resumeSync()
-        try await source.sender.setSyncEnabled(true)
-        try await source.sender.setSyncTagSelected(source.tag, selected: true)
-        let before = await source.cloud.currentUploads()
-        XCTAssertEqual(before.filter { $0.record.kind == .entry }.count, 1)
-        try await peer.setSyncEnabled(true)
-        let after = await source.cloud.currentUploads()
-        let peerStatus = await peer.syncStatus()
-        XCTAssertEqual(peerStatus.phase, .upToDate)
-        XCTAssertEqual(after.filter { $0.record.kind == .entry }.count, 1)
-        let fresh = try await peer.capture(.init(source: .unknown, content: .text("new local text after reset")))
-        _ = try await peer.apply(.setTags(fresh.entryID, [source.tag]))
-        await peer.retrySync()
-        let withFresh = await source.cloud.currentUploads()
-        XCTAssertEqual(withFresh.filter { $0.record.kind == .entry }.count, 2)
-        try await peer.setSyncTagSelected(source.tag, selected: true)
-        let explicitlyShared = await source.cloud.currentUploads()
-        XCTAssertEqual(explicitlyShared.filter { $0.record.kind == .entry }.count, 3)
+        let page = try await peer.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+    }
+
+    func testDeletionWinsWhenAnOfflineUploadLosesItsControlRace() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x98, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x99, time: 2_000)
+        let shared = try await first.capture(.init(source: .unknown, content: .text("race original")))
+        let tag = try await first.createTagDefinition(named: "Race", assigningTo: shared.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        _ = try await second.apply(.editText(shared.entryID, "save this offline draft"))
+        await cloud.holdNextEntryCommit()
+        let upload = Task { await second.resumeSync() }
+        await cloud.waitForHeldEntryCommit()
+        _ = try await first.apply(.delete(shared.entryID))
+        await first.retrySync()
+        await cloud.releaseEntryCommit()
+        await upload.value
+        let after = try await second.page(.init())
+        XCTAssertEqual(after.entries.count, 1)
+        XCTAssertNotEqual(after.entries.first?.id, shared.entryID)
+        XCTAssertEqual(after.entries.first?.previewText, "save this offline draft")
+        let notice = try await second.preservedSyncEdits()
+        XCTAssertEqual(notice.count, 1)
+    }
+
+    func testBulkClearPreservesProtectedEntriesUntilExplicitlyIncludedAndDeletesOnPeers() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x96, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x97, time: 2_000)
+        let shared = try await first.capture(.init(source: .unknown, content: .text("protected shared")))
+        let tag = try await first.createTagDefinition(named: "Clear scope", assigningTo: shared.entryID)
+        _ = try await first.capture(.init(source: .unknown, content: .text("unprotected local")))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let local = try await first.previewClearHistory(scope: .unprotectedOnly)
+        XCTAssertEqual(local.affectedCount, 1)
+        XCTAssertEqual(local.sharedAffectedCount, 0)
+        _ = try await first.confirm(local.token)
+        await first.retrySync()
+        await second.retrySync()
+        let retained = try await second.page(.init())
+        XCTAssertEqual(retained.entries.count, 1)
+        let all = try await first.previewClearHistory(scope: .includingProtected)
+        XCTAssertEqual(all.affectedCount, 1)
+        XCTAssertEqual(all.sharedAffectedCount, 1)
+        _ = try await first.confirm(all.token)
+        await first.retrySync()
+        await second.retrySync()
+        let deleted = try await second.page(.init())
+        XCTAssertTrue(deleted.entries.isEmpty)
+    }
+
+    func testOfflineEditBecomesOneLocalCopyAcrossDeletionReplayAndRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-salvage-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x94, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x95, time: 2_000, root: root)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("shared original")))
+        let tag = try await first.createTagDefinition(named: "Preserved work", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        _ = try await second.apply(.setFavorite(captured.entryID, true))
+        _ = try await second.apply(.editText(captured.entryID, "precise offline work"))
+        try await second.closeStoreForTesting()
+        _ = try await first.apply(.delete(captured.entryID))
+        await first.retrySync()
+        let reopened = makeModule(services: services, keyByte: 0x95, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let saved = try await reopened.page(.init())
+        XCTAssertEqual(saved.entries.count, 1)
+        guard let copy = saved.entries.first else { return }
+        let notices = try await reopened.preservedSyncEdits()
+        XCTAssertEqual(notices.map(\.id), [copy.id])
+        XCTAssertEqual(notices.map(\.previewText), ["precise offline work"])
+        XCTAssertNotEqual(copy.id, captured.entryID)
+        XCTAssertEqual(copy.previewText, "precise offline work")
+        XCTAssertTrue(copy.isFavorite)
+        XCTAssertEqual(copy.tagIDs, [tag.definition.id])
+        try await reopened.closeStoreForTesting()
+        await cloud.replayAllChangesInReverseOrder()
+        let again = makeModule(services: services, keyByte: 0x95, time: 4_000, root: root)
+        await again.resumeSync()
+        try await again.setSyncTagSelected(tag.definition.id, selected: true)
+        await again.retrySync()
+        let repeated = try await again.page(.init())
+        XCTAssertEqual(repeated.entries.map(\.id), [copy.id])
+        let noticesAgain = try await again.preservedSyncEdits()
+        XCTAssertEqual(noticesAgain.map(\.id), [copy.id])
+        try await again.dismissPreservedSyncEdits([copy.id])
+        let dismissed = try await again.preservedSyncEdits()
+        XCTAssertTrue(dismissed.isEmpty)
+        await again.retrySync()
+        await first.retrySync()
+        let peer = try await first.page(.init())
+        XCTAssertTrue(peer.entries.isEmpty)
+    }
+
+    func testExplicitSharedDeletionSurvivesReverseReplayOnANewDevice() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x91, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x92, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("delete everywhere")))
+        let tag = try await first.createTagDefinition(named: "Shared deletion", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let before = try await second.page(.init())
+        XCTAssertEqual(before.entries.count, 1)
+        _ = try await first.apply(.delete(captured.entryID))
+        await first.retrySync()
+        await second.retrySync()
+        let after = try await second.page(.init())
+        XCTAssertTrue(after.entries.isEmpty)
+        await cloud.replayAllChangesInReverseOrder()
+        let late = makeModule(services: services, keyByte: 0x93, time: 3_000)
+        try await late.setSyncEnabled(true)
+        let replayed = try await late.page(.init())
+        XCTAssertTrue(replayed.entries.isEmpty)
     }
 
     @MainActor
@@ -680,40 +712,6 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(secondAfterToggle.entries.first { $0.id == capture.entryID }).isFavorite)
         XCTAssertFalse(try XCTUnwrap(thirdAfterToggle.entries.first).isFavorite)
         XCTAssertEqual(secondAfterToggle.entries.first?.id, recentLocal.entryID)
-    }
-
-    func testCloudResetDiscardsAQueuedTagMergeWithoutChangingLocalTags() async throws {
-        let source = try await recoverySource()
-        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x29, time: 2_000)
-        let sourceTag = try await source.sender.syncTags().first { $0.id == source.tag }
-        let local = try await peer.capture(.init(source: .unknown, content: .text("locally merged before reset")))
-        let localTag = try await peer.createTagDefinition(named: try XCTUnwrap(sourceTag).displayName, assigningTo: local.entryID).definition
-        try await peer.setSyncEnabled(true)
-        await peer.suspendSync()
-        let preview = try await peer.prepareSyncTagMerge(sourceID: localTag.id, targetID: source.tag)
-        try await peer.mergeSyncTags(preview)
-        let before = try await peer.syncTags().map { ($0.id, $0.displayName) }
-        let confirmation = try await peer.prepareCloudReset()
-        try await peer.clearCloudDataAndStopSync(confirmation)
-        try await peer.setSyncEnabled(true)
-        let uploads = await source.cloud.currentUploads()
-        XCTAssertTrue(uploads.isEmpty)
-        let after = try await peer.syncTags().map { ($0.id, $0.displayName) }
-        XCTAssertEqual(after.map(\.0), before.map(\.0))
-        XCTAssertEqual(after.map(\.1), before.map(\.1))
-    }
-
-    func testCloudResetStillCompletesWhenLocalHistoryWasAlreadyDeleted() async throws {
-        let source = try await recoverySource()
-        let page = try await source.sender.page(.init())
-        let id = try XCTUnwrap(page.entries.first?.id)
-        _ = try await source.sender.apply(.delete(id))
-        let confirmation = try await source.sender.prepareCloudReset()
-        try await source.sender.clearCloudDataAndStopSync(confirmation)
-        let status = await source.sender.syncStatus()
-        XCTAssertEqual(status.cloudReset?.stage, .completed)
-        let uploads = await source.cloud.currentUploads()
-        XCTAssertTrue(uploads.isEmpty)
     }
 
     @MainActor
@@ -1446,6 +1444,11 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(choicesAfterRemoteMerge.first { $0.id == currentTag.id }).requiresLocalAuthorization)
         let local = try await first.page(.init()).entries
         XCTAssertEqual(local.map(\.id), [secret.entryID])
+        let extra = ClipboardHistoryTagDefinition(id: "another-current-tag", displayName: "Work")
+        _ = try await first.replaceTagDefinitions(with: [currentTag, extra])
+        let localMerge = try await first.prepareSyncTagMerge(sourceID: currentTag.id, targetID: extra.id)
+        XCTAssertEqual(localMerge.newlyEligibleEntryCount, 1,
+            "A selected but account-blocked retained entry is newly enrolled by explicit local merge")
         try await first.setSyncTagSelected(currentTag.id, selected: true)
         let afterExplicitConsent = await cloud.currentUploads()
         XCTAssertEqual(afterExplicitConsent.filter { $0.record.kind == .entry }.count, 1)
@@ -1680,6 +1683,240 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await second.retrySync()
         let replayed = try await second.page(.init()).entries
         XCTAssertEqual(replayed.count, 2)
+    }
+
+    func testCloudResetPreservesLocalHistoryAndKeyButRetiresSharedAuthority() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let before = try await source.cloud.control(for: account)
+        let page = try await source.sender.page(.init())
+        let confirmation = try await source.sender.prepareCloudReset()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(status.cloudReset?.stage, .completed)
+        let after = try await source.cloud.control(for: account)
+        XCTAssertEqual(after?.phase, "stopped")
+        XCTAssertNotEqual(after?.epoch, before?.epoch)
+        XCTAssertEqual(after?.keyID, before?.keyID)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let retained = try await source.sender.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), page.entries.map(\.id))
+        await source.sender.resumeSync()
+        let stillStopped = try await source.cloud.control(for: account)
+        XCTAssertEqual(stillStopped, after)
+    }
+
+    func testCloudResetRequiresManualNewEpochAndTagSelectionOnBothDevices() async throws {
+        let source = try await recoverySource()
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x21, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        await peer.suspendSync()
+        let account = try await source.cloud.account()
+        let old = try await source.cloud.control(for: account)
+        let replay = await source.cloud.currentUploads().last!
+        let confirmation = try await source.sender.prepareCloudReset()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        do {
+            _ = try await source.cloud.commit(replay, for: account, control: old!)
+            XCTFail("A delayed writer must lose retired authority")
+        } catch ClipboardSyncServiceError.missingRemoteState { }
+        await peer.resumeSync()
+        let peerStatus = await peer.syncStatus()
+        XCTAssertFalse(peerStatus.isEnabled)
+        let retained = try await peer.page(.init())
+        XCTAssertEqual(retained.entries.count, 1)
+        try await source.sender.setSyncEnabled(true)
+        let active = try await source.cloud.control(for: account)
+        XCTAssertEqual(active?.phase, "active")
+        XCTAssertEqual(active?.keyID, old?.keyID)
+        XCTAssertNotEqual(active?.epoch, old?.epoch)
+        let empty = await source.cloud.currentUploads()
+        XCTAssertTrue(empty.isEmpty)
+        let tags = try await source.sender.syncTags()
+        XCTAssertTrue(tags.allSatisfy { !$0.isSelected })
+        try await source.sender.setSyncTagSelected(source.tag, selected: true)
+        let newUploads = await source.cloud.currentUploads()
+        XCTAssertEqual(newUploads.filter { $0.record.kind == .entry }.count, 1)
+        XCTAssertTrue(newUploads.allSatisfy { $0.record.epoch == active?.epoch })
+        await peer.resumeSync()
+        let unchanged = await peer.syncStatus()
+        XCTAssertFalse(unchanged.isEnabled)
+    }
+
+    func testCloudResetLostResponsesResumeAcrossReopenWithoutReplacingKey() async throws {
+        for lostPhase in ["resetting", "cleanup", "stopped"] {
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-reset-\(UUID())")
+            let first = makeModule(services: services, keyByte: 0x23, time: 1_000, root: root)
+            let entry = try await first.capture(.init(source: .unknown, content: .text("retained after interrupted cloud reset")))
+            let tag = try await first.createTagDefinition(named: "Reset", assigningTo: entry.entryID)
+            try await first.setSyncTagSelected(tag.definition.id, selected: true)
+            try await first.setSyncEnabled(true)
+            let confirmation = try await first.prepareCloudReset()
+            await cloud.loseNextResetResponse(at: lostPhase)
+            try await first.clearCloudDataAndStopSync(confirmation)
+            let failed = await first.syncStatus()
+            XCTAssertFalse(failed.isEnabled)
+            XCTAssertNotEqual(failed.cloudReset?.stage, .completed)
+            XCTAssertEqual(failed.cloudReset?.failure, .failed(.network))
+            if lostPhase == "stopped" { XCTAssertGreaterThan(failed.cloudReset?.deletedRecordCount ?? 0, 0) }
+            try await first.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0x23, time: 2_000, root: root)
+            await reopened.resumeSync()
+            let completed = await reopened.syncStatus()
+            XCTAssertEqual(completed.cloudReset?.stage, .completed)
+            XCTAssertGreaterThanOrEqual(completed.cloudReset?.deletedRecordCount ?? 0, failed.cloudReset?.deletedRecordCount ?? 0)
+            let uploads = await cloud.currentUploads()
+            XCTAssertTrue(uploads.isEmpty)
+            let keyCount = await keys.count()
+            XCTAssertEqual(keyCount, 1)
+            let local = try await reopened.page(.init())
+            XCTAssertEqual(local.entries.map(\.id), [entry.entryID])
+        }
+    }
+
+    func testCloudResetConfirmationCannotRetargetAnotherAccount() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let before = try await source.cloud.control(for: account)
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.switchAccount(to: "other-account")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
+        let other = try await source.cloud.account()
+        let untouched = try await source.cloud.control(for: other)
+        XCTAssertNil(untouched)
+        await source.cloud.switchAccount(to: account.owner)
+        let unchanged = try await source.cloud.control(for: account)
+        XCTAssertEqual(unchanged, before)
+        await source.sender.retrySync()
+        let completed = await source.sender.syncStatus()
+        XCTAssertEqual(completed.cloudReset?.stage, .completed)
+    }
+
+    func testCloudResetRetryAfterDisablingRetainsThePendingClear() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.loseNextResetResponse(at: "resetting")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        try await source.sender.setSyncEnabled(false)
+        await source.sender.retrySync()
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.stage, .completed)
+        XCTAssertFalse(status.isEnabled)
+    }
+
+    func testCloudResetAccountSwitchDuringCleanupDoesNotTouchTheNewAccount() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let reset = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        await source.cloud.switchAccount(to: "changed-during-clear")
+        await source.cloud.releaseClear()
+        try await reset.value
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
+        let other = try await source.cloud.account()
+        let otherControl = try await source.cloud.control(for: other)
+        XCTAssertNil(otherControl)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
+    }
+
+    func testCloudResetLateCleanupCannotPersistIntoAReplacementLocalStore() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        let cancellation = await source.cloud.cancellationCount()
+        let localReset = Task { try await source.sender.reset(confirmation: .confirmed) }
+        await source.cloud.waitForCancellation(after: cancellation)
+        await source.cloud.releaseClear()
+        try await clearing.value
+        try await localReset.value
+        let status = await source.sender.syncStatus()
+        XCTAssertNil(status.cloudReset)
+        XCTAssertFalse(status.isEnabled)
+        let page = try await source.sender.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let account = try await source.cloud.account()
+        let control = try await source.cloud.control(for: account)
+        XCTAssertEqual(control?.phase, "resetting")
+    }
+
+    func testCloudResetFailureBeforeRetirementNeverBootstrapsMissingControl() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        let initialAttempts = await source.cloud.controlCreationAttempts()
+        await source.cloud.removeControl()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.recoveryRequired))
+        XCTAssertNotEqual(status.cloudReset?.stage, .completed)
+        let attempts = await source.cloud.controlCreationAttempts()
+        XCTAssertEqual(attempts, initialAttempts)
+        let local = try await source.sender.page(.init())
+        XCTAssertEqual(local.entries.count, 1)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertFalse(uploads.isEmpty)
+    }
+
+    func testCloudResetRetirementPreventsNewWritesBeforeCleanupCompletes() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let observed = try await source.cloud.control(for: account)
+        let old = try XCTUnwrap(observed)
+        let observedUploads = await source.cloud.currentUploads()
+        let upload = try XCTUnwrap(observedUploads.last)
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        do {
+            _ = try await source.cloud.commit(upload, for: account, control: old)
+            XCTFail("An old writer cannot publish while cleanup is pending")
+        } catch ClipboardSyncServiceError.missingRemoteState { }
+        let inProgress = await source.sender.syncStatus()
+        XCTAssertEqual(inProgress.cloudReset?.stage, .clearing)
+        XCTAssertNil(inProgress.cloudReset?.failure)
+        await source.cloud.releaseClear()
+        try await clearing.value
+        let complete = await source.sender.syncStatus()
+        XCTAssertEqual(complete.cloudReset?.stage, .completed)
+    }
+
+    func testCloudResetLateRetryCannotClearANewManuallyActivatedCollection() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.loseNextResetResponse(at: "stopped")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x26, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let account = try await source.cloud.account()
+        let active = try await source.cloud.control(for: account)
+        await source.sender.retrySync()
+        let after = try await source.cloud.control(for: account)
+        XCTAssertEqual(after, active)
+        let stopped = await source.sender.syncStatus()
+        XCTAssertFalse(stopped.isEnabled)
+        XCTAssertNotEqual(stopped.cloudReset?.stage, .completed)
+        try await source.sender.setSyncEnabled(true)
+        let enabled = await source.sender.syncStatus()
+        XCTAssertTrue(enabled.isEnabled)
+        XCTAssertEqual(enabled.phase, .upToDate)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
     }
 
     func testLostSuccessfulBootstrapReopensTheSameWinnerAfterPeerProgress() async throws {
@@ -2456,7 +2693,12 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
+    private var losesPurgeResponse = false
+    private var purgedRecords = Set<String>()
     private var revision = 0
+    private var holdsEntryCommit = false
+    private var heldEntryCommit: CheckedContinuation<Void, Never>?
+    private var entryCommitObserver: CheckedContinuation<Void, Never>?
     private var losesEntryResponse = false
     private var reads = 0
     private var rendezvous = false
@@ -2531,7 +2773,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
-        let page = reversesAllChanges ? uploads.reversed().map(\.record) : uploads.dropFirst(offset).map(\.record)
+        let page = (reversesAllChanges ? uploads.reversed().map(\.record) : uploads.dropFirst(offset).map(\.record)).filter { !purgedRecords.contains($0.recordID) }
         return ClipboardSyncChanges(records: reversesDelivery ? Array(page.reversed()) : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
@@ -2551,7 +2793,15 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return upload.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount,
-                control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+                control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        if holdsEntryCommit, upload.record.kind == .entry {
+            holdsEntryCommit = false
+            await withCheckedContinuation {
+                heldEntryCommit = $0
+                entryCommitObserver?.resume()
+                entryCommitObserver = nil
+            }
+        }
         try checkAccount(account)
         guard let descriptor = descriptors[account.identifier], descriptor.epoch == control.epoch, descriptor.phase == "active", descriptor.keyID == control.keyID else {
             throw ClipboardSyncServiceError.missingRemoteState
@@ -2570,6 +2820,26 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         return result
     }
+    func loseNextPurgeResponse() { losesPurgeResponse = true }
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        try checkAccount(account)
+        guard let current = descriptors[account.identifier], current == control else { throw ClipboardSyncServiceError.conflict }
+        guard current.phase == "active", current.epoch == record.epoch, current.keyID == record.keyID else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        purgedRecords.insert(record.recordID)
+        let result = advanced(current)
+        descriptors[account.identifier] = result
+        if losesPurgeResponse { losesPurgeResponse = false; throw ClipboardSyncServiceError.network(retryAfter: nil) }
+        return result
+    }
+    func holdNextEntryCommit() { holdsEntryCommit = true }
+    func waitForHeldEntryCommit() async {
+        guard heldEntryCommit == nil else { return }
+        await withCheckedContinuation { entryCommitObserver = $0 }
+    }
+    func releaseEntryCommit() { heldEntryCommit?.resume(); heldEntryCommit = nil }
     func holdNextClear() { holdsClear = true }
     func waitForHeldClear() async {
         guard heldClear == nil else { return }
@@ -2634,7 +2904,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func switchAccount(to owner: String) {
         currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
     }
-    func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
+    func currentUploads() -> [ClipboardSyncUpload] { (records[currentAccount.identifier] ?? []).filter { !purgedRecords.contains($0.record.recordID) } }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }

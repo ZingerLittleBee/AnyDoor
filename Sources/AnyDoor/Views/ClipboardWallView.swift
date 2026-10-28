@@ -465,7 +465,7 @@ struct ClipboardWallView: View {
             if let key = cat.titleKey {
                 LocalizedText(key)
             } else if let id = cat.tagFilter {
-                Text(tagName(for: id))
+                Text(state.presentation.tagTitle(id))
             }
         }
         .font(.caption)
@@ -996,9 +996,21 @@ struct ClipboardWallView: View {
                 .onTapGesture { onTagDialogCancel() }
             VStack(spacing: 12) {
                 switch state.tagDialog {
-                case .create:
+                case .create(let entryID):
                     LocalizedText(.clipboardTagCreateTitle).font(.headline)
                     tagNameField
+                    if ambiguousTagChoices.count > 1 {
+                        LocalizedText(.clipboardTagChooseIdentity).font(.caption)
+                        ForEach(ambiguousTagChoices, id: \.id) { tag in
+                            Button(state.presentation.tagTitle(tag.id)) {
+                                if let entry = state.presentation.entries.first(where: { $0.id == entryID }),
+                                   !entry.tagIDs.contains(tag.id) {
+                                    onToggleTag(entry, tag.id)
+                                }
+                                onTagDialogCancel()
+                            }
+                        }
+                    }
                 case .rename:
                     LocalizedText(.clipboardTagRenameTitle).font(.headline)
                     tagNameField
@@ -1021,6 +1033,7 @@ struct ClipboardWallView: View {
                         LocalizedText(isDeleteDialog ? .clipboardActionDelete : .clipboardTagConfirm)
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(isAmbiguousCreate)
                 }
             }
             .padding(20)
@@ -1031,6 +1044,16 @@ struct ClipboardWallView: View {
 
     private var isDeleteDialog: Bool {
         if case .confirmDelete = state.tagDialog { return true }
+        return false
+    }
+
+    private var ambiguousTagChoices: [ClipboardHistoryTagDefinition] {
+        let name = state.tagDialogText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return state.presentation.tags.filter { $0.displayName == name }
+    }
+
+    private var isAmbiguousCreate: Bool {
+        if case .create = state.tagDialog { return ambiguousTagChoices.count > 1 }
         return false
     }
 

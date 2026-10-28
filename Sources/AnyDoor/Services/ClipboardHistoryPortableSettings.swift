@@ -12,10 +12,13 @@ enum ClipboardHistoryPortableKeys {
 
 @MainActor
 enum ClipboardHistoryPortableSettings {
-    static func persist(
-        _ definitions: [ClipboardHistoryTagDefinition],
-        to defaults: UserDefaults = .standard
-    ) throws {
+    static func legacyTagData(from defaults: UserDefaults) -> Data {
+        guard let value = defaults.object(forKey: ClipboardHistoryPortableKeys.customTags) else { return Data("[]".utf8) }
+        guard let json = value as? String else { return Data() }
+        return Data(json.utf8)
+    }
+
+    static func encode(_ definitions: [ClipboardHistoryTagDefinition]) throws -> String {
         let tags = definitions.map {
             ClipboardTag(id: $0.id, name: $0.displayName)
         }
@@ -23,31 +26,10 @@ enum ClipboardHistoryPortableSettings {
         guard let json = String(data: data, encoding: .utf8) else {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        defaults.set(json, forKey: ClipboardHistoryPortableKeys.customTags)
+        return json
     }
 
-    static func reconcile(
-        module: ClipboardHistoryModule,
-        defaults: UserDefaults = .standard,
-        importClipboardTags: Bool = true
-    ) async throws {
-        // Config Sync still refreshes monitoring rules, but must not restore
-        // a stale local tag mirror as a side effect of an unrelated setting.
-        guard importClipboardTags else { return }
-        let definitions = try definitions(from: defaults)
-        _ = try await module.replaceTagDefinitions(with: definitions)
-    }
-
-    static func definitions(
-        from defaults: UserDefaults
-    ) throws -> [ClipboardHistoryTagDefinition] {
-        guard
-            let json = defaults.string(
-                forKey: ClipboardHistoryPortableKeys.customTags
-            )
-        else {
-            return []
-        }
+    static func definitions(from json: String) throws -> [ClipboardHistoryTagDefinition] {
         let tags = try JSONDecoder().decode(
             [ClipboardTag].self,
             from: Data(json.utf8)

@@ -22,14 +22,13 @@ extension ClipboardHistoryModule {
             guard names.count == 2, names[0] == names[1] else { throw ClipboardHistoryModuleError.invalidTagName }
             let selected = Set(try selectedSyncTags(accountID: accountID, in: database).map(\.id))
             guard selected.contains(sourceID) || selected.contains(targetID) else { throw ClipboardHistoryModuleError.operationUnavailable }
-            let count = try Int.fetchOne(database, sql: """
+            let count = try Int.fetchOne(database, SQLRequest<Int>(literal: """
                 SELECT COUNT(*) FROM clipboard_entries AS entry
-                WHERE \(Self.syncEntryEligibility)
-                  AND EXISTS (SELECT 1 FROM clipboard_entry_tags WHERE entry_id = entry.id AND tag_id IN (?, ?))
-                  AND NOT EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                      JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                      WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1)
-                """, arguments: [sourceID, targetID, accountID]) ?? 0
+                WHERE \(sql: Self.syncEntryEligibility)
+                  AND EXISTS (SELECT 1 FROM clipboard_entry_tags
+                      WHERE entry_id = entry.id AND tag_id IN (\(sourceID), \(targetID)))
+                  AND NOT (\(Self.syncEntryPublicationAuthority(accountID: accountID)))
+                """)) ?? 0
             return ClipboardHistorySyncTagMergePreview(id: UUID(), sourceID: sourceID, targetID: targetID,
                 displayName: names[0], newlyEligibleEntryCount: count,
                 historyRevision: try Self.historyRevision(in: database), accountID: accountID)
