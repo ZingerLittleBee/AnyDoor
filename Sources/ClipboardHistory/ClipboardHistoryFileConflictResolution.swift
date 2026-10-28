@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import GRDB
 
@@ -132,7 +131,8 @@ extension ClipboardHistoryModule {
                 try saveFileResolutionJournal(journal, planID: planID)
             }
             for prepared in journal.prepared {
-                try await Self.verifyPreparedFileVersion(prepared, account: account, control: control, key: key)
+                try await ClipboardSyncFileTransfer.verify(prepared.descriptor, directory: prepared.uploadDirectory,
+                    account: account, control: control, key: key)
             }
             try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             guard let result = journal.prepared.first(where: { $0.descriptor.versionID == journal.resultID }) else { throw ClipboardSyncServiceError.corruptData }
@@ -288,21 +288,4 @@ extension ClipboardHistoryModule {
             """, arguments: [planID.uuidString, snapshot.accountID, snapshot.epoch.uuidString, snapshot.objectID.uuidString, version.uuidString])
     }
 
-    @concurrent
-    static func verifyPreparedFileVersion(_ prepared: ClipboardSyncPreparedFileVersion,
-        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) async throws {
-        guard let body = prepared.descriptor.body else { throw ClipboardSyncServiceError.corruptData }
-        var plain = SHA256(), encrypted = SHA256()
-        var count: Int64 = 0, cipherCount: Int64 = 0
-        for index in 0..<body.chunkCount {
-            try Task.checkCancellation()
-            let bytes = try ClipboardSyncFileTransfer.readSegment(in: prepared.uploadDirectory, index: index)
-            let data = try ClipboardSyncCodec.openFileSegment(bytes, descriptor: prepared.descriptor,
-                account: account, control: control, key: key, index: index)
-            plain.update(data: data); encrypted.update(data: bytes)
-            count += Int64(data.count); cipherCount += Int64(bytes.count)
-        }
-        guard count == prepared.descriptor.streamByteCount, Data(plain.finalize()) == prepared.descriptor.contentDigest,
-              cipherCount == body.encryptedByteCount, Data(encrypted.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
-    }
 }

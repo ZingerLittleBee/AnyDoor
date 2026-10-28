@@ -21,6 +21,24 @@ struct ClipboardSyncFrozenFile: Sendable {
 enum ClipboardSyncFileTransfer {
     static let maximumEncryptedSegmentBytes = ClipboardSyncCodec.chunkByteCount + 28
 
+    @concurrent
+    static func verify(_ descriptor: ClipboardSyncFileDescriptor, directory: URL,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) async throws {
+        guard let body = descriptor.body else { throw ClipboardSyncServiceError.corruptData }
+        var plain = SHA256(), encrypted = SHA256()
+        var count: Int64 = 0, cipherCount: Int64 = 0
+        for index in 0..<body.chunkCount {
+            try Task.checkCancellation()
+            let bytes = try readSegment(in: directory, index: index)
+            let data = try ClipboardSyncCodec.openFileSegment(bytes, descriptor: descriptor,
+                account: account, control: control, key: key, index: index)
+            plain.update(data: data); encrypted.update(data: bytes)
+            count += Int64(data.count); cipherCount += Int64(bytes.count)
+        }
+        guard count == descriptor.streamByteCount, Data(plain.finalize()) == descriptor.contentDigest,
+              cipherCount == body.encryptedByteCount, Data(encrypted.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
+    }
+
     static func segmentURL(in directory: URL, index: Int) -> URL {
         directory.appendingPathComponent("\(index).ciphertext")
     }

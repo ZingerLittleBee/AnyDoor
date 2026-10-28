@@ -216,7 +216,7 @@ extension ClipboardHistoryModule {
                   key.count == 32, ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
                 throw ClipboardSyncServiceError.keyUnavailable
             }
-            try await Self.verifySyncFileRestoration(frozen.descriptor, directory: frozen.uploadDirectory,
+            try await ClipboardSyncFileTransfer.verify(frozen.descriptor, directory: frozen.uploadDirectory,
                 account: account, control: control, key: key)
             let root = destination.deletingLastPathComponent()
             let candidate = try await ClipboardSyncFilePublication.construct(descriptor: frozen.descriptor,

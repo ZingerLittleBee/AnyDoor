@@ -91,7 +91,7 @@ extension ClipboardHistoryModule {
                     let candidates = [file.directory, uploaded.map { URL(fileURLWithPath: $0) }, downloaded].compactMap { $0 }
                     for directory in Set(candidates) {
                         do {
-                            try await Self.verifySyncFileRestoration(file.descriptor, directory: directory,
+                            try await ClipboardSyncFileTransfer.verify(file.descriptor, directory: directory,
                                 account: account, control: control, key: key)
                             recovered.directory = directory
                             break
@@ -271,21 +271,4 @@ extension ClipboardHistoryModule {
                 row["shared_id"] as String, row["activation_id"] as String])
     }
 
-    @concurrent
-    static func verifySyncFileRestoration(_ descriptor: ClipboardSyncFileDescriptor, directory: URL,
-        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) async throws {
-        guard let body = descriptor.body else { throw ClipboardSyncServiceError.corruptData }
-        var plain = SHA256(), encrypted = SHA256()
-        var count: Int64 = 0, cipherCount: Int64 = 0
-        for index in 0..<body.chunkCount {
-            try Task.checkCancellation()
-            let bytes = try ClipboardSyncFileTransfer.readSegment(in: directory, index: index)
-            let data = try ClipboardSyncCodec.openFileSegment(bytes, descriptor: descriptor,
-                account: account, control: control, key: key, index: index)
-            plain.update(data: data); encrypted.update(data: bytes)
-            count += Int64(data.count); cipherCount += Int64(bytes.count)
-        }
-        guard count == descriptor.streamByteCount, Data(plain.finalize()) == descriptor.contentDigest,
-              cipherCount == body.encryptedByteCount, Data(encrypted.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
-    }
 }

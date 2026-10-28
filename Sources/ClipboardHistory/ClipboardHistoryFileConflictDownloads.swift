@@ -53,7 +53,8 @@ extension ClipboardHistoryModule {
         let basis = try linkedRead { try fileConflictBasis(entryID: .init(snapshot.entryID), objectID: snapshot.objectID, in: $0) }
         try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
         guard let key = try await services.keys.load(account: basis.account, keyID: basis.control.keyID), key.count == 32 else { throw ClipboardSyncServiceError.keyUnavailable }
-        try await Self.verifyPreparedFileVersion(prepared, account: basis.account, control: basis.control, key: key)
+        try await ClipboardSyncFileTransfer.verify(prepared.descriptor, directory: prepared.uploadDirectory,
+            account: basis.account, control: basis.control, key: key)
         let root = syncWorkingRoot.appendingPathComponent("Conflict Versions", isDirectory: true)
         let output = try await ClipboardSyncFilePublication.construct(descriptor: prepared.descriptor,
             encryptedDirectory: prepared.uploadDirectory, root: root, account: basis.account, control: basis.control, key: key, faults: faultInjector)
