@@ -38,11 +38,11 @@ extension ClipboardHistoryModule {
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_linked_locations
                     (id, account_id, epoch, object_id, path, bookmark, identity, kind,
-                     base_version_id, base_digest, state, observed_digest)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'associated', ?, ?, ?, ?)
+                     base_version_id, base_digest, state, observed_digest, native_identity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'associated', ?, ?, ?, ?, ?)
                 """, arguments: [id.uuidString, base.accountID, base.epoch, request.objectID.uuidString,
                     proof.url.path, proof.bookmark, proof.identity, base.descriptor.versionID.uuidString,
-                    base.descriptor.contentDigest, state.rawValue, proof.digest])
+                    base.descriptor.contentDigest, state.rawValue, proof.digest, try proof.nativeIdentity?.encoded()])
             try Self.bumpHistoryRevision(in: database)
             return ClipboardHistoryLinkedFileLocation(id: id, objectID: request.objectID,
                 baseVersionID: base.descriptor.versionID, url: proof.url, kind: .associated, state: state)
@@ -135,7 +135,8 @@ extension ClipboardHistoryModule {
         let path: String = row["path"]
         let available = ClipboardSyncFileIO.isAvailable(path: path, identity: row["identity"])
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
-            url: URL(fileURLWithPath: path), kind: kind, state: available ? storedState : .unavailable)
+            url: URL(fileURLWithPath: path), kind: kind, state: available ? storedState : .unavailable,
+            revision: row["revision"])
     }
 
     private static func linkedObjectBase(

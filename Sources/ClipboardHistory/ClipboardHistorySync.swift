@@ -334,6 +334,7 @@ extension ClipboardHistoryModule {
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await reconcileLinkedFileObservations(account: account, control: control, generation: generation, onlyUnproven: true)
             try await reconcileLinkedFileVersions(account: account, control: control, generation: generation)
             // A location processed earlier in this pass also receives a version
             // just frozen from another local association, independent of ID order.
