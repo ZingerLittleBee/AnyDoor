@@ -202,6 +202,7 @@ extension ClipboardHistoryModule {
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try importSyncContent(content, record: record, account: account)
+                if case .deletion = content { try await resumeSyncFilePreservations() }
             }
             // A content operation can disappear after metadata discovery. Apply
             // available retirement events, but do not acknowledge a missing body.
