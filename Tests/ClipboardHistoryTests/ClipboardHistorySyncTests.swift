@@ -8,6 +8,18 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testWorkingRootSymlinkCannotRedirectFilePublication() async throws {
+        let fixture = try await fileFixture(names: ["Safe.txt"], contents: [Data("must stay confined".utf8)])
+        let outside = fixture.root.appendingPathComponent("Unrelated")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: fixture.receiverRoot.appendingPathComponent("Linked Working Copies"), withDestinationURL: outside)
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.map(\.state), [.waitingForDownload])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outside.path), [])
+    }
+
+    @MainActor
     func testFileBackfillReadsCurrentBytesAndKeepsUnavailableMembersInOrder() async throws {
         let fixture = try await fileFixture(names: ["Edited.txt", "Gone.txt"],
             contents: [Data("old capture".utf8), Data("gone".utf8)], beforeEnable: { urls in
@@ -65,7 +77,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
             XCTAssertEqual(pending.entries[0].syncFiles.map(\.state), [.waitingForDownload])
             try await fixture.receiver.closeStoreForTesting()
             let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
-            await reopened.retrySync()
+            await reopened.resumeSync()
             let recovered = try await reopened.page(.init())
             XCTAssertEqual(recovered.entries.map(\.id), pending.entries.map(\.id))
             XCTAssertEqual(recovered.entries[0].syncFiles.map(\.state), [.complete])

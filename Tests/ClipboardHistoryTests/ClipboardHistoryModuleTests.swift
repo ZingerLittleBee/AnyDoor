@@ -1123,6 +1123,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v13_ocr_facet",
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
+                "v19_clipboard_sync_files",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -1167,6 +1168,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v13_ocr_facet",
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
+                "v19_clipboard_sync_files",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

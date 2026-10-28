@@ -245,6 +245,13 @@ extension ClipboardHistoryModule {
         for descriptor in descriptors {
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   size <= Self.automaticSyncFileDownloadBytes, let body = descriptor.body else { continue }
+            // Bound the temporary JSON body for this small-file path. This is
+            // protocol-envelope validation, not a file-size rejection policy.
+            let maximumEnvelopeBytes = size * 3 + 4_096
+            guard body.encryptedByteCount <= maximumEnvelopeBytes,
+                  body.chunkCount <= Int(maximumEnvelopeBytes / Int64(ClipboardSyncCodec.chunkByteCount)) + 1 else {
+                throw ClipboardSyncServiceError.corruptData
+            }
             try await admitSync(generation, account: account, services: services)
             let chunks = try await services.transport.download(body, for: account)
             try await admitSync(generation, account: account, services: services)

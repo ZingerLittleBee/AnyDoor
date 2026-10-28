@@ -14956,13 +14956,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Share plain-text history across Macs using the same Apple Account. Enable sync separately on each Mac."
+            "value": "Share clipboard history across Macs using the same Apple Account. Enable sync separately on each Mac."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在使用同一 Apple 账户的 Mac 间同步纯文本历史。每台 Mac 都需要单独开启同步。"
+            "value": "在使用同一 Apple 账户的 Mac 间同步剪贴板历史。每台 Mac 都需要单独开启同步。"
           }
         }
       }
@@ -14973,13 +14973,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selecting a tag shares its existing and future plain-text entries. Received history does not replace the current clipboard."
+            "value": "Selecting a tag shares its existing and future entries. Received history does not replace the current clipboard."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择标签后，会同步该标签下已有和之后新增的纯文本记录。收到的历史不会替换当前剪贴板。"
+            "value": "选择标签后，会同步该标签下已有和之后新增的记录。收到的历史不会替换当前剪贴板。"
           }
         }
       }
@@ -15024,13 +15024,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ (%lld text entries)"
+            "value": "%@ (%lld entries)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@（%lld 条文本记录）"
+            "value": "%@（%lld 条记录）"
           }
         }
       }
@@ -15041,13 +15041,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add a tag to a text entry in Clipboard History, then return here."
+            "value": "Add a tag to an entry in Clipboard History, then return here."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "先在剪贴板历史中为文本记录添加标签，再返回这里。"
+            "value": "先在剪贴板历史中为记录添加标签，再返回这里。"
           }
         }
       }
@@ -15262,13 +15262,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Syncing selected text history…"
+            "value": "Syncing selected clipboard history…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在同步所选文本历史…"
+            "value": "正在同步所选剪贴板历史…"
           }
         }
       }

@@ -98,6 +98,7 @@ enum ClipboardSyncFileIO {
         }
         let bytes = try readSmallFile(descriptor, byteCount: Int(count))
         var after = stat()
+        var pathStatus = stat()
         guard fstat(descriptor, &after) == 0,
               before.st_dev == after.st_dev, before.st_ino == after.st_ino,
               before.st_size == after.st_size,
@@ -105,7 +106,9 @@ enum ClipboardSyncFileIO {
               before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
               before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
               before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
-              try resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
+              try resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL,
+              lstat(url.path, &pathStatus) == 0,
+              pathStatus.st_dev == after.st_dev, pathStatus.st_ino == after.st_ino else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         return ClipboardSyncFileSample(state: .available, byteCount: count, bytes: bytes, url: url, bookmark: bookmark)
@@ -166,6 +169,7 @@ enum ClipboardSyncFileIO {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         let existing = openat(directory, descriptor.displayName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        var published = stat()
         if existing >= 0 {
             defer { close(existing) }
             var status = stat()
@@ -173,6 +177,9 @@ enum ClipboardSyncFileIO {
                   status.st_size == data.count,
                   try readSmallFile(existing, byteCount: data.count) == data else {
                 throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
+            }
+            guard fstat(existing, &published) == 0, unchangedFile(status, published) else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
         } else {
             guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
@@ -202,17 +209,33 @@ enum ClipboardSyncFileIO {
             guard unlinkat(directory, pendingName, 0) == 0, fsync(directory) == 0 else {
                 throw ClipboardHistoryStorageError.fileOperationFailed(errno)
             }
+            guard fstat(pending, &published) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         }
         guard lstat(url.path, &parentPath) == 0,
               parent.st_dev == parentPath.st_dev, parent.st_ino == parentPath.st_ino else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+        }
+        var destinationStatus = stat()
+        guard lstat(destination.path, &destinationStatus) == 0, unchangedFile(published, destinationStatus) else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         let values = try destination.resourceValues(forKeys: [.fileResourceIdentifierKey, .isSymbolicLinkKey])
         guard values.isSymbolicLink != true, let identifier = values.fileResourceIdentifier as? NSObject else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
-        return ClipboardSyncPublishedFile(url: destination,
+        let result = ClipboardSyncPublishedFile(url: destination,
             bookmark: try destination.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true))
+        guard lstat(destination.path, &destinationStatus) == 0, unchangedFile(published, destinationStatus) else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+        }
+        return result
+    }
+
+    private static func unchangedFile(_ before: stat, _ after: stat) -> Bool {
+        before.st_dev == after.st_dev && before.st_ino == after.st_ino
+            && before.st_mode == after.st_mode && before.st_size == after.st_size
+            && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec
+            && before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec
     }
 }
