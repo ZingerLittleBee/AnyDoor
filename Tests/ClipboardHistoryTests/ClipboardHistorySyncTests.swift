@@ -8,6 +8,59 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testSharedRichTextEditKeepsMetadataAndLateInitialContentCannotRestoreOldFormats() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x5A, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x5B, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-rich-edit.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let attributed = NSAttributedString(string: "formatted original")
+        let rtf = try attributed.data(from: .init(location: 0, length: attributed.length),
+            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let item = NSPasteboardItem()
+        item.setString("formatted original", forType: .string)
+        item.setData(rtf, forType: .rtf)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        let source = ClipboardHistoryCaptureSource(bundleIdentifier: "test.editor", displayName: "Editor")
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: source) else {
+            return XCTFail("Expected rich text capture")
+        }
+        let tag = try await first.createTagDefinition(named: "Rich edits", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let initial = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertTrue(initial.items[0].representations.contains(.data(typeIdentifier: "public.rtf", rtf)))
+        let privateTag = try await second.createTagDefinition(named: "Private context", assigningTo: captured.entryID)
+        _ = try await second.apply(.setFavorite(captured.entryID, true))
+
+        _ = try await first.apply(.editText(captured.entryID, "edited exact text"))
+        await first.retrySync()
+        await second.retrySync()
+        let expected = ClipboardHistoryMaterialization(items: [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "edited exact text")
+        ])])
+        let edited = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(edited, expected)
+        let page = try await second.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertTrue(entry.isFavorite)
+        XCTAssertEqual(entry.tagIDs, [tag.definition.id, privateTag.definition.id])
+        XCTAssertEqual(entry.source, source)
+        XCTAssertEqual(entry.capturedAt, Date(timeIntervalSince1970: 1_000))
+
+        await cloud.replayAllChangesInReverseOrder()
+        let late = makeModule(services: services, keyByte: 0x5C, time: 3_000)
+        try await late.setSyncEnabled(true)
+        await late.retrySync()
+        let replayed = try await late.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(replayed, expected)
+        let plan = try await late.textEditPlan(for: captured.entryID)
+        XCTAssertFalse(plan.hasConflict)
+    }
+
     func testEditorRetainsItsDisplayedAncestryWhenRemoteTextChangesBeforeSave() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

@@ -88,9 +88,9 @@ otherwise unrelated user data appears "lost".
 remote inbox, and imported history in its existing SQLCipher store. The additive
 `v14_clipboard_sync` migration keeps those records separate from local content and
 leaves the device-only history master key unchanged. The current slice transfers
-existing and newly eligible single-item plain text for one selected tag, including
-versioned text edits and explicit conflict resolution. Other content, withdrawal,
-and cloud reset follow the
+existing and newly eligible ordered content for selected tags, including
+versioned text edits and explicit conflict resolution. Further file lifecycle,
+withdrawal, and cloud reset behavior follow the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 The additive `v18_clipboard_sync_versions` journal records immutable versions and
