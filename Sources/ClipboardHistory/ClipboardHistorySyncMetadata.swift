@@ -12,8 +12,14 @@ struct ClipboardSyncMetadataRevision: Codable, Equatable, Comparable, Sendable {
 
 enum ClipboardSyncMetadataValue: Codable, Equatable, Sendable {
     case favorite(Bool)
+    case recognition(kind: ClipboardHistoryDerivedJobKind, values: [String], basisRecordID: String)
 
-    var field: String { switch self { case .favorite: "favorite" } }
+    var field: String {
+        switch self {
+        case .favorite: "favorite"
+        case .recognition(let kind, _, _): kind.rawValue
+        }
+    }
 }
 
 struct ClipboardSyncMetadataContent: Codable, Equatable, Sendable {
@@ -74,13 +80,52 @@ extension ClipboardHistoryModule {
 
     func seedSyncEntryMetadata(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,
                                record: ClipboardSyncRemoteRecord, in database: Database) throws {
-        let initial = ClipboardSyncMetadataContent(id: content.id, revision: .initial, value: .favorite(content.favorite))
-        if try syncMetadata(id: content.id, field: initial.value.field, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) == nil {
-            try saveSyncMetadata(initial, accountID: account.identifier, epoch: record.epoch.uuidString, pending: false, in: database)
+        var values: [ClipboardSyncMetadataValue] = [.favorite(content.favorite)]
+        if let ocr = content.recognition.ocr { values.append(.recognition(kind: .ocr, values: ocr, basisRecordID: record.recordID)) }
+        if let qr = content.recognition.qr { values.append(.recognition(kind: .qr, values: qr, basisRecordID: record.recordID)) }
+        for value in values {
+            try validateSyncMetadataValue(value)
+            let initial = ClipboardSyncMetadataContent(id: content.id, revision: .initial, value: value)
+            if try syncMetadata(id: content.id, field: value.field, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) == nil {
+                try saveSyncMetadata(initial, accountID: account.identifier, epoch: record.epoch.uuidString, pending: false, in: database)
+            }
         }
-        if let current = try syncMetadata(id: content.id, field: initial.value.field, accountID: account.identifier,
-                                          epoch: record.epoch.uuidString, in: database) {
-            try applySyncMetadata(current, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+        // Also apply registers received before an initial snapshot with no results.
+        for field in ["favorite", "ocr", "qr"] {
+            if let current = try syncMetadata(id: content.id, field: field, accountID: account.identifier,
+                                              epoch: record.epoch.uuidString, in: database) {
+                try applySyncMetadata(current, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+            }
+        }
+    }
+
+    func syncEntryRecognition(entryID: String, in database: Database) throws -> ClipboardSyncRecognitionContent {
+        func results(_ kind: ClipboardHistoryDerivedJobKind) throws -> [String]? {
+            let completed = try Bool.fetchOne(database, sql: """
+                SELECT EXISTS (SELECT 1 FROM clipboard_derived_jobs WHERE entry_id = ? AND kind = ? AND state = 'succeeded')
+                    OR EXISTS (SELECT 1 FROM clipboard_sync_metadata AS metadata
+                        JOIN clipboard_sync_entries AS shared ON shared.account_id = metadata.account_id
+                            AND shared.epoch = metadata.epoch AND shared.shared_id = metadata.shared_id
+                        WHERE shared.local_entry_id = ? AND metadata.field = ?)
+                """, arguments: [entryID, kind.rawValue, entryID, kind.rawValue]) ?? false
+            guard completed else { return nil }
+            return try String.fetchAll(database, sql: """
+                SELECT value FROM clipboard_search_fields WHERE entry_id = ? AND field_kind = ? ORDER BY field_index
+                """, arguments: [entryID, kind.rawValue])
+        }
+        guard try Bool.fetchOne(database, sql: """
+            SELECT EXISTS (SELECT 1 FROM clipboard_representations WHERE entry_id = ? AND kind = 'bitmap')
+            """, arguments: [entryID]) == true else { return .init() }
+        return try .init(ocr: results(.ocr), qr: results(.qr))
+    }
+
+    private func validateSyncMetadataValue(_ value: ClipboardSyncMetadataValue) throws {
+        guard case .recognition(_, let values, let basisRecordID) = value else { return }
+        guard !basisRecordID.isEmpty else { throw ClipboardSyncServiceError.corruptData }
+        var count = 0
+        for text in values {
+            guard text.utf8.count <= PasteboardSnapshot.maximumByteCount - count else { throw ClipboardSyncServiceError.corruptData }
+            count += text.utf8.count
         }
     }
 
@@ -88,6 +133,7 @@ extension ClipboardHistoryModule {
                             record: ClipboardSyncRemoteRecord, in database: Database) throws {
         guard operation.revision.counter > 0, operation.revision.counter < Int64.max - 1,
               UUID(uuidString: operation.revision.operationID) == record.operationID else { throw ClipboardSyncServiceError.corruptData }
+        try validateSyncMetadataValue(operation.value)
         try database.execute(sql: "UPDATE clipboard_sync_metadata_clock SET counter = MAX(counter, ?) WHERE id = 1",
             arguments: [operation.revision.counter])
         if let current = try syncMetadata(id: operation.id, field: operation.value.field, accountID: account.identifier,
@@ -120,6 +166,26 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, operation.id.uuidString.lowercased()]),
             try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)", arguments: [localID]) == true else { return }
         switch operation.value {
+        case .recognition(let kind, let values, let basisRecordID):
+            // Text edits remove the original bitmap. Late recognition is then
+            // acknowledged without reviving results for obsolete content.
+            guard try Bool.fetchOne(database, sql: """
+                SELECT EXISTS (SELECT 1 FROM clipboard_sync_entries
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ? AND record_id = ?)
+                    AND EXISTS (SELECT 1 FROM clipboard_representations WHERE entry_id = ? AND kind = 'bitmap')
+                """, arguments: [accountID, epoch, operation.id.uuidString.lowercased(), basisRecordID, localID]) == true else { return }
+            try Self.deleteSearchFields(forEntryID: localID, kind: kind.rawValue, from: database, faultInjector: faultInjector)
+            for (index, value) in values.enumerated() {
+                try Self.insertSearchField(value: value, kind: kind.rawValue, index: index,
+                    rankingGroup: Self.searchRankingGroup(for: kind.rawValue), entryID: localID,
+                    into: database, faultInjector: faultInjector)
+            }
+            if kind == .qr {
+                try database.execute(sql: "DELETE FROM clipboard_entry_facets WHERE entry_id = ? AND facet = 'qrCode'", arguments: [localID])
+                if !values.isEmpty {
+                    try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'qrCode')", arguments: [localID])
+                }
+            }
         case .favorite(let favorite):
             let protected = try Bool.fetchOne(database, sql: "SELECT is_protected FROM clipboard_retention_state WHERE entry_id = ?", arguments: [localID]) ?? false
             try database.execute(sql: "UPDATE clipboard_entries SET is_favorite = ? WHERE id = ?", arguments: [favorite, localID])

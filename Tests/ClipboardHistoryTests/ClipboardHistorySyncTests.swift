@@ -9,6 +9,34 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testCompletedImageRecognitionTransfersAsSearchableResultsWithoutEnablingReceiverRecognition() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x91, time: 1_000,
+            recognizer: SyncTestRecognizer(results: [.ocr: ["recognized invoice 4721"], .qr: ["anydoor://recognized/qr"]]))
+        let receiverRecognizer = SyncTestRecognizer()
+        let second = makeModule(services: services, keyByte: 0x92, time: 2_000, recognizer: receiverRecognizer)
+        try await first.setAutomaticImageTextIndexingEnabled(true)
+        let captured = try await first.capture(.init(source: .unknown, content: .bitmap(try makeSyncBitmap(), provenance: .image)))
+        await first.awaitDerivedJobsForTesting()
+        let tag = try await first.createTagDefinition(named: "Images", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let ocr = try await second.page(.init(text: "invoice 4721"))
+        let qr = try await second.page(.init(text: "recognized/qr", facet: .qrCode))
+        XCTAssertEqual(ocr.entries.map(\.id), [captured.entryID])
+        XCTAssertEqual(qr.entries.map(\.id), [captured.entryID])
+        XCTAssertEqual(qr.entries.first?.facets, [.image, .qrCode])
+        let recognitionEnabled = try await second.isAutomaticImageTextIndexingEnabled()
+        XCTAssertFalse(recognitionEnabled)
+        let calls = await receiverRecognizer.callCount()
+        XCTAssertEqual(calls, 0)
+        let original = try await first.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        let received = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(received, original)
+    }
+
+    @MainActor
     func testFavoriteUpdatesSurviveRestartAndReorderingWithoutReplacingRichContentOrPrivateTags() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -1272,9 +1300,11 @@ final class ClipboardHistorySyncTests: XCTestCase {
 
 private actor SyncTestRecognizer: ClipboardHistoryVisionRecognizing {
     private var calls = 0
+    let results: [ClipboardHistoryDerivedJobKind: [String]]
+    init(results: [ClipboardHistoryDerivedJobKind: [String]] = [:]) { self.results = results }
     func recognize(_ kind: ClipboardHistoryDerivedJobKind, in bitmaps: [Data]) -> [String] {
         calls += 1
-        return []
+        return results[kind] ?? []
     }
     func callCount() -> Int { calls }
 }

@@ -83,7 +83,7 @@ extension ClipboardHistoryModule {
             sourceProvenance: entry["source_provenance"], favorite: entry["is_favorite"], tags: tags,
             items: items, facets: try String.fetchAll(database,
                 sql: "SELECT facet FROM clipboard_entry_facets WHERE entry_id = ? ORDER BY facet", arguments: [storedID]),
-            recognition: .init())
+            recognition: try syncEntryRecognition(entryID: storedID, in: database))
     }
 
     func importSyncEntryContent(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,

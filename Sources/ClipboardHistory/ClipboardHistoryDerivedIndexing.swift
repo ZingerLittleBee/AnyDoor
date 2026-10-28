@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import Vision
 
-enum ClipboardHistoryDerivedJobKind: String, CaseIterable, Sendable {
+enum ClipboardHistoryDerivedJobKind: String, Codable, CaseIterable, Sendable {
     case ocr
     case qr
 }
