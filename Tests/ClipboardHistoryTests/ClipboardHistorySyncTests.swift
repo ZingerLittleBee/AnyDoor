@@ -8,6 +8,56 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testEditingFileBearingTextDoesNotReviveItsPendingFile() async throws {
+        let fixture = try await fileFixture(names: ["Obsolete.txt"], contents: [Data("obsolete bytes".utf8)],
+            receiverFaults: .init(points: [.syncFileBeforePublication]), exactText: "original label")
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        _ = try await fixture.receiver.apply(.editText(entry.id, "edited text"))
+        let downloadsBefore = await fixture.cloud.fileBodyDownloadCount()
+        await fixture.receiver.retrySync()
+        let edited = try await fixture.receiver.page(.init())
+        XCTAssertEqual(edited.entries.first?.syncFiles, [])
+        let downloadsAfter = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(downloadsAfter, downloadsBefore)
+        let materialized = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        XCTAssertEqual(materialized.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "edited text")])])
+    }
+
+    @MainActor
+    func testOrderedFileNamesAndBytesAreEncryptedOutsideVisibleWorkingCopies() async throws {
+        let names = ["Confidential first.txt", "Confidential second.txt"]
+        let bytes = [Data("first confidential file body".utf8), Data("second confidential file body".utf8)]
+        let fixture = try await fileFixture(names: names, contents: bytes)
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let materialized = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        let files = materialized.items.flatMap(\.representations).compactMap { representation -> ClipboardHistoryMaterializedFileReference? in
+            if case .file(let file) = representation { return file }
+            return nil
+        }
+        XCTAssertEqual(files.map(\.displayName), names)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0.currentURL) }, bytes)
+        let secrets = bytes + names.map { Data($0.utf8) } + fixture.sourceURLs.map { Data($0.path.utf8) }
+        for upload in await fixture.cloud.currentUploads() {
+            for artifact in upload.chunks + [try JSONEncoder().encode(upload.record)] {
+                for secret in secrets { XCTAssertNil(artifact.range(of: secret)) }
+            }
+        }
+        let workingRoot = fixture.receiverRoot.appendingPathComponent("Linked Working Copies").resolvingSymlinksInPath().pathComponents
+        XCTAssertTrue(files.allSatisfy { $0.currentURL.resolvingSymlinksInPath().pathComponents.starts(with: workingRoot) })
+        let persisted = try XCTUnwrap(FileManager.default.enumerator(at: fixture.receiverRoot, includingPropertiesForKeys: [.isRegularFileKey]))
+        for url in persisted.allObjects.compactMap({ $0 as? URL })
+            where !url.resolvingSymlinksInPath().pathComponents.starts(with: workingRoot) {
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let artifact = try Data(contentsOf: url)
+            for secret in secrets { XCTAssertNil(artifact.range(of: secret)) }
+        }
+    }
+
+    @MainActor
     func testWorkingRootSymlinkCannotRedirectFilePublication() async throws {
         let fixture = try await fileFixture(names: ["Safe.txt"], contents: [Data("must stay confined".utf8)])
         let outside = fixture.root.appendingPathComponent("Unrelated")
@@ -156,6 +206,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
     private func fileFixture(names: [String], contents: [Data],
         receiverFaults: ClipboardHistoryFaultInjector = .init(),
+        exactText: String? = nil,
         beforeEnable: ([URL]) throws -> Void = { _ in }
     ) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule, cloud: SyncTestCloud,
@@ -180,6 +231,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let items = urls.map { url in
             let item = NSPasteboardItem()
             item.setString(url.absoluteString, forType: .fileURL)
+            if let exactText { item.setString(exactText, forType: .string) }
             return item
         }
         XCTAssertTrue(pasteboard.writeObjects(items))

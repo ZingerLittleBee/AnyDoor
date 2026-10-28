@@ -5,12 +5,19 @@ import GRDB
 extension ClipboardHistoryModule {
     static let automaticSyncFileDownloadBytes: Int64 = 5_000_000
 
+    private static let liveSyncFileMember = """
+        EXISTS (SELECT 1 FROM clipboard_representations AS current
+            WHERE current.entry_id = member.entry_id AND current.item_index = member.item_index
+              AND current.representation_index = member.representation_index AND current.kind = 'fileReference')
+        """
+
     static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
         try Row.fetchAll(database, sql: """
             SELECT version.descriptor, version.transfer_state, version.local_path, version.local_identity
             FROM clipboard_sync_file_members AS member
             JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
-            WHERE member.entry_id = ? ORDER BY member.item_index, member.representation_index
+            WHERE member.entry_id = ? AND \(liveSyncFileMember)
+            ORDER BY member.item_index, member.representation_index
             """, arguments: [entryID]).map { row in
                 let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
                 let state: ClipboardHistorySyncFileState
@@ -39,7 +46,7 @@ extension ClipboardHistoryModule {
                        version.local_path, version.local_bookmark, version.local_identity
                 FROM clipboard_sync_file_members AS member
                 JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
-                WHERE member.entry_id = ? AND member.origin = 'remote'
+                WHERE member.entry_id = ? AND member.origin = 'remote' AND \(Self.liveSyncFileMember)
                 ORDER BY member.item_index, member.representation_index
                 """, arguments: [entryID.value.uuidString.lowercased()])
         }
@@ -166,8 +173,11 @@ extension ClipboardHistoryModule {
                 WHERE membership.entry_id = ? AND selected.account_id = ? AND selected.selected = 1
                   AND (selected.locally_authorized = 1 OR NOT EXISTS (
                     SELECT 1 FROM clipboard_sync_entries AS former
-                    WHERE former.local_entry_id = membership.entry_id AND former.account_id != selected.account_id)))
-            """, arguments: [source.entryID, account.identifier]) ?? false
+                    WHERE former.local_entry_id = membership.entry_id AND former.account_id != selected.account_id))
+                  AND EXISTS (SELECT 1 FROM clipboard_representations AS current
+                    WHERE current.entry_id = membership.entry_id AND current.item_index = ?
+                      AND current.representation_index = ? AND current.kind = 'fileReference'))
+            """, arguments: [source.entryID, account.identifier, source.itemIndex, source.representationIndex]) ?? false
     }
 
     func syncFileDescriptor(
@@ -237,7 +247,7 @@ extension ClipboardHistoryModule {
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id AND member.version_id = version.version_id
-                      AND member.origin = 'remote')
+                      AND member.origin = 'remote' AND \(Self.liveSyncFileMember))
                 """, arguments: [account.identifier, control.epoch.uuidString]).map {
                     try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: $0)
                 }
@@ -292,8 +302,9 @@ extension ClipboardHistoryModule {
     ) throws -> Bool {
         try requiredDatabase().read { database in
             try Bool.fetchOne(database, sql: """
-                SELECT EXISTS (SELECT 1 FROM clipboard_sync_file_members
-                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                SELECT EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                      AND \(Self.liveSyncFileMember))
                 """, arguments: [account.identifier, epoch.uuidString,
                     descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
         }
