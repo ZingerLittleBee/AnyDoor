@@ -176,14 +176,14 @@ final class ClipboardFileConflictPresentationTests: XCTestCase {
     }
 }
 
-private struct FileConflictUILocalKey: ClipboardHistoryMasterKeyStoring {
+struct FileConflictUILocalKey: ClipboardHistoryMasterKeyStoring {
     let byte: UInt8
     func load() -> ClipboardHistoryMasterKeyResult { .key(Data(repeating: byte, count: 32)) }
     func create() -> ClipboardHistoryMasterKeyResult { load() }
     func delete() -> ClipboardHistoryMasterKeyResult { .missing }
 }
 
-private actor FileConflictUIKeys: ClipboardSyncKeyStoring {
+actor FileConflictUIKeys: ClipboardSyncKeyStoring {
     private var keys: [UUID: Data] = [:]
     func load(account: ClipboardSyncAccount, keyID: UUID) -> Data? { keys[keyID] }
     func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) throws -> Data {
@@ -196,7 +196,7 @@ private actor FileConflictUIKeys: ClipboardSyncKeyStoring {
     }
 }
 
-private actor FileConflictUICloud: ClipboardSyncTransport {
+actor FileConflictUICloud: ClipboardSyncTransport {
     private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []

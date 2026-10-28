@@ -751,7 +751,7 @@ struct ClipboardWallView: View {
                             onNewTag: { state.select(item.id); onNewTag(item) },
                             onIgnoreSource: { state.select(item.id); onIgnoreSource(item) },
                             onDelete: { state.select(item.id); onDelete(item) },
-                            menuSuppressed: { state.tagDialog != nil || state.presentation.fileConflictEntryID != nil }
+                            menuSuppressed: { state.tagDialog != nil || state.presentation.hasFileActionSheet }
                         )
                         // Identify by the item's stable id (matching the ForEach
                         // key). A positional `.id(index)` here conflicts with the

@@ -127,6 +127,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         state.tagDialog = nil
         state.tagDialogText = ""
         state.presentation.dismissFileConflict()
+        state.presentation.dismissApplicationUpdate()
         // A rebuild started from an earlier session reports nothing here.
         state.forgetUserRebuild()
         // Seed from the live flags: ⌥ may already be held when the wall opens,
@@ -222,6 +223,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // The floating panels have no life of their own once the wall goes away.
         closePreviews()
         configuredState?.presentation.dismissFileConflict()
+        configuredState?.presentation.dismissApplicationUpdate()
         guard let window, window.isVisible, let screen = NSScreen.main else {
             // Nothing on screen to slide out. Settling runs what was queued
             // now, so none of it can run in a later session.
@@ -361,7 +363,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             MainThreadIsolation.run {
                 guard let self else { return }
                 // Don't throw away an in-progress edit on a stray outside click.
-                if ClipboardTextWindow.shared.isEditing || self.state.presentation.fileConflictEntryID != nil { return }
+                if ClipboardTextWindow.shared.isEditing || self.state.presentation.hasFileActionSheet { return }
                 if ClipboardQuickLookWindow.shared.containsMouseEvent(event) { return }
                 self.dismiss(restoreFocus: false)
             }
@@ -381,7 +383,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             MainThreadIsolation.run {
                 guard let self, self.window?.isVisible == true,
                       !ClipboardTextWindow.shared.isEditing,
-                      self.state.presentation.fileConflictEntryID == nil,
+                      !self.state.presentation.hasFileActionSheet,
                       ClipboardWallDismissalPolicy.shouldDismissAfterActivatingApplication(
                         hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
                         activatedProcessID: processID,
@@ -426,7 +428,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // cards advance under it). This subsumes the old floating-text-panel
         // check, since that panel is a different window.
         guard event.window === window else { return false }
-        if state.presentation.fileConflictEntryID != nil { return false }
+        if state.presentation.hasFileActionSheet { return false }
         // The selection must not change behind the tag dialog's modal dimmer.
         if state.tagDialog != nil { return true }
         // The top strip (tab row + search field) hosts its own horizontal
@@ -457,7 +459,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
         // The native conflict sheet owns Return, Escape, and candidate navigation.
-        if state.presentation.fileConflictEntryID != nil { return false }
+        if state.presentation.hasFileActionSheet { return false }
         // Once the wall is closing, or a dismissal waits for the slide-in,
         // keys no longer act on it: a quick ⌫ after Return must not delete
         // the selected entry, and a second Return must not commit again.
@@ -1313,7 +1315,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
             isOpening: lifecycle.phase == .opening,
             openedOverAnotherApp: previousApp != nil,
-            hasFileConflictSheet: configuredState?.presentation.fileConflictEntryID != nil
+            hasFileConflictSheet: configuredState?.presentation.fileConflictEntryID != nil,
+            hasApplicationUpdateSheet: configuredState?.presentation.applicationUpdateSelection != nil
         ) else { return }
         // A click elsewhere already moved focus; don't yank it back.
         dismiss(restoreFocus: false)
@@ -1334,10 +1337,11 @@ enum ClipboardWallDismissalPolicy {
         hasQuickLook: Bool,
         isOpening: Bool,
         openedOverAnotherApp: Bool,
-        hasFileConflictSheet: Bool = false
+        hasFileConflictSheet: Bool = false,
+        hasApplicationUpdateSheet: Bool = false
     ) -> Bool {
         if isOpening && !openedOverAnotherApp { return false }
-        return !hasTextWindow && !hasQuickLook && !hasFileConflictSheet
+        return !hasTextWindow && !hasQuickLook && !hasFileConflictSheet && !hasApplicationUpdateSheet
     }
 
     static func shouldDismissAfterActivatingApplication(
