@@ -125,7 +125,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private static func linkedFileLocation(_ row: Row) throws -> ClipboardHistoryLinkedFileLocation {
+    static func linkedFileLocation(_ row: Row) throws -> ClipboardHistoryLinkedFileLocation {
         guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
               let base = UUID(uuidString: row["base_version_id"]),
               let kind = ClipboardHistoryLinkedFileLocationKind(rawValue: row["kind"]),
@@ -135,7 +135,8 @@ extension ClipboardHistoryModule {
         let path: String = row["path"]
         let available = ClipboardSyncFileIO.isAvailable(path: path, identity: row["identity"])
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
-            url: URL(fileURLWithPath: path), kind: kind, state: available ? storedState : .unavailable,
+            url: URL(fileURLWithPath: path), kind: kind,
+            state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
             revision: row["revision"])
     }
 

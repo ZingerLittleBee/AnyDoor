@@ -27,10 +27,14 @@ extension ClipboardHistoryModule {
                 let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
                 let state: ClipboardHistorySyncFileState
                 let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
+                let linked = try usableLinkedFileReference(objectID: descriptor.objectID,
+                    accountID: row["account_id"], epoch: row["epoch"], in: database)
                 let available = (row["transfer_state"] as String?) == "complete"
-                    && ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"])
+                    && (linked.exists ? linked.reference != nil
+                        : ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"]))
+                let availableVersion = linked.reference?.versionID ?? completeVersion
                 if available {
-                    state = completeVersion == descriptor.versionID ? .complete : .updateAvailable
+                    state = availableVersion == descriptor.versionID ? .complete : .updateAvailable
                 } else if completeVersion != nil {
                     state = .localUnavailable
                 } else {
@@ -45,7 +49,7 @@ extension ClipboardHistoryModule {
                 let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
-                    availableVersionID: available ? completeVersion : nil, transferredByteCount: transfer.bytes,
+                    availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
                     transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending, hasConflict: conflict)
             }
     }
@@ -55,7 +59,7 @@ extension ClipboardHistoryModule {
     ) throws -> [Int: ClipboardHistoryMaterializedFileReference] {
         let rows = try database.read { database in
             try Row.fetchAll(database, sql: """
-                SELECT member.item_index, version.descriptor, version.transfer_state,
+                SELECT member.item_index, member.account_id, member.epoch, version.descriptor, version.transfer_state,
                        COALESCE(location.path, version.local_path) AS local_path,
                        COALESCE(location.bookmark, version.local_bookmark) AS local_bookmark,
                        COALESCE(location.identity, version.local_identity) AS local_identity
@@ -78,17 +82,39 @@ extension ClipboardHistoryModule {
         var missingCount = 0
         for row in rows {
             let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
-            guard let bookmark: Data = row["local_bookmark"], let identity: Data = row["local_identity"],
+            let linked = try database.read { try Self.usableLinkedFileReference(objectID: descriptor.objectID,
+                accountID: row["account_id"], epoch: row["epoch"], in: $0) }
+            let bookmark: Data? = linked.exists ? linked.reference?.bookmark : row["local_bookmark"]
+            let identity: Data? = linked.exists ? linked.reference?.identity : row["local_identity"]
+            guard let bookmark, let identity,
                   let url = try? ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity) else {
                 missingCount += 1
                 continue
             }
             references[row["item_index"]] = ClipboardHistoryMaterializedFileReference(
-                capturedPath: row["local_path"], displayName: descriptor.displayName, currentURL: url
+                capturedPath: linked.reference?.path ?? row["local_path"], displayName: descriptor.displayName, currentURL: url
             )
         }
         guard missingCount == 0 else { throw ClipboardHistoryModuleError.fileReferencesUnavailable(entryID, count: missingCount) }
         return references
+    }
+
+    private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
+        in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT path, bookmark, identity, state, base_version_id FROM clipboard_sync_linked_locations
+            WHERE account_id = ? AND epoch = ? AND object_id = ?
+            ORDER BY CASE kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, id
+            """, arguments: [accountID, epoch, objectID.uuidString])
+        for row in rows where !["unavailable", "detached", "identityUncertain"].contains(row["state"] as String) {
+            let path: String = row["path"]
+            let identity: Data = row["identity"]
+            if ClipboardSyncFileIO.isAvailable(path: path, identity: identity),
+               let versionID = UUID(uuidString: row["base_version_id"]) {
+                return (true, (path, row["bookmark"], identity, versionID))
+            }
+        }
+        return (!rows.isEmpty, nil)
     }
 
     static func createSyncFileSchema(in database: Database) throws {

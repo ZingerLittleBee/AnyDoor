@@ -13,7 +13,7 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
     let identity: Data
     private let source: any DispatchSourceFileSystemObject
 
-    init?(url: URL, identity: Data, onChange: @escaping @Sendable () -> Void) {
+    init?(url: URL, identity: Data, onChange: @escaping @Sendable (ClipboardLinkedFileIdentityEvent) -> Void) {
         let descriptor = open(url.path, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { return nil }
         var status = stat()
@@ -25,7 +25,17 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
         self.identity = identity
         source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
             eventMask: [.write, .extend, .attrib, .rename, .delete, .revoke], queue: Self.queue)
-        source.setEventHandler(handler: onChange)
+        source.setEventHandler {
+            var status = stat()
+            let unlinked = fstat(descriptor, &status) == 0 && status.st_nlink == 0
+            var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            let path: URL?
+            if fcntl(descriptor, F_GETPATH, &buffer) == 0 {
+                let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                path = URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self))
+            } else { path = nil }
+            onChange(ClipboardLinkedFileIdentityEvent(identity: identity, candidate: path, unlinked: unlinked))
+        }
         source.setCancelHandler { close(descriptor) }
         source.activate()
     }
@@ -42,6 +52,7 @@ struct ClipboardLinkedLocationSource: Sendable {
     let bookmark: Data
     let revision: UInt64
     let nativeIdentity: ClipboardLinkedNativeIdentity?
+    let hasPendingApplication: Bool
     let baseVersionID: UUID
     let baseDigest: Data
     let state: ClipboardHistoryLinkedFileLocationState
@@ -55,6 +66,7 @@ extension ClipboardHistoryModule {
         for task in linkedFileObservationTasks.values { task.cancel() }
         linkedFileObservationTasks.removeAll()
         linkedFileObservationRevisions.removeAll()
+        linkedFileIdentityEvents.removeAll()
     }
 
     func refreshLinkedFileObservers(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) throws {
@@ -65,18 +77,20 @@ extension ClipboardHistoryModule {
             linkedFileObservers.removeValue(forKey: id)?.cancel()
             linkedFileObservationTasks.removeValue(forKey: id)?.cancel()
             linkedFileObservationRevisions.removeValue(forKey: id)
+            linkedFileIdentityEvents.removeValue(forKey: id)
         }
         for source in sources {
             if let existing = linkedFileObservers[source.id], existing.path == source.url.path, existing.identity == source.identity { continue }
             linkedFileObservers.removeValue(forKey: source.id)?.cancel()
-            linkedFileObservers[source.id] = ClipboardLinkedFileObservation(url: source.url, identity: source.identity) { [weak self] in
-                Task { await self?.linkedFileDidChange(source.id, account: account, epoch: control.epoch, generation: generation) }
+            linkedFileObservers[source.id] = ClipboardLinkedFileObservation(url: source.url, identity: source.identity) { [weak self] event in
+                Task { await self?.linkedFileDidChange(source.id, event: event, account: account, epoch: control.epoch, generation: generation) }
             }
         }
     }
 
-    private func linkedFileDidChange(_ id: UUID, account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) {
+    private func linkedFileDidChange(_ id: UUID, event: ClipboardLinkedFileIdentityEvent, account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) {
         guard generation == syncGeneration, !syncSuspended else { return }
+        linkedFileIdentityEvents[id] = event
         let revision = (linkedFileObservationRevisions[id] ?? 0) &+ 1
         linkedFileObservationRevisions[id] = revision
         linkedFileObservationTasks[id]?.cancel()
@@ -114,10 +128,10 @@ extension ClipboardHistoryModule {
         guard let services = syncServices else { return false }
         try await admitSync(generation, account: account, services: services)
         guard let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: $0).first }) else { return false }
+        guard !source.hasPendingApplication else { return false }
+        let event = linkedFileIdentityEvents[id].flatMap { $0.identity == source.identity ? $0 : nil }
         let inspection = Task.detached(priority: .utility) {
-            Result {
-                try ClipboardLinkedIdentityResolution.inspect(source)
-            }
+            Result { try ClipboardLinkedIdentityResolution.inspect(source, event: event) }
         }
         let result = await withTaskCancellationHandler {
             await inspection.value
@@ -138,10 +152,14 @@ extension ClipboardHistoryModule {
                 if current.state == .conflict { state = .conflict }
                 else if inspected.digest != current.baseDigest { state = .localChanges }
                 else { state = current.state == .pendingUpload ? .pendingUpload : .current }
-            case .failure:
+            case .failure(let error):
                 proof = nil
                 digest = nil
-                state = .unavailable
+                switch error as? ClipboardLinkedIdentityFailure {
+                case .removed: state = .detached
+                case .replaced: state = .identityUncertain
+                default: state = .unavailable
+                }
             }
             let previous = try Data.fetchOne(database, sql: "SELECT observed_digest FROM clipboard_sync_linked_locations WHERE id = ?", arguments: [id.uuidString])
             guard state != current.state || digest != previous || proof.map({ $0.url != current.url || $0.nativeIdentity != current.nativeIdentity || $0.identity != current.identity }) == true else { return false }
@@ -163,6 +181,7 @@ extension ClipboardHistoryModule {
             SELECT location.* FROM clipboard_sync_linked_locations AS location
             WHERE location.account_id = \(accountID) AND location.epoch = \(epoch.uuidString)
               AND (\(id?.uuidString) IS NULL OR location.id = \(id?.uuidString))
+              AND location.state NOT IN ('detached', 'identityUncertain', 'paused')
               AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                 JOIN clipboard_entries AS entry ON entry.id = member.entry_id
                 WHERE member.account_id = location.account_id AND member.epoch = location.epoch
@@ -178,6 +197,7 @@ extension ClipboardHistoryModule {
                 return ClipboardLinkedLocationSource(id: id, objectID: objectID, url: URL(fileURLWithPath: row["path"]),
                     identity: row["identity"], bookmark: row["bookmark"], revision: row["revision"],
                     nativeIdentity: try (row["native_identity"] as Data?).map { try JSONDecoder().decode(ClipboardLinkedNativeIdentity.self, from: $0) },
+                    hasPendingApplication: (row["applying_version_id"] as String?) != nil,
                     baseVersionID: base, baseDigest: row["base_digest"], state: state)
             }
     }
