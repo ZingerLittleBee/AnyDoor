@@ -381,12 +381,12 @@ private actor LinkedFileKeys: ClipboardSyncKeyStoring {
 }
 
 actor LinkedFileCloud: ClipboardSyncTransport {
-    private let identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
+    private var identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
     private var purgedRecords: Set<String> = []
     private var commitsFail = false
-    private var shouldHoldDownload = false
+    private var heldSegmentIndex: Int?
     private var heldDownload: CheckedContinuation<Void, Never>?
     private var cancellations = 0
     private var fileDownloads: [UUID] = []
@@ -410,7 +410,11 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         uploads.insert(contentsOf: tail, at: 0)
     }
     func failCommits(_ fail: Bool) { commitsFail = fail }
-    func holdNextDownload() { shouldHoldDownload = true }
+    func holdNextDownload(at index: Int = 0) { heldSegmentIndex = index }
+    func switchAccount(to owner: String) {
+        identity = .init(container: identity.container, environment: identity.environment, owner: owner)
+        currentControl = nil
+    }
     func downloadIsHeld() -> Bool { heldDownload != nil }
     func releaseDownload() { heldDownload?.resume(); heldDownload = nil }
 
@@ -464,6 +468,26 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         self.currentControl = updated
         return updated
     }
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
+        for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl {
+        guard account == identity else { throw ClipboardSyncServiceError.accountChanged }
+        guard currentControl == control else { throw ClipboardSyncServiceError.conflict }
+        let result = advanced(.init(accountID: control.accountID, keyID: control.keyID,
+            keyCheck: control.keyCheck, epoch: epoch, phase: phase, serverToken: control.serverToken))
+        currentControl = result
+        return result
+    }
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl,
+        cursor: Data?) async throws -> ClipboardSyncCleanupPage {
+        guard account == identity else { throw ClipboardSyncServiceError.accountChanged }
+        guard currentControl == control, control.phase == "resetting" else { throw ClipboardSyncServiceError.conflict }
+        let records = visibleRecords()
+        purgedRecords.formUnion(records.map(\.recordID))
+        partialFileRecords.removeAll()
+        let result = advanced(control)
+        currentControl = result
+        return .init(control: result, cursor: nil, deletedRecordCount: records.count, hasMore: false)
+    }
     func cancellationCount() -> Int { cancellations }
     func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
         control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
@@ -482,13 +506,16 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
         fileDownloads.append(record.operationID)
-        if shouldHoldDownload {
-            shouldHoldDownload = false
-            await withCheckedContinuation { heldDownload = $0 }
-        }
         let chunks = try download(record, for: account)
         guard chunks.indices.contains(index) else { throw ClipboardSyncServiceError.corruptData }
-        return chunks[index]
+        let response = chunks[index]
+        if heldSegmentIndex == index {
+            heldSegmentIndex = nil
+            await withCheckedContinuation { heldDownload = $0 }
+        }
+        // Simulate an already-read successful provider response arriving after
+        // cancellation, account replacement, or collection retirement.
+        return response
     }
     func uploadCount() -> Int { uploads.count }
     private func advanced(_ control: ClipboardSyncControl) -> ClipboardSyncControl {
