@@ -170,7 +170,9 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let page = try await fixture.receiver.page(.init())
         let entry = try XCTUnwrap(page.entries.first)
         XCTAssertEqual(entry.syncFiles.map(\.originalByteCount), [5_000_001])
-        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForUpload])
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForDownload])
+        let uploads = await fixture.cloud.currentUploads()
+        XCTAssertTrue(uploads.contains { $0.record.kind == .fileBody }, "Large eligible files must upload automatically")
         do {
             _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .hostAction))
             XCTFail("Preview or copy must not implicitly download a pending file")
@@ -1629,6 +1631,23 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             throw ClipboardSyncServiceError.network(retryAfter: nil)
         }
         return result
+    }
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        var chunks: [Data] = []
+        var bytes: Int64 = 0
+        for index in 0..<upload.record.chunkCount {
+            let chunk = try ClipboardSyncFileTransfer.readSegment(in: upload.directory, index: index)
+            chunks.append(chunk)
+            bytes += Int64(chunk.count)
+            try await progress(bytes)
+        }
+        return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+        let chunks = try download(record, for: account)
+        guard chunks.indices.contains(index) else { throw ClipboardSyncServiceError.corruptData }
+        return chunks[index]
     }
     func cancel() async {
         cancellations += 1

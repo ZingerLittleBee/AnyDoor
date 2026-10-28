@@ -55,6 +55,18 @@ struct ClipboardSyncUpload: Codable, Equatable, Sendable {
     let chunks: [Data]
 }
 
+enum ClipboardSyncPendingUpload: Sendable {
+    case inline(ClipboardSyncUpload)
+    case file(ClipboardSyncFileUpload)
+
+    var record: ClipboardSyncRemoteRecord {
+        switch self {
+        case .inline(let value): value.record
+        case .file(let value): value.record
+        }
+    }
+}
+
 enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case accountUnavailable
     case accountChanged
@@ -94,6 +106,14 @@ protocol ClipboardSyncTransport: Sendable {
         for account: ClipboardSyncAccount,
         control: ClipboardSyncControl
     ) async throws -> ClipboardSyncControl
+    func commitFile(
+        _ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl,
+        progress: @Sendable (Int64) async throws -> Void
+    ) async throws -> ClipboardSyncControl
+    func downloadFileSegment(
+        _ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount
+    ) async throws -> Data
     func cancel() async
 }
 

@@ -127,13 +127,24 @@ extension ClipboardHistoryModule {
                 }
         }
         for source in sources {
+            try admitSync(generation)
+            guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let sampled = await Task.detached(priority: .utility) {
                 ClipboardSyncFileIO.sample(source)
             }.value
-            try await waitForWriteTurn()
-            try admitSync(generation)
             let objectID = UUID()
             let versionID = UUID()
+            let frozen: ClipboardSyncFrozenFile?
+            if sampled.state == .pendingUpload, let url = sampled.url,
+               let bookmark = sampled.bookmark, let identity = source.identity {
+                frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
+                    directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
+                    account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+            } else { frozen = nil }
+            var stored = false
+            defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
+            try await waitForWriteTurn()
+            try admitSync(generation)
             let body = try sampled.bytes.map { bytes in
                 try ClipboardSyncCodec.seal(
                     .fileBody(.init(objectID: objectID, versionID: versionID, bytes: bytes)),
@@ -142,24 +153,27 @@ extension ClipboardHistoryModule {
             }
             let descriptor = ClipboardSyncFileDescriptor(
                 objectID: objectID, versionID: versionID, displayName: source.name,
-                originalByteCount: sampled.byteCount,
-                contentDigest: sampled.bytes.map { Data(SHA256.hash(data: $0)) },
-                body: body?.record, state: sampled.state
+                originalByteCount: frozen?.originalByteCount ?? sampled.byteCount,
+                contentDigest: frozen?.contentDigest ?? sampled.bytes.map { Data(SHA256.hash(data: $0)) },
+                body: frozen?.upload.record ?? body?.record, state: frozen == nil ? sampled.state : .available,
+                bodyFormat: frozen == nil ? nil : .segmentsV1
             )
-            try syncWrite { database in
-                guard try syncFileSourceIsEligible(source, account: account, in: database) else { return }
+            stored = try syncWrite { database in
+                guard try syncFileSourceIsEligible(source, account: account, in: database) else { return false }
                 if let body {
                     try storeSyncUpload(body, subjectID: objectID.uuidString, account: account, in: database)
                 }
+                if let frozen { try storeSyncFileUpload(frozen.upload, objectID: objectID, account: account, in: database) }
                 try storeSyncFileDescriptor(descriptor, account: account, epoch: control.epoch,
                     localPath: sampled.url?.path, bookmark: sampled.bookmark, identity: source.identity,
-                    transferState: body == nil ? descriptor.state.rawValue : "complete", in: database)
+                    transferState: body == nil && frozen == nil ? descriptor.state.rawValue : "complete", in: database)
                 try database.execute(sql: """
                     INSERT INTO clipboard_sync_file_members
                         (account_id, epoch, entry_id, item_index, representation_index, object_id, version_id, origin)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, source.entryID,
                         source.itemIndex, source.representationIndex, objectID.uuidString, versionID.uuidString])
+                return true
             }
         }
     }

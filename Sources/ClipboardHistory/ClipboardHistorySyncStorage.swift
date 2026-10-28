@@ -154,7 +154,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    func nextSyncUpload(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncUpload? {
+    func nextSyncUpload(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {
         try requiredDatabase().read { database in
             guard let row = try Row.fetchOne(database, sql: """
                 SELECT record_id, metadata FROM clipboard_sync_outbox
@@ -163,9 +163,14 @@ extension ClipboardHistoryModule {
                 """, arguments: [account.identifier, control.epoch.uuidString]) else { return nil }
             let id: String = row["record_id"]
             let metadata: Data = row["metadata"]
+            let record = try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: metadata)
+            if let directory = try String.fetchOne(database,
+                sql: "SELECT directory FROM clipboard_sync_file_uploads WHERE record_id = ?", arguments: [id]) {
+                return .file(.init(record: record, directory: URL(fileURLWithPath: directory)))
+            }
             let chunks = try Data.fetchAll(database,
                 sql: "SELECT ciphertext FROM clipboard_sync_chunks WHERE record_id = ? ORDER BY chunk_index", arguments: [id])
-            return ClipboardSyncUpload(record: try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: metadata), chunks: chunks)
+            return .inline(ClipboardSyncUpload(record: record, chunks: chunks))
         }
     }
 

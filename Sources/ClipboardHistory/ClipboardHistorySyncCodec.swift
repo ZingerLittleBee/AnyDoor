@@ -30,6 +30,39 @@ enum ClipboardSyncContent: Codable, Equatable, Sendable {
 enum ClipboardSyncCodec {
     static let chunkByteCount = 4 * 1_024 * 1_024
 
+    static func sealFileSegment(_ bytes: Data, account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, key: Data, objectID: UUID, versionID: UUID,
+        originalByteCount: Int64, index: Int, count: Int) throws -> Data {
+        let box = try AES.GCM.seal(bytes, using: derivedKey(key, purpose: "file-segments-v1"),
+            authenticating: fileContext(account: account, control: control, objectID: objectID,
+                versionID: versionID, originalByteCount: originalByteCount, index: index, count: count))
+        guard let bytes = box.combined else { throw ClipboardSyncServiceError.corruptData }
+        return bytes
+    }
+
+    static func openFileSegment(_ bytes: Data, descriptor: ClipboardSyncFileDescriptor,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, index: Int) throws -> Data {
+        guard let body = descriptor.body, let size = descriptor.originalByteCount,
+              descriptor.bodyFormat == .segmentsV1, body.epoch == control.epoch,
+              body.keyID == control.keyID, index >= 0, index < body.chunkCount else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        do {
+            return try AES.GCM.open(AES.GCM.SealedBox(combined: bytes),
+                using: derivedKey(key, purpose: "file-segments-v1"),
+                authenticating: fileContext(account: account, control: control,
+                    objectID: descriptor.objectID, versionID: descriptor.versionID,
+                    originalByteCount: size, index: index, count: body.chunkCount))
+        } catch { throw ClipboardSyncServiceError.corruptData }
+    }
+
+    private static func fileContext(account: ClipboardSyncAccount, control: ClipboardSyncControl,
+        objectID: UUID, versionID: UUID, originalByteCount: Int64, index: Int, count: Int) -> Data {
+        Data(["file-segments-v1", account.identifier, control.epoch.uuidString, control.keyID.uuidString,
+              objectID.uuidString, versionID.uuidString, String(originalByteCount), String(index), String(count)]
+            .joined(separator: ":").utf8)
+    }
+
     static func check(key: Data, account: ClipboardSyncAccount, keyID: UUID) -> Data {
         let value = Data("clipboard-sync-key-v1:\(account.identifier):\(keyID.uuidString)".utf8)
         return Data(HMAC<SHA256>.authenticationCode(for: value, using: derivedKey(key, purpose: "key-check")))

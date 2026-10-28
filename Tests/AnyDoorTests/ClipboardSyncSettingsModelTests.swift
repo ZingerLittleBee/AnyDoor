@@ -246,6 +246,13 @@ private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
         throw ClipboardSyncServiceError.capabilityUnavailable
     }
 
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
     func cancel() async {
         accountRequest?.resume(throwing: CancellationError())
         accountRequest = nil

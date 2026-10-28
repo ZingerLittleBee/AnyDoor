@@ -205,6 +205,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v19_clipboard_sync_files") { database in
             try Self.createSyncFileSchema(in: database)
         }
+        migrator.registerMigration("v23_clipboard_sync_downloads") { database in
+            try Self.createSyncDownloadSchema(in: database)
+        }
         return migrator
     }
 
