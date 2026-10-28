@@ -5,6 +5,7 @@ struct ClipboardSyncFileControls: View {
     let entry: ClipboardHistoryEntry
     let presentation: ClipboardHistoryPresentationModel
     @State private var requests: Set<UUID> = []
+    @State private var requestFailures: [UUID: ClipboardHistoryActionFailure] = [:]
 
     private var pending: [ClipboardHistorySyncFileSummary] {
         let conflictIDs = Set(conflicts.map(\.id))
@@ -54,20 +55,22 @@ struct ClipboardSyncFileControls: View {
                             }
                         }
                         ForEach(pending) { file in
+                            let actionTitle = L(file.transferFailure == nil && !file.downloadRequested && !file.uploadPending
+                                ? .clipboardSyncFileDownload : .settingsClipboardSyncRetry)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(file.displayName).lineLimit(1).truncationMode(.middle)
                                     Spacer(minLength: 4)
-                                    Button(L(file.transferFailure == nil && !file.downloadRequested && !file.uploadPending
-                                        ? .clipboardSyncFileDownload : .settingsClipboardSyncRetry)) {
+                                    Button(actionTitle) {
                                         requests.insert(file.versionID)
+                                        requestFailures[file.versionID] = nil
                                         Task {
-                                            await presentation.transferSyncFile(file, entryID: entry.id)
+                                            requestFailures[file.versionID] = await presentation.transferSyncFile(file, entryID: entry.id)
                                             requests.remove(file.versionID)
                                         }
                                     }
                                     .disabled(requests.contains(file.versionID))
-                                    .accessibilityLabel(L(.clipboardSyncFileDownload) + ": " + file.displayName)
+                                    .accessibilityLabel(actionTitle + ": " + file.displayName)
                                 }
                                 if let total = file.transferTotalByteCount ?? file.originalByteCount, file.downloadRequested || file.uploadPending {
                                     ProgressView(value: Double(min(total, file.transferredByteCount)), total: Double(max(1, total)))
@@ -77,7 +80,10 @@ struct ClipboardSyncFileControls: View {
                                         ByteCountFormatter.string(fromByteCount: total, countStyle: .file)))
                                         .foregroundStyle(.secondary)
                                 }
-                                if let failure = file.transferFailure {
+                                if requestFailures[file.versionID] != nil {
+                                    LocalizedText(.clipboardSyncFileRequestFailed)
+                                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                } else if let failure = file.transferFailure {
                                     Text(failureText(failure)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                                 }
                             }

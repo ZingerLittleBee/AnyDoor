@@ -600,6 +600,23 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置已与另一个文件关联。" } }
       }
     },
+  "clipboard.sync.fileRequestFailed": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Transfer could not start. Check that Clipboard Sync is enabled, then refresh the entry and try again."
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "无法开始传输。请确认已启用剪贴板同步，然后刷新记录并重试。"
+        }
+      }
+    }
+  },
   "clipboard.sync.fileDownload": {
     "extractionState": "manual",
     "localizations": {

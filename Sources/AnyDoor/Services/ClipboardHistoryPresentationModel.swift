@@ -803,7 +803,8 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
-    func transferSyncFile(_ file: ClipboardHistorySyncFileSummary, entryID: ClipboardHistoryEntryID) async {
+    @discardableResult
+    func transferSyncFile(_ file: ClipboardHistorySyncFileSummary, entryID: ClipboardHistoryEntryID) async -> ClipboardHistoryActionFailure? {
         actionFailure = nil
         do {
             if file.uploadPending {
@@ -812,8 +813,11 @@ final class ClipboardHistoryPresentationModel {
                 try await operations.requestSyncFileDownload(entryID, file.id, file.versionID)
             }
             invalidateMaterializations(for: entryID)
+            return nil
         } catch {
-            actionFailure = ClipboardHistoryActionFailure(error)
+            let failure = ClipboardHistoryActionFailure(error)
+            actionFailure = failure
+            return failure
         }
     }
 

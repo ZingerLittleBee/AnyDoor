@@ -112,6 +112,7 @@ enum L10n {
         case clipboardSyncFileWaitingForUpload = "clipboard.sync.fileWaitingForUpload"
         case clipboardSyncFileWaitingForDownload = "clipboard.sync.fileWaitingForDownload"
         case clipboardSyncFileDownload = "clipboard.sync.fileDownload"
+        case clipboardSyncFileRequestFailed = "clipboard.sync.fileRequestFailed"
         case clipboardSyncFileUpdateAvailable = "clipboard.sync.fileUpdateAvailable"
         case clipboardSyncFileProgress = "clipboard.sync.fileProgress"
         case clipboardSyncFileAvailable = "clipboard.sync.fileAvailable"

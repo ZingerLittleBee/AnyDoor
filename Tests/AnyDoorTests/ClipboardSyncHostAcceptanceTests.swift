@@ -8,6 +8,45 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncHostAcceptanceTests: XCTestCase {
+    func testDownloadAdmissionFailureReturnsToTheInitiatingControlAndCanRetryAfterActivation() async throws {
+        let fixture = try makeModules()
+        let source = fixture.root.appendingPathComponent("Explicit download.bin")
+        let bytes = Data(repeating: 0x6E, count: 5_000_001)
+        try bytes.write(to: source)
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString(source.absoluteString, forType: .fileURL)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let captured) = try await fixture.sender.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a file capture")
+        }
+        let tag = try await fixture.sender.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+        try await fixture.sender.setSyncTagSelected(tag.id, selected: true)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(false)
+        let presentation = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await presentation.reload()
+        let file = try XCTUnwrap(presentation.entries.first?.syncFiles.first)
+        XCTAssertEqual(file.state, .waitingForDownload)
+
+        let failure = await presentation.transferSyncFile(file, entryID: captured.entryID)
+
+        XCTAssertNotNil(failure, "The initiating control must receive a failure even before transfer status exists")
+        let rejected = try await fixture.receiver.page(.init()).entries.first?.syncFiles.first
+        XCTAssertNil(rejected?.transferFailure)
+        XCTAssertEqual(rejected?.downloadRequested, false)
+        let disabled = await fixture.receiver.syncStatus()
+        XCTAssertFalse(disabled.isEnabled)
+        try await fixture.receiver.setSyncEnabled(true)
+        let retried = await presentation.transferSyncFile(file, entryID: captured.entryID)
+        XCTAssertNil(retried)
+        let content = try await fixture.receiver.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        guard case .file(let recovered) = content.items.first?.representations.first else { return XCTFail("Expected the explicitly downloaded file") }
+        XCTAssertEqual(try Data(contentsOf: recovered.currentURL), bytes)
+    }
+
     func testUnavailableInitialSourceRecoversThroughFileRetryAfterAccessReturns() async throws {
         guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
         let fixture = try makeModules()
