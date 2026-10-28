@@ -53,6 +53,21 @@ extension ClipboardHistoryModule {
             """, arguments: [tagID, accountID]) == 0
     }
 
+    /// Publication authority for the fixed `entry` SQL alias. Values remain
+    /// bound inside the literal so callers never manage this predicate's slots.
+    static func syncEntryPublicationAuthority(accountID: String) -> SQL {
+        """
+        NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
+                    WHERE blocked.account_id = \(accountID) AND blocked.local_entry_id = entry.id)
+        AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
+            JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
+            WHERE membership.entry_id = entry.id AND selected.account_id = \(accountID) AND selected.selected = 1
+              AND (selected.locally_authorized = 1 OR NOT EXISTS (
+                SELECT 1 FROM clipboard_sync_entries AS former
+                WHERE former.local_entry_id = entry.id AND former.account_id != selected.account_id)))
+        """
+    }
+
     /// Admission is for the whole entry, never a filtered representation subset.
     static let syncEntryEligibility = """
         EXISTS (SELECT 1 FROM clipboard_items WHERE entry_id = entry.id)

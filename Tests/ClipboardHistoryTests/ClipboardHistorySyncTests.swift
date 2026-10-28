@@ -1074,6 +1074,54 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(secondPage.first?.capturedAt, Date(timeIntervalSince1970: 1_000))
     }
 
+    @MainActor
+    func testRemoteMergeCannotStageFileBodiesFromAnotherAccount() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x66, time: 1_000)
+        let sourceRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-account-file-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(sourceRoot)
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let source = sourceRoot.appendingPathComponent("Private.txt")
+        try Data("previous account private file".utf8).write(to: source)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-account-file.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString(source.absoluteString, forType: .fileURL)
+        guard case .captured(let secret) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected an original file")
+        }
+        let oldTag = ClipboardHistoryTagDefinition(id: "z-old-account", displayName: "Work")
+        let currentTag = ClipboardHistoryTagDefinition(id: "a-current-account", displayName: "Work")
+        _ = try await first.replaceTagDefinitions(with: [oldTag])
+        _ = try await first.apply(.setTags(secret.entryID, [oldTag.id]))
+        try await first.setSyncTagSelected(oldTag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        await cloud.switchAccount(to: "account-B")
+        await first.retrySync()
+        let peer = makeModule(services: services, keyByte: 0x68, time: 2_000)
+        _ = try await peer.replaceTagDefinitions(with: [oldTag, currentTag])
+        try await peer.setSyncTagSelected(currentTag.id, selected: true)
+        try await peer.setSyncEnabled(true)
+        try await first.setSyncEnabled(true)
+        try await first.setSyncTagSelected(currentTag.id, selected: true)
+        let preview = try await peer.prepareSyncTagMerge(sourceID: oldTag.id, targetID: currentTag.id)
+        try await peer.mergeSyncTags(preview)
+        await first.retrySync()
+        let afterRemoteMerge = await cloud.currentUploads()
+        XCTAssertEqual(afterRemoteMerge.filter { $0.record.kind == .entry }.count, 0)
+        XCTAssertEqual(afterRemoteMerge.filter { $0.record.kind == .fileBody }.count, 0)
+        let choicesAfterRemoteMerge = try await first.syncTags()
+        XCTAssertTrue(try XCTUnwrap(choicesAfterRemoteMerge.first { $0.id == currentTag.id }).requiresLocalAuthorization)
+        let local = try await first.page(.init()).entries
+        XCTAssertEqual(local.map(\.id), [secret.entryID])
+        try await first.setSyncTagSelected(currentTag.id, selected: true)
+        let afterExplicitConsent = await cloud.currentUploads()
+        XCTAssertEqual(afterExplicitConsent.filter { $0.record.kind == .entry }.count, 1)
+        XCTAssertEqual(afterExplicitConsent.filter { $0.record.kind == .fileBody }.count, 1)
+        let choicesAfterConsent = try await first.syncTags()
+        XCTAssertFalse(try XCTUnwrap(choicesAfterConsent.first { $0.id == currentTag.id }).requiresLocalAuthorization)
+    }
+
     func testRemoteMergeCannotAuthorizeHistoryFromAnotherAccount() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)

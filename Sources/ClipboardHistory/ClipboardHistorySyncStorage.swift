@@ -108,22 +108,16 @@ extension ClipboardHistoryModule {
             try stageSyncMetadata(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
             guard !tags.isEmpty else { return }
-            let rows = try Row.fetchCursor(database, sql: """
+            let rows = try Row.fetchCursor(database, SQLRequest<Row>(literal: """
                 SELECT entry.id
                 FROM clipboard_entries AS entry
-                WHERE \(Self.syncEntryEligibility)
-                  AND NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
-                                  WHERE blocked.account_id = ? AND blocked.local_entry_id = entry.id)
-                  AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                              JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                              WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1
-                                AND (selected.locally_authorized = 1 OR NOT EXISTS (
-                                    SELECT 1 FROM clipboard_sync_entries AS former
-                                    WHERE former.local_entry_id = entry.id AND former.account_id != selected.account_id)))
+                WHERE \(sql: Self.syncEntryEligibility)
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
-                                  WHERE shared.account_id = ? AND shared.epoch = ? AND shared.local_entry_id = entry.id)
+                    WHERE shared.account_id = \(account.identifier) AND shared.epoch = \(control.epoch.uuidString)
+                      AND shared.local_entry_id = entry.id)
                 ORDER BY entry.id
-                """, arguments: [account.identifier, account.identifier, account.identifier, control.epoch.uuidString])
+                """))
             while let row = try rows.next() {
                 let localID: String = row["id"]
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
