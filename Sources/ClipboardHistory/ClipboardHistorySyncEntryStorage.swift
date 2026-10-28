@@ -90,7 +90,7 @@ extension ClipboardHistoryModule {
 
     func importSyncEntryContent(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,
                                 record: ClipboardSyncRemoteRecord, prepared: ClipboardSyncPreparedEntry? = nil,
-                                initialRecordID: String? = nil, in database: Database) throws {
+                                initialRecordID: String? = nil, fileParents: [UUID: [UUID]] = [:], in database: Database) throws {
         let sharedID = content.id.uuidString.lowercased()
         guard try String.fetchOne(database, sql: """
             SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
@@ -163,7 +163,8 @@ extension ClipboardHistoryModule {
                         VALUES (?, ?, ?, 'fileReference', 'public.file-url', ?)
                         """, arguments: [localID, itemIndex, representationIndex, try JSONEncoder().encode(descriptor)])
                     try importSyncFileDescriptor(descriptor, entryID: localID, itemIndex: itemIndex,
-                        representationIndex: representationIndex, account: account, record: record, in: database)
+                        representationIndex: representationIndex, account: account, record: record,
+                        parents: fileParents[descriptor.versionID] ?? [], in: database)
                     try Self.insertSearchField(value: descriptor.displayName, kind: "fileName", index: searchIndex,
                         rankingGroup: Self.searchRankingGroup(for: "fileName"), entryID: localID,
                         into: database, faultInjector: faultInjector)

@@ -20,6 +20,12 @@ extension ClipboardHistoryModule {
 
     static func syncFileTransferSummary(_ descriptor: ClipboardSyncFileDescriptor, accountID: String, epoch: String,
         in database: Database) throws -> (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool) {
+        if let epochID = UUID(uuidString: epoch),
+           let restoring = try pendingSyncFileRestoration(descriptor, accountID: accountID, epoch: epochID, in: database) {
+            let units = (restoring.completedBytes + Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes) - 1)
+                / Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes)
+            return (max(0, restoring.completedBytes - units * 28), nil, false, true)
+        }
         if let body = descriptor.body, let upload = try Row.fetchOne(database, sql: """
             SELECT transfer.completed_bytes, transfer.failure, outbox.acknowledged
             FROM clipboard_sync_file_uploads AS transfer JOIN clipboard_sync_outbox AS outbox USING(record_id)
@@ -104,6 +110,9 @@ extension ClipboardHistoryModule {
                 WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
                 """, arguments: [context.account.identifier, context.control.epoch.uuidString, objectID.uuidString, versionID.uuidString]),
                   let body = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"]).body else { return false }
+            let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+            if try Self.pendingSyncFileRestoration(descriptor, accountID: context.account.identifier,
+                epoch: context.control.epoch, in: database) != nil { return false }
             let publication: String? = try row["publication_record_id"] ?? String.fetchOne(database, sql: """
                 SELECT entry.record_id FROM clipboard_sync_entries AS entry
                 JOIN clipboard_sync_file_members AS member ON member.account_id = entry.account_id

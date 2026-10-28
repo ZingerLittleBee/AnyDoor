@@ -164,8 +164,8 @@ the tombstone is published. The native adapter preserves the tombstone and contr
 removes chunks before their manifest, and distinguishes a missing deletion target
 from missing authority. Interrupted cleanup retries from its SQLCipher journal.
 A control conflict imports fresh lifecycle authority before retrying an upload.
-File-body and Linked Working Copy lifecycle integration follows the file lifecycle
-ticket; deletion never removes original or independently exported files.
+File bodies and version events use these same receipts and lifecycle authority;
+deletion never removes original or independently exported files.
 
 Every device starts disabled. Constructing the production services does not access
 CloudKit or the synchronizable Keychain. The host resumes stored consent only
@@ -312,6 +312,31 @@ and every recorded linked location has durably installed it; superseded proposal
 do not trigger eager body deletion. History exposes review, Open, explicit
 Download, Refresh, Cancel, and Use This Version. A saved choice can still await
 upload or linked-file application. Independent exports remain independent.
+
+The additive `v29_clipboard_sync_file_lifecycle` migration retains object ownership
+before member cascades, including historical bodies, incomplete uploads, and
+prepared conflict versions. Withdrawal purges their cloud records through the
+shared conditional cleanup ledger while retaining local working files. Explicit
+rejoin carries the complete file DAG under the original object identity. A
+separate restoration journal tracks current transfer progress without rewriting
+historical acknowledgements. Retained authenticated ciphertext can restore the
+same immutable version; missing ciphertext requires a newly encrypted version
+with the proven linked base as its parent.
+
+Remote deletion inspects saved local work even when observation was stopped.
+Unpublished frozen branches and newer saved bytes become independent visible
+copies with the existing preserved-edit notice and permanent automatic-publication
+exclusion. Copy publication survives restart, and inaccessible sources remain
+pending. Only after owned work is preserved can a durable local cleanup intent
+remove the corresponding encrypted `SyncTransfers` directories. Original files,
+linked working files, independently exported copies, and replacement backups
+are never transfer-cache targets. A locally completed name exchange can finish
+its journal while sync is off, so retained history remains materializable without
+reactivating cloud access. File, directory, and package bodies share these rules.
+Cloud Reset captures these same ownership and preservation intents before retiring
+the outbox. It reclaims partial encrypted transfers after preserving unpublished
+work, keeps local history and visible files, and cannot authorize a late response
+or old-account queue to restart publication.
 
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.

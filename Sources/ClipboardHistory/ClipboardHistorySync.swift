@@ -120,6 +120,7 @@ extension ClipboardHistoryModule {
         pending?.cancel()
         await syncServices?.transport.cancel()
         await pending?.value
+        if availability == .ready { try? await recoverLocalLinkedFileApplications() }
         return generation
     }
 
@@ -186,10 +187,10 @@ extension ClipboardHistoryModule {
             for record in page.records where record.epoch == control.epoch {
                 // A body is discovered without downloading it. Its encrypted
                 // entry descriptor authorizes a separate version download.
-                if record.kind == .fileBody { continue }
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try rememberDiscoveredSyncRecord(record, account: account)
+                if record.kind == .fileBody { continue }
                 guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
                 let chunks: [Data]
                 do { chunks = try await services.transport.download(record, for: account) }
@@ -202,6 +203,7 @@ extension ClipboardHistoryModule {
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try importSyncContent(content, record: record, account: account)
+                if case .deletion = content { try await resumeSyncFilePreservations() }
             }
             // A content operation can disappear after metadata discovery. Apply
             // available retirement events, but do not acknowledge a missing body.
@@ -283,6 +285,7 @@ extension ClipboardHistoryModule {
             if control.phase == "resetting" ||
                 (!activationAuthorized && (control.phase != "active" || state.control.map { $0.epoch != control.epoch } == true)) {
                 try stopForRetiredCollection(control, state: &state)
+                try await resumeSyncFilePreservations()
                 return
             }
             if control.phase == "stopped" {
@@ -304,6 +307,7 @@ extension ClipboardHistoryModule {
             guard control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
             if let previous = state.control, previous.epoch != control.epoch {
                 try syncWrite { try retireLocalSyncCollection(accountID: account.identifier, in: $0) }
+                try await resumeSyncFilePreservations()
                 state.cursor = nil
             }
             state.candidate = nil
@@ -351,21 +355,40 @@ extension ClipboardHistoryModule {
                 // not need another full backfill scan for every uploaded record.
                 let revision = try syncWrite { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
+                    try await prepareSyncFileRejoins(account: account, control: control, key: key, generation: generation)
                     try stageSyncBackfill(account: account, control: control, key: key)
                     stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
                 }
-                if let upload = try nextSyncUpload(account: account, control: control) {
+                let ordinary = try nextSyncUpload(account: account, control: control)
+                let restoration = ordinary == nil ? try nextSyncFileRestoration(account: account, control: control) : nil
+                if let upload = ordinary ?? restoration {
+                    let restoring = restoration != nil
                     do {
                         try await admitSync(generation, account: account, services: services)
-                        guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
-                            arguments: [upload.record.recordID]) ?? false }) else { continue }
+                        guard try syncWrite({ database in
+                            if restoring {
+                                guard try syncFileRestorationIsPending(upload.record, account: account, control: control, in: database) else { return false }
+                                try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 0 WHERE account_id = ? AND epoch = ? AND record_id = ?",
+                                    arguments: [account.identifier, control.epoch.uuidString, upload.record.recordID])
+                                return true
+                            }
+                            return try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+                                SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox AS outbox
+                                  WHERE outbox.record_id = \(upload.record.recordID) AND outbox.account_id = \(account.identifier)
+                                    AND outbox.acknowledged = 0 AND (\(Self.syncFileOutboxAuthority(accountID: account.identifier))))
+                                """)) ?? false
+                        }) else { continue }
                         let committed: ClipboardSyncControl
                         switch upload {
                         case .inline(let value):
                             committed = try await services.transport.commit(value, for: account, control: control)
                         case .file(let value):
                             committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
-                                try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                                if restoring {
+                                    try await self.recordSyncFileRestorationProgress(bytes, record: value.record, account: account, generation: generation)
+                                } else {
+                                    try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                                }
                             }
                         }
                         try await admitSync(generation, account: account, services: services)
@@ -377,9 +400,16 @@ extension ClipboardHistoryModule {
                         _ = try await writableDatabase()
                         try admitSync(generation)
                         try syncWrite { database in
-                            try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
-                                arguments: [upload.record.recordID])
-                            try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                            if restoring {
+                                try recordSyncFileRestorationAcknowledged(upload.record, account: account, in: database)
+                            } else {
+                                try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
+                                    arguments: [upload.record.recordID])
+                                try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                                if upload.record.kind == .fileBody {
+                                    try recordSyncFileRestorationAcknowledged(upload.record, account: account, in: database)
+                                }
+                            }
                             try saveSyncAccount(state, in: database)
                             if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
                         }
@@ -439,6 +469,7 @@ extension ClipboardHistoryModule {
                 }
             }
             state.lastCompletedAt = now()
+            try await resumeSyncFilePreservations()
             try acknowledgeLinkedFileVersions(account: account, control: control)
             try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }

@@ -86,6 +86,8 @@ extension ClipboardHistoryModule {
                                    origin: String, in database: Database) throws {
         guard UUID(uuidString: sharedID) != nil else { throw ClipboardSyncServiceError.corruptData }
         guard try !isSyncDeleted(sharedID, accountID: accountID, epoch: epoch, in: database) else { return }
+        try rememberSyncFileOwnership(sharedID: sharedID, accountID: accountID, epoch: epoch, in: database)
+        try captureSyncFileCleanup(sharedID: sharedID, accountID: accountID, epoch: epoch, in: database)
         try database.execute(sql: """
             INSERT INTO clipboard_sync_deletions(account_id, epoch, shared_id, record_id, origin) VALUES (?, ?, ?, ?, ?)
             """, arguments: [accountID, epoch, sharedID, recordID, origin])
@@ -110,6 +112,7 @@ extension ClipboardHistoryModule {
     func receiveSyncDeletion(_ deletion: ClipboardSyncDeletion, record: ClipboardSyncRemoteRecord,
                              account: ClipboardSyncAccount, in database: Database) throws {
         if try !Self.isSyncDeleted(deletion.sharedID, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+            try Self.captureSyncFilePreservations(sharedID: deletion.sharedID, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
             try preserveUnuploadedSyncEdits(sharedID: deletion.sharedID, accountID: account.identifier,
                 epoch: record.epoch.uuidString, in: database)
         }
@@ -122,8 +125,9 @@ extension ClipboardHistoryModule {
         _ = try logicallyDelete(entryIDs: ids, in: database)
     }
 
-    public func preservedSyncEdits() throws -> [ClipboardHistoryPreservedEdit] {
-        try requiredDatabase().read { database in
+    public func preservedSyncEdits() async throws -> [ClipboardHistoryPreservedEdit] {
+        try await resumeSyncFilePreservations()
+        return try linkedRead { database in
             try Row.fetchAll(database, sql: """
                 SELECT entry.id, entry.preview_text FROM clipboard_sync_preserved_edits AS saved
                 JOIN clipboard_entries AS entry ON entry.id = saved.local_entry_id

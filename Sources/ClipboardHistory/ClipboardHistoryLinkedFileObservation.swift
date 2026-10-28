@@ -61,7 +61,7 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
     deinit { cancel() }
 }
 
-struct ClipboardLinkedLocationSource: Sendable {
+struct ClipboardLinkedLocationSource: Codable, Sendable {
     let id: UUID
     let objectID: UUID
     let url: URL
@@ -209,7 +209,10 @@ extension ClipboardHistoryModule {
                   AND member.object_id = location.object_id AND \(SQL(sql: liveSyncFileMember))
                   AND (\(syncEntryPublicationAuthority(accountID: accountID))))
             ORDER BY location.id
-            """)).map { row in
+            """)).map(linkedLocationSource)
+    }
+
+    static func linkedLocationSource(_ row: Row) throws -> ClipboardLinkedLocationSource {
                 guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
                       let base = UUID(uuidString: row["base_version_id"]),
                       let state = ClipboardHistoryLinkedFileLocationState(rawValue: row["state"]) else {
@@ -220,6 +223,5 @@ extension ClipboardHistoryModule {
                     nativeIdentity: try (row["native_identity"] as Data?).map { try JSONDecoder().decode(ClipboardLinkedNativeIdentity.self, from: $0) },
                     hasPendingApplication: (row["applying_version_id"] as String?) != nil,
                     baseVersionID: base, baseDigest: row["base_digest"], state: state)
-            }
     }
 }
