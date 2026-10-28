@@ -169,7 +169,10 @@ extension ClipboardHistoryLinkedFileTests {
             try PrivacyArtifactProbe.assertEncrypted([JSONEncoder().encode(upload.record)] + upload.chunks, markers: markers)
         }
         try await receiver.closeStoreForTesting()
-        let reopened = makeLinkedModule(root: receiverRoot, services: services, key: 0x52)
+        let reopened = makeLinkedModule(root: receiverRoot, services: services, key: 0x52, faultInjector: .init { point in
+            if point == .linkedFileBeforeReplacement { probe.inspectReplacement() }
+            return false
+        })
         await reopened.resumeSync()
         await reopened.retrySync()
         let materialized = try await reopened.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
@@ -180,9 +183,32 @@ extension ClipboardHistoryLinkedFileTests {
         XCTAssertEqual(try Data(contentsOf: complete.currentURL.appendingPathComponent(memberName + "/..namedfork/rsrc")), fork)
         probe.allowVisible(complete.currentURL)
         probe.scan(stage: "reopened")
+        try await sender.setSyncEnabled(false)
+        let update = contents + Data(" changed contents".utf8)
+        try update.write(to: member)
+        try await sender.setSyncEnabled(true)
+        await reopened.retrySync()
+        let updatePage = try await reopened.page(.init())
+        let updateFile = try XCTUnwrap(updatePage.entries.first?.syncFiles.first)
+        XCTAssertNotEqual(updateFile.versionID, file.versionID)
+        XCTAssertFalse(updateFile.downloadRequested)
+        let account = await cloud.account()
+        let verified = receiverRoot.appendingPathComponent("Linked Working Copies")
+            .appendingPathComponent(account.identifier).appendingPathComponent(file.id.uuidString.lowercased())
+            .appendingPathComponent(updateFile.versionID.uuidString.lowercased()).appendingPathComponent(original.lastPathComponent)
+        probe.expectReplacement(at: complete.currentURL, verified: verified, member: memberName, contents: update)
+        try await reopened.requestSyncFileDownload(entryID: captured.entryID, objectID: file.id, versionID: updateFile.versionID)
+        let updated = try await reopened.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        guard case .file(let updatedFile) = updated.items.first?.representations.first else {
+            return XCTFail("Expected linked replacement after explicit download")
+        }
+        XCTAssertEqual(updatedFile.currentURL, complete.currentURL)
+        XCTAssertEqual(try Data(contentsOf: updatedFile.currentURL.appendingPathComponent(memberName)), update)
+        probe.scan(stage: "updated")
         let evidence = probe.evidence
         XCTAssertTrue(evidence.errors.isEmpty, evidence.errors.joined(separator: "\n"))
-        XCTAssertTrue(evidence.stages.isSuperset(of: ["frozen", "partial", "constructing", "interrupted", "reopened"]))
+        XCTAssertTrue(evidence.stages.isSuperset(of: ["frozen", "partial", "constructing", "interrupted", "reopened", "replacement", "updated"]))
+        XCTAssertEqual(evidence.sidecars.count, 1, "Only the proven, complete source-parent replacement is a readable sidecar")
         XCTAssertTrue(evidence.inventoryObserved)
         XCTAssertTrue(evidence.parserObserved)
         XCTAssertGreaterThan(evidence.encryptedFiles, 0)
@@ -191,6 +217,12 @@ extension ClipboardHistoryLinkedFileTests {
 }
 
 private final class PrivacyArtifactProbe: @unchecked Sendable {
+    struct Replacement {
+        let destination: URL
+        let verified: URL
+        let member: String
+        let contents: Data
+    }
     struct Evidence {
         var errors: [String] = []
         var stages: Set<String> = []
@@ -201,6 +233,8 @@ private final class PrivacyArtifactProbe: @unchecked Sendable {
         var inventoryObserved = false
         var parserObserved = false
         var encryptedFiles = 0
+        var replacement: Replacement?
+        var sidecars: [URL] = []
     }
     let roots: [URL]
     let observesScratch: Bool
@@ -217,6 +251,25 @@ private final class PrivacyArtifactProbe: @unchecked Sendable {
         state.withLock { $0.expectedVersion = version; $0.expectedObject = object }
     }
     func allowVisible(_ url: URL) { state.withLock { $0.allowed.append(url.standardizedFileURL) } }
+    func expectReplacement(at destination: URL, verified: URL, member: String, contents: Data) {
+        state.withLock { $0.replacement = .init(destination: destination, verified: verified, member: member, contents: contents) }
+    }
+    func inspectReplacement() {
+        guard let replacement = evidence.replacement else { return }
+        do {
+            let siblings = try FileManager.default.contentsOfDirectory(at: replacement.destination.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            let candidates = siblings.filter { $0.lastPathComponent.hasPrefix(replacement.destination.lastPathComponent + " (AnyDoor update ") }
+            guard candidates.count == 1, let candidate = candidates.first,
+                  try Data(contentsOf: candidate.appendingPathComponent(replacement.member)) == replacement.contents,
+                  try Data(contentsOf: replacement.verified.appendingPathComponent(replacement.member)) == replacement.contents else {
+                throw PrivacyScanError.invalidCandidate
+            }
+            allowVisible(replacement.verified)
+            allowVisible(candidate)
+            state.withLock { $0.sidecars.append(candidate) }
+            scan(stage: "replacement")
+        } catch { state.withLock { $0.errors.append("replacement: \(error)") } }
+    }
     func inspectConstruction(in root: URL, memberName: String, contents: Data) {
         do {
             let expected = evidence
@@ -245,7 +298,7 @@ private final class PrivacyArtifactProbe: @unchecked Sendable {
                     throw PrivacyScanError.unreadableArtifact
                 }
                 for case let url as URL in enumerator {
-                    if allowed.contains(where: { url.standardizedFileURL == $0 || url.path.hasPrefix($0.path + "/") }) {
+                    if allowed.contains(where: { url.standardizedFileURL.path == $0.path || url.path.hasPrefix($0.path + "/") }) {
                         enumerator.skipDescendants()
                         continue
                     }
