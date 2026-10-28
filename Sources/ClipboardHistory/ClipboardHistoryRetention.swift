@@ -58,6 +58,12 @@ extension ClipboardHistoryModule {
                 ) else {
                     throw ClipboardHistoryModuleError.entryNotFound
                 }
+                let matchingCount = try Int.fetchOne(database,
+                    sql: "SELECT COUNT(*) FROM clipboard_tag_definitions WHERE display_name = ?",
+                    arguments: [displayName]) ?? 0
+                guard matchingCount <= 1 else {
+                    throw ClipboardHistoryModuleError.duplicateTagName
+                }
                 let existing = try Row.fetchOne(
                     database,
                     sql: """
@@ -371,9 +377,9 @@ extension ClipboardHistoryModule {
                 in: .whitespacesAndNewlines
             )
         }
-        guard !names.contains(where: \.isEmpty),
-            Set(names).count == names.count
-        else {
+        // Names are presentation, not identity. A manual backup may contain
+        // independent same-name tags introduced by encrypted Clipboard Sync.
+        guard !names.contains(where: \.isEmpty) else {
             throw ClipboardHistoryModuleError.invalidTagName
         }
         let database = try await writableDatabase()
@@ -1266,7 +1272,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func protectionState(
+    func protectionState(
         for entryID: String,
         in database: Database
     ) throws -> Bool {
@@ -1314,7 +1320,7 @@ extension ClipboardHistoryModule {
         return isProtected
     }
 
-    private func resetRetentionStart(
+    func resetRetentionStart(
         for entryID: String,
         to date: Date,
         in database: Database
