@@ -140,6 +140,24 @@ Text edits retain favorite/tag/provenance state and local recency. The v14 upgra
 can replay the initial encrypted operation to recover ancestry while preserving
 an edit whose original upload chunks have already been reclaimed.
 
+The additive `v22_clipboard_sync_deletion` journal binds explicit deletion to an
+account, epoch, and shared identity. Only the explicitly confirmed bulk-clear IDs
+publish deletions; automatic retention remains local. Clear confirmations bind the
+shared identity set as well as the local revision, and disclose their cross-device
+scope. A deletion preserves each maximal unacknowledged local text branch as an
+independent history entry in the same transaction. A durable, dismissible Settings
+notice identifies those copies; their publication exclusion survives tag selection,
+account changes, and notice dismissal.
+
+Deleted identities fence initial content, edits, metadata, and membership replay.
+Authenticated content receipts drive bounded, conditional remote cleanup after
+the tombstone is published. The native adapter preserves the tombstone and control,
+removes chunks before their manifest, and distinguishes a missing deletion target
+from missing authority. Interrupted cleanup retries from its SQLCipher journal.
+A control conflict imports fresh lifecycle authority before retrying an upload.
+File-body and Linked Working Copy lifecycle integration follows the file lifecycle
+ticket; deletion never removes original or independently exported files.
+
 Every device starts disabled. Constructing the production services does not access
 CloudKit or the synchronizable Keychain. The host resumes stored consent only
 after legacy migration reports ready, and suspends work before store replacement

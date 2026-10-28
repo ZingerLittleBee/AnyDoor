@@ -167,6 +167,9 @@ extension ClipboardHistoryModule {
 
     func applySyncMemberships(sharedID: String, localID: String, account: ClipboardSyncAccount,
                                       epoch: UUID, in database: Database) throws {
+        guard try !Self.isSyncDeleted(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database),
+              try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)",
+                arguments: [localID]) == true else { return }
         let wasProtected = try protectionState(for: localID, in: database)
         let rows = try Row.fetchAll(database, sql: """
             SELECT membership.tag_id, membership.present FROM clipboard_sync_memberships AS membership
