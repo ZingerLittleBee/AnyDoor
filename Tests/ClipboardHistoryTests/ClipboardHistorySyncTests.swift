@@ -8,6 +8,24 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testAuthenticatedEntryWithDuplicateStandardTypesFailsAsAWhole() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x97, time: 1_000)
+        try await module.setSyncEnabled(true)
+        try await publishFixture(.entry(.init(id: UUID(), capturedAt: Date(timeIntervalSince1970: 500),
+            sourceBundleID: nil, sourceDisplayName: nil, sourceProvenance: "unknown", favorite: false,
+            tags: [.init(id: "shared", name: "Shared")],
+            items: [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "first"),
+                                           .text(typeIdentifier: "public.utf8-plain-text", value: "second")])],
+            facets: ["text"], recognition: .init())), cloud: cloud, keys: keys)
+        await module.retrySync()
+        let page = try await module.page(.init())
+        let status = await module.syncStatus()
+        XCTAssertEqual(page.entries, [])
+        XCTAssertEqual(status.phase, .failed(.corruptData))
+    }
+
     func testLegacyTextSnapshotAppliesEarlierFavoriteMetadata() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

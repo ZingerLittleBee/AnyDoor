@@ -200,6 +200,16 @@ extension ClipboardHistoryModule {
         var containsFile = false
         let items = try content.items.map { item in
             guard !item.representations.isEmpty else { throw ClipboardSyncServiceError.corruptData }
+            var standardTypes: Set<String> = []
+            for representation in item.representations {
+                let type: String = switch representation {
+                case .text(let identifier, _), .richText(let identifier, _): identifier
+                case .color: "com.apple.cocoa.pasteboard.color"
+                case .bitmap: "public.png"
+                case .file: "public.file-url"
+                }
+                guard standardTypes.insert(type).inserted else { throw ClipboardSyncServiceError.corruptData }
+            }
             return PasteboardSnapshot.Item(representations: try item.representations.compactMap { representation -> PasteboardSnapshot.Representation? in
                 let result: PasteboardSnapshot.Representation
                 let bytes: Int
