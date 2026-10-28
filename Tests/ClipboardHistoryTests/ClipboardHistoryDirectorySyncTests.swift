@@ -6,6 +6,51 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testSubstitutedCandidateFIFORejectsReceiptAndAllowsOffToDrain() async throws {
+        let race = DirectoryFIFORace()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .syncFileTreeBeforeMetadata { race.replaceCandidateMember() }
+            return false
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("deep"), withIntermediateDirectories: true)
+            try Data("old complete tree".utf8).write(to: root.appendingPathComponent("deep/member"))
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        try Data("remote replacement".utf8).write(to: fixture.original.appendingPathComponent("deep/member"))
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        race.arm(receiver: fixture.receiverRoot)
+        let receive = Task { await fixture.receiver.retrySync() }
+        // Polling and rescue are bounded even if the native read-open blocks.
+        for _ in 0..<500 {
+            if race.triggered { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        var disabled = false
+        let disable = Task { try await fixture.receiver.setSyncEnabled(false); disabled = true }
+        for _ in 0..<500 {
+            if disabled { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let completedWithoutRescue = disabled
+        let rescue = race.openOwnedRescueWriter()
+        defer { if rescue >= 0 { close(rescue) } }
+        await receive.value
+        try await disable.value
+
+        XCTAssertTrue(race.triggered)
+        XCTAssertTrue(completedWithoutRescue, "A writerless FIFO must not block receipt or Off")
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.availableVersionID, working.baseVersionID)
+        let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Expected the previous complete tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("deep/member")), Data("old complete tree".utf8))
+    }
+
+    @MainActor
     func testSaveThroughDisplacedTreeDescriptorSurvivesCompletedReplacement() async throws {
         try await assertDisplacedTreeSaveSurvives(recovering: false)
     }
@@ -379,6 +424,36 @@ extension ClipboardHistoryLinkedFileTests {
         _ = try await fixture.receiver.exportFiles(fixture.entryID, to: [copied])
         try Data("independent edit".utf8).write(to: copied.appendingPathComponent("nested/notes.txt"))
         XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent("nested/notes.txt")), Data("directory content".utf8))
+    }
+}
+
+private final class DirectoryFIFORace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var receiver: URL?
+    private var fifo: URL?
+    var triggered: Bool { lock.withLock { fifo != nil } }
+    func arm(receiver: URL) { lock.withLock { self.receiver = receiver } }
+    func replaceCandidateMember() {
+        lock.withLock {
+            guard fifo == nil, let receiver,
+                  let entries = FileManager.default.enumerator(at: receiver, includingPropertiesForKeys: nil) else { return }
+            for case let url as URL in entries where url.lastPathComponent.hasPrefix("Receiving-") && url.pathExtension == "partial" {
+                let member = url.appendingPathComponent("deep/member")
+                do {
+                    try FileManager.default.removeItem(at: member)
+                    if mkfifo(member.path, 0o600) == 0 { fifo = member }
+                } catch {}
+                return
+            }
+        }
+    }
+    func openOwnedRescueWriter() -> Int32 {
+        lock.withLock {
+            guard let fifo else { return -1 }
+            // O_RDWR is nonblocking and releases the old blocking read-open.
+            // Keep this FD alive until both test-owned tasks have drained.
+            return open(fifo.path, O_RDWR | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
+        }
     }
 }
 

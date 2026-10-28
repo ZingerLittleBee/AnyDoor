@@ -68,7 +68,7 @@ final class ClipboardFileTreeOutput {
             let directory = try parentFor(header.path)
             defer { close(directory) }
             let leaf = String(header.path.split(separator: "/").last ?? "")
-            fd = openat(directory, leaf, O_RDONLY | O_CLOEXEC | (header.kind == "link" ? O_SYMLINK : O_NOFOLLOW))
+            fd = openat(directory, leaf, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (header.kind == "link" ? O_SYMLINK : O_NOFOLLOW))
         }
         guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(fd) }
