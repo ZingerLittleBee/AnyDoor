@@ -58,7 +58,7 @@ enum ClipboardLinkedFileIO {
     static func applyReplacement(_ replacement: ClipboardLinkedFileProof, to source: ClipboardLinkedLocationSource) throws -> ClipboardLinkedFileProof? {
         var error: NSError?
         var result: Result<ClipboardLinkedFileProof?, any Error>?
-        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: source.url, options: .forReplacing, error: &error) { destination in
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: source.url, options: [], error: &error) { destination in
             result = Result {
                 let before = try inspectCoordinated(destination, expectedIdentity: source.identity)
                 guard before.digest == source.baseDigest else { return nil }
@@ -97,7 +97,11 @@ enum ClipboardLinkedFileIO {
         return try result.get()
     }
 
-    private static func inspectCoordinated(_ url: URL, expectedIdentity: Data?) throws -> ClipboardLinkedFileProof {
+    private static func inspectCoordinated(_ coordinatedURL: URL, expectedIdentity: Data?) throws -> ClipboardLinkedFileProof {
+        // URL resource values may cache the inode sampled before an exchange.
+        // A new URL must prove the current path, including its new bookmark.
+        var url = URL(fileURLWithPath: coordinatedURL.path)
+        url.removeAllCachedResourceValues()
         let file = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard file >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(file) }

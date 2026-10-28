@@ -576,7 +576,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
-    func testEachLargeVersionRequiresItsOwnDownloadAndKeepsTheOldCompleteFile() async throws {
+    func testEachLargeVersionRequiresItsOwnDownloadAndKeepsTheOldFileUntilReplacementReady() async throws {
         let firstBytes = Data(repeating: 0x35, count: 5_000_001)
         let fixture = try await fileFixture(names: ["Versioned.bin"], contents: [firstBytes])
         try await fixture.receiver.setSyncEnabled(true)
@@ -593,15 +593,22 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let second = try XCTUnwrap(updated.entries.first?.syncFiles.first)
         XCTAssertNotEqual(second.versionID, first.versionID)
         XCTAssertEqual(second.availableVersionID, first.versionID)
+        let linkedBeforeDownload = try await fixture.receiver.linkedFileLocations(for: entry.id)
+        XCTAssertEqual(linkedBeforeDownload.first?.state, .current, "Old linked version must remain available")
         let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
         guard case .file(let oldFile) = old.items[0].representations[0] else { return XCTFail("Old file was lost") }
         XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), firstBytes)
+        let independent = fixture.receiverRoot.appendingPathComponent("Independent previous version.bin")
+        _ = try await fixture.receiver.exportFiles(entry.id, to: [independent])
 
         try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: first.id, versionID: second.versionID)
+        let linkedAfterDownload = try await fixture.receiver.linkedFileLocations(for: entry.id)
+        XCTAssertEqual(linkedAfterDownload.first?.state, .current, "New verified version must apply to the linked location")
         let latest = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
         guard case .file(let latestFile) = latest.items[0].representations[0] else { return XCTFail("Missing update") }
         XCTAssertEqual(try Data(contentsOf: latestFile.currentURL), newer)
-        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), firstBytes)
+        XCTAssertEqual(latestFile.currentURL, oldFile.currentURL, "The linked working location stays stable")
+        XCTAssertEqual(try Data(contentsOf: independent), firstBytes)
     }
 
     @MainActor

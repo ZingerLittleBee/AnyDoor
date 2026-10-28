@@ -165,8 +165,22 @@ The version descriptor is durable before publication, so interrupted publication
 retries only adopt identical complete bytes and refuse an unrelated existing file.
 Missing or replaced working files are unavailable, not a complete-looking path.
 History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
-remain independent and do not create Linked Locations. Watching, later versions,
-move reconciliation, and conflict resolution are separate implementation slices.
+remain independent and do not create Linked Locations.
+
+The additive `v24_clipboard_linked_locations` migration records the original,
+managed working copy, and explicitly associated ordinary files with their actual
+base version, resource identity, and dirty/conflict state. Dispatch filesystem
+events are hints; resume and synchronization reconcile saved bytes using bounded
+reads. Observation stops with local sync participation. Publication reuses the
+shared entry authority before and after I/O and the single file-version transfer
+path, so ignored or withdrawn entries cannot restart uploads through a watcher.
+Remote versions apply only over the recorded unchanged base. A durable replacement
+journal and atomic name exchange preserve interrupted replacements and later saves;
+dirty locations retain their bytes and expose a pending conflict. Visible verified
+replacement files beside a linked location are ordinary working output, not a
+plaintext download cache. History exposes Linked Locations and Associate File;
+normal materialization prefers the stable linked location after completeness checks.
+Move/replacement identity reconciliation and conflict resolution remain separate slices.
 
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.

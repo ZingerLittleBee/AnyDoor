@@ -7,6 +7,51 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testExplicitAssociatedLocationPublishesToOriginalAndStableWorkingCopy() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        let associatedURL = fixture.root.appendingPathComponent("Different local name.txt")
+        _ = try await fixture.receiver.exportFiles(fixture.entryID, to: [associatedURL])
+        _ = try await fixture.receiver.associateFileLocation(.init(entryID: fixture.entryID, objectID: working.objectID, url: associatedURL))
+        let saved = Data("saved from an explicitly associated location".utf8)
+        try saved.write(to: associatedURL)
+
+        try await eventually {
+            await fixture.sender.retrySync()
+            return (try? Data(contentsOf: fixture.original)) == saved && (try? Data(contentsOf: working.url)) == saved
+        }
+
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.linkedFileLocations.count, 2)
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.displayName, "Linked notes.txt")
+    }
+
+    @MainActor
+    func testSaveDuringRemoteDownloadIsPreservedAsConflict() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try Data("remote while downloader waits".utf8).write(to: fixture.original)
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+        await fixture.cloud.holdNextDownload()
+        let download = Task { await fixture.receiver.retrySync() }
+        try await eventually { await fixture.cloud.downloadIsHeld() }
+        let local = Data("local save during download".utf8)
+        try local.write(to: working.url)
+        await fixture.cloud.releaseDownload()
+        await download.value
+
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(locations.first?.state, .conflict)
+        XCTAssertEqual(try Data(contentsOf: working.url), local)
+    }
+
+    @MainActor
     func testRemoteUpdatePreservesDirtyWorkingFileAndConflictAcrossRestart() async throws {
         let fixture = try await makeLinkedFixture()
         let initialLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
@@ -275,7 +320,12 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
     private var commitsFail = false
+    private var shouldHoldDownload = false
+    private var heldDownload: CheckedContinuation<Void, Never>?
     func failCommits(_ fail: Bool) { commitsFail = fail }
+    func holdNextDownload() { shouldHoldDownload = true }
+    func downloadIsHeld() -> Bool { heldDownload != nil }
+    func releaseDownload() { heldDownload?.resume(); heldDownload = nil }
 
     func account() -> ClipboardSyncAccount { identity }
     func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? { currentControl }
@@ -321,7 +371,11 @@ private actor LinkedFileCloud: ClipboardSyncTransport {
         }
         return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
     }
-    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        if shouldHoldDownload {
+            shouldHoldDownload = false
+            await withCheckedContinuation { heldDownload = $0 }
+        }
         let chunks = try download(record, for: account)
         guard chunks.indices.contains(index) else { throw ClipboardSyncServiceError.corruptData }
         return chunks[index]

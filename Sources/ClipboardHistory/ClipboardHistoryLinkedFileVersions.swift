@@ -2,15 +2,32 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    func acknowledgeLinkedFileVersions(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws {
+        let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
+        for source in sources where source.state == .pendingUpload {
+            guard try syncFileVersionIsCommitted(objectID: source.objectID, versionID: source.baseVersionID) else { continue }
+            try syncWrite { database in
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_linked_locations SET state = 'current', pending_version_id = NULL
+                    WHERE id = ? AND base_version_id = ? AND state = 'pendingUpload'
+                    """, arguments: [source.id.uuidString, source.baseVersionID.uuidString])
+                try Self.bumpHistoryRevision(in: database)
+            }
+            publishMutation()
+        }
+    }
+
     /// One transfer/version path serves original files, receiving working copies,
     /// and explicit associations. Every location keeps its actual edited base.
-    func reconcileLinkedFileVersions(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+    func reconcileLinkedFileVersions(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64, canPublish: Bool = true) async throws {
         guard let services = syncServices else { return }
         try await recoverLinkedFileApplications(account: account, control: control, generation: generation)
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
             try await admitSync(generation, account: account, services: services)
             guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
+            if !selection.hasConflict, selection.latest.versionID == source.baseVersionID,
+               source.state == .current || !canPublish { continue }
             let inspection = Task.detached(priority: .utility) {
                 try ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
             }
@@ -26,6 +43,7 @@ extension ClipboardHistoryModule {
                 continue
             }
             if proof.digest != source.baseDigest {
+                guard canPublish else { continue }
                 let versionID = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
                     parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
                 try await admitSync(generation, account: account, services: services)
@@ -123,8 +141,8 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: account, services: services)
         guard try linkedSourceIsCurrent(source, account: account, control: control) else { return }
         if let proof {
-            try finishLinkedApplication(source, versionID: version.descriptor.versionID, digest: replacement.digest, proof: proof)
             try? FileManager.default.removeItem(at: replacement.url)
+            try finishLinkedApplication(source, versionID: version.descriptor.versionID, digest: replacement.digest, proof: proof)
         } else {
             try setLinkedConflict(source, remoteVersion: version.descriptor.versionID)
             try clearLinkedApplication(source.id)
@@ -170,11 +188,13 @@ extension ClipboardHistoryModule {
             try await admitSync(generation, account: account, services: services)
             guard try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
             if let proof {
-                try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
                 // Only the old, unchanged inode is ours to remove after adoption.
                 let backup = URL(fileURLWithPath: path)
                 let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(backup, expectedIdentity: source.identity) }
-                if let old = await inspection.value, old.digest == source.baseDigest { try? FileManager.default.removeItem(at: backup) }
+                let old = await inspection.value
+                try await admitSync(generation, account: account, services: services)
+                if old?.digest == source.baseDigest { try? FileManager.default.removeItem(at: backup) }
+                try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
             } else {
                 // No exchange occurred. Remove only our verified replacement.
                 if ClipboardSyncFileIO.isAvailable(path: path, identity: identity) { try? FileManager.default.removeItem(atPath: path) }

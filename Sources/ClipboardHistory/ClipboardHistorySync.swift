@@ -249,6 +249,9 @@ extension ClipboardHistoryModule {
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
             try await reconcileLinkedFileVersions(account: account, control: control, generation: generation)
+            // A location processed earlier in this pass also receives a version
+            // just frozen from another local association, independent of ID order.
+            try await reconcileLinkedFileVersions(account: account, control: control, generation: generation, canPublish: false)
             try refreshLinkedFileObservers(account: account, control: control, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
@@ -296,6 +299,7 @@ extension ClipboardHistoryModule {
                 }
             }
             state.lastCompletedAt = now()
+            try acknowledgeLinkedFileVersions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
             await finishSync(.upToDate, generation: generation)
         } catch is CancellationError {

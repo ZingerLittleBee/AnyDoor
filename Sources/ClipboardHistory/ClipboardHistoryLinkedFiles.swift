@@ -25,8 +25,8 @@ extension ClipboardHistoryModule {
             }
             if let existing = try Row.fetchOne(database, sql: """
                 SELECT * FROM clipboard_sync_linked_locations
-                WHERE account_id = ? AND epoch = ? AND path = ?
-                """, arguments: [base.accountID, base.epoch, proof.url.path]) {
+                WHERE account_id = ? AND epoch = ? AND (path = ? OR identity = ?)
+                """, arguments: [base.accountID, base.epoch, proof.url.path, proof.identity]) {
                 guard (existing["object_id"] as String) == request.objectID.uuidString,
                       (existing["identity"] as Data) == proof.identity else {
                     throw ClipboardHistoryModuleError.fileLocationAlreadyAssociated
