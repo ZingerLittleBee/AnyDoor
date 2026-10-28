@@ -171,7 +171,8 @@ extension ClipboardHistoryModule {
         }
         for version in value.versions {
             try Self.saveSyncTextVersion(version, accountID: account.identifier, epoch: record.epoch.uuidString,
-                origin: version.parents.isEmpty ? "root" : "remote", recordID: record.recordID, in: database)
+                origin: version.parents.isEmpty ? "root" : "remote",
+                recordID: version.parents.isEmpty ? value.initialRecordID : record.recordID, in: database)
         }
         if !existed, let selected = value.selectedVersionID, value.versions.contains(where: { $0.versionID == selected }) {
             try Self.selectSyncVersion(selected, subjectID: value.state.sharedID, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)

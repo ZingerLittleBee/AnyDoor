@@ -8,6 +8,25 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testFreshRejoinRetainsTheOriginalRootWithoutRepeatingMigrationReplay() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xD9, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("keep the original root provenance")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        let fresh = makeModule(services: services, keyByte: 0xDA, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        await cloud.clearObservedChangeCursors()
+        await fresh.retrySync()
+        let cursors = await cloud.observedChangeCursors()
+        XCTAssertEqual(cursors.count, 1)
+        XCTAssertTrue(cursors.allSatisfy { $0 != nil }, "A complete rejoin checkpoint must not repeatedly request migration replay")
+    }
+
     func testRejoinDuringPendingWithdrawalCleanupPublishesBeforeTheSyncPassCompletes() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -3471,6 +3490,9 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var losesPurgeResponse = false
     private var purgedRecords = Set<String>()
     private var revision = 0
+    private var changeCursors: [Data?] = []
+    func clearObservedChangeCursors() { changeCursors.removeAll() }
+    func observedChangeCursors() -> [Data?] { changeCursors }
     private var holdsPurge = false
     private var heldPurge: CheckedContinuation<Void, Never>?
     private var purgeObserver: CheckedContinuation<Void, Never>?
@@ -3548,6 +3570,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return result
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncChanges {
+        changeCursors.append(cursor)
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
