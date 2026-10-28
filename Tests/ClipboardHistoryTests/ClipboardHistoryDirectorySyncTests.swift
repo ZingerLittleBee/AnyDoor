@@ -6,6 +6,53 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testSaveThroughDisplacedTreeDescriptorSurvivesCompletedReplacement() async throws {
+        try await assertDisplacedTreeSaveSurvives(recovering: false)
+    }
+
+    @MainActor
+    func testSaveThroughDisplacedTreeDescriptorSurvivesRecoveryAdmission() async throws {
+        try await assertDisplacedTreeSaveSurvives(recovering: true)
+    }
+
+    @MainActor
+    private func assertDisplacedTreeSaveSurvives(recovering: Bool) async throws {
+        let save = DisplacedTreeSave()
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == (recovering ? .linkedFileBeforeRecoveryCommit : .linkedFileAfterReplacement) {
+                save.writeSavedBytes()
+            }
+            return recovering && point == .linkedFileAfterReplacement
+        }, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("deep"), withIntermediateDirectories: true)
+            try Data("old tree".utf8).write(to: root.appendingPathComponent("deep/member"))
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let descriptor = open(working.url.appendingPathComponent("deep/member").path, O_WRONLY | O_CLOEXEC | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        save.arm(descriptor)
+        try Data("complete remote tree".utf8).write(to: fixture.original.appendingPathComponent("deep/member"))
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        await fixture.receiver.retrySync()
+        if recovering { await fixture.receiver.retrySync() }
+
+        XCTAssertTrue(save.saved, "The old FD must save after the previous content proof")
+        let siblings = try FileManager.default.contentsOfDirectory(at: working.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+        let displaced = siblings.filter { $0.lastPathComponent.hasPrefix(working.url.lastPathComponent + " (AnyDoor update ") }
+        XCTAssertEqual(displaced.count, 1, "The displaced inode must remain reachable after completion")
+        if let retained = displaced.first {
+            XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("deep/member")), DisplacedTreeSave.bytes)
+        }
+        let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Expected the complete installed tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("deep/member")), Data("complete remote tree".utf8))
+    }
+
+    @MainActor
     func testTreeUploadProgressCountsEncodedPlaintextWithoutAuthenticationOverhead() async throws {
         let fixture = try await makeLinkedFixture(prepareSource: { root in
             try FileManager.default.removeItem(at: root)
@@ -332,6 +379,22 @@ extension ClipboardHistoryLinkedFileTests {
         _ = try await fixture.receiver.exportFiles(fixture.entryID, to: [copied])
         try Data("independent edit".utf8).write(to: copied.appendingPathComponent("nested/notes.txt"))
         XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent("nested/notes.txt")), Data("directory content".utf8))
+    }
+}
+
+private final class DisplacedTreeSave: @unchecked Sendable {
+    static let bytes = Data("saved through the old descriptor after verification".utf8)
+    private let lock = NSLock()
+    private var descriptor: Int32 = -1
+    private var didSave = false
+    var saved: Bool { lock.withLock { didSave } }
+    func arm(_ descriptor: Int32) { lock.withLock { self.descriptor = descriptor } }
+    func writeSavedBytes() {
+        lock.withLock {
+            guard descriptor >= 0, !didSave else { return }
+            didSave = Self.bytes.withUnsafeBytes { pwrite(descriptor, $0.baseAddress, $0.count, 0) } == Self.bytes.count
+                && ftruncate(descriptor, off_t(Self.bytes.count)) == 0 && fsync(descriptor) == 0
+        }
     }
 }
 

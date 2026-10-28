@@ -309,7 +309,9 @@ Remote versions apply only over the recorded unchanged base. A durable replaceme
 journal and atomic name exchange preserve interrupted replacements and later saves;
 dirty locations retain their bytes and expose a pending conflict. Visible verified
 replacement files beside a linked location are ordinary working output, not a
-plaintext download cache. History exposes Linked Locations and Associate File;
+plaintext download cache. Successful exchange and recovery keep the displaced
+output beside the linked location because an editor can still save through its
+old file descriptor after verification. History exposes Linked Locations and Associate File;
 normal materialization prefers the stable linked location after completeness checks.
 The final exchange uses a revocable generation gate and a serialized database
 authority check after file hashing. Off revokes the gate before waiting for work

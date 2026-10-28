@@ -198,7 +198,8 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: account, services: services)
         guard try linkedSourceIsCurrent(source, account: account, control: control) else { return }
         if let proof {
-            try? FileManager.default.removeItem(at: replacement.url)
+            // A retained editor FD can save to the displaced inode after the
+            // exchange proof. Keep that visible output when adopting the new one.
             try finishLinkedApplication(source, versionID: version.descriptor.versionID, digest: replacement.digest, proof: proof)
         } else {
             try setLinkedConflict(source, remoteVersion: version.descriptor.versionID)
@@ -247,19 +248,16 @@ extension ClipboardHistoryModule {
             guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
                 replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
             if let proof {
-                // Only the old, unchanged inode is ours to remove after adoption.
-                let backup = URL(fileURLWithPath: path)
+                // Preserve the displaced output across admission, including
+                // saves made through an editor FD after the initial exchange.
                 let faults = faultInjector
-                let inspection = Task.detached(priority: .utility) {
-                    let old = try? ClipboardLinkedFileIO.inspect(backup, expectedIdentity: source.identity)
+                let checkpoint = Task.detached(priority: .utility) {
                     try faults.check(.linkedFileBeforeRecoveryCommit)
-                    return old
                 }
-                let old = try await inspection.value
+                try await checkpoint.value
                 try await admitSync(generation, account: account, services: services)
                 guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
                     replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
-                if old?.digest == source.baseDigest { try? FileManager.default.removeItem(at: backup) }
                 try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
             } else {
                 // No exchange occurred. Remove only our verified replacement.
