@@ -15,6 +15,7 @@ struct ClipboardSyncRejoin: Codable, Equatable, Sendable {
     let selectedVersionID: UUID?
     let metadata: [ClipboardSyncMetadataContent]?
     let memberships: [ClipboardSyncTagMembership]?
+    let fileVersions: [ClipboardSyncFileVersionContent]?
 }
 
 extension ClipboardHistoryModule {
@@ -73,6 +74,7 @@ extension ClipboardHistoryModule {
                 record_id = excluded.record_id, origin = excluded.origin
             """, arguments: [accountID, epoch, value.sharedID, value.withdrawn, value.revision.counter,
                 value.revision.operationID, pending, recordID, pending ? "local" : "remote"])
+        if !value.withdrawn { try recordSyncFileRejoin(value, accountID: accountID, epoch: epoch, in: database) }
         if value.withdrawn {
             try Self.rememberSyncFileOwnership(sharedID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
             // Cancel publication, but keep whether each local version was ever
@@ -140,7 +142,8 @@ extension ClipboardHistoryModule {
                 ClipboardSyncTagMembership(sharedID: $0["shared_id"], tagID: $0["tag_id"], present: $0["present"],
                     revision: .init(counter: $0["counter"], operationID: $0["operation_id"]))
             }
-        return ClipboardSyncRejoin(state: state, entry: entry, initialRecordID: shared["record_id"], versions: versions, selectedVersionID: selection, metadata: metadata, memberships: memberships)
+        return ClipboardSyncRejoin(state: state, entry: entry, initialRecordID: shared["record_id"], versions: versions, selectedVersionID: selection, metadata: metadata, memberships: memberships,
+            fileVersions: try syncFileRejoinVersions(entryID: localID.uuidString.lowercased(), account: account, control: control, in: database))
     }
 
     func importSyncRejoin(_ value: ClipboardSyncRejoin, account: ClipboardSyncAccount,
@@ -162,8 +165,10 @@ extension ClipboardHistoryModule {
         let existed = try Bool.fetchOne(database, sql: """
             SELECT EXISTS (SELECT 1 FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?)
             """, arguments: [account.identifier, record.epoch.uuidString, value.state.sharedID]) ?? false
+        let fileParents = try importSyncFileRejoinVersions(value.fileVersions, entry: value.entry,
+            account: account, record: record, in: database)
         try importSyncEntryContent(value.entry, account: account, record: record, prepared: prepared,
-            initialRecordID: value.initialRecordID, in: database)
+            initialRecordID: value.initialRecordID, fileParents: fileParents, in: database)
         for membership in value.memberships ?? [] where membership.revision != .initial {
             try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
         }

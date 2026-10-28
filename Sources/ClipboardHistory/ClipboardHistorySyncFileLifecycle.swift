@@ -4,6 +4,7 @@ import GRDB
 extension ClipboardHistoryModule {
     static func createSyncFileLifecycleSchema(in database: Database) throws {
         try createSyncFilePreservationSchema(in: database)
+        try createSyncFileRejoinSchema(in: database)
         try database.execute(sql: """
             CREATE TABLE clipboard_sync_file_subjects (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, shared_id TEXT NOT NULL,

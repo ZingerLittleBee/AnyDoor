@@ -390,7 +390,10 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private var fileDownloads: [UUID] = []
     func downloadedFileVersions() -> [UUID] { fileDownloads }
     func uploadedRecords() -> [ClipboardSyncUpload] { uploads }
-    func visibleRecords() -> [ClipboardSyncRemoteRecord] { uploads.filter { !purgedRecords.contains($0.record.recordID) }.map(\.record) }
+    func visibleRecords() -> [ClipboardSyncRemoteRecord] {
+        var seen: Set<String> = []
+        return uploads.filter { !purgedRecords.contains($0.record.recordID) && seen.insert($0.record.recordID).inserted }.map(\.record)
+    }
     func moveLastTwoRecordsToFront() {
         guard uploads.count >= 2 else { return }
         let tail = Array(uploads.suffix(2))
@@ -425,6 +428,14 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         }
         if let current = uploads.first(where: { $0.record.recordID == upload.record.recordID }) {
             guard current == upload else { throw ClipboardSyncServiceError.corruptData }
+            if purgedRecords.contains(upload.record.recordID) {
+                guard currentControl.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }
+                purgedRecords.remove(upload.record.recordID)
+                uploads.append(upload)
+                let updated = advanced(currentControl)
+                self.currentControl = updated
+                return updated
+            }
             return currentControl
         }
         guard currentControl.serverToken == control.serverToken else { throw ClipboardSyncServiceError.conflict }

@@ -282,11 +282,11 @@ extension ClipboardHistoryModule {
     func importSyncFileDescriptor(
         _ descriptor: ClipboardSyncFileDescriptor, entryID: String, itemIndex: Int,
         representationIndex: Int, account: ClipboardSyncAccount,
-        record: ClipboardSyncRemoteRecord, in database: Database
+        record: ClipboardSyncRemoteRecord, parents: [UUID] = [], in database: Database
     ) throws {
         try validateSyncFileDescriptor(descriptor, epoch: record.epoch, keyID: record.keyID)
         try storeSyncFileDescriptor(descriptor, account: account, epoch: record.epoch,
-            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", publicationRecordID: record.recordID, in: database)
+            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", parents: parents, publicationRecordID: record.recordID, in: database)
         try database.execute(sql: """
             INSERT INTO clipboard_sync_file_members
                 (account_id, epoch, entry_id, item_index, representation_index, object_id, version_id, origin)
