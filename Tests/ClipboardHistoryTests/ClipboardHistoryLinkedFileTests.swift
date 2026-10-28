@@ -447,7 +447,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
 }
 
 /// Blocks only the detached filesystem boundary, never the module actor.
-private final class LinkedReplacementBarrier: @unchecked Sendable {
+final class LinkedReplacementBarrier: @unchecked Sendable {
     private let lock = NSLock()
     private let semaphore = DispatchSemaphore(value: 0)
     private var waiting = false

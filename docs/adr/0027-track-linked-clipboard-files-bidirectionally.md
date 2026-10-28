@@ -30,7 +30,21 @@ history entry is deleted. Top-level source removal detaches that location;
 removal inside a tracked directory remains a content change.
 
 Ordinary-file associations and saved-change reconciliation are implemented with
-persisted per-location bases and dirty-file preservation. Directory/package
-tracking, identity reconciliation, and conflict resolution are separate slices.
+persisted per-location bases and dirty-file preservation. Established filesystem
+identity follows moves and renames; supported mounted filesystems can recover
+the object using persistent volume/object identity and its birth stamp. Missing
+volumes and permissions pause tracking without mounting a volume or publishing
+empty content. Confirmed removal detaches the location while retaining shared
+versions and other linked copies.
+
+In-place saves continue tracking. AnyDoor's own verified replacement journal can
+establish continuity across its atomic new-inode installation. An external editor
+safe-save that replaces the filesystem object requires explicit reassociation
+when continuity cannot be proven, even if its path or document ID matches.
+Generic filesystem and file-coordination callbacks do not establish that proof.
+Pause, retry, resume, and reassociation actions validate the displayed location
+revision so a stale picker cannot silently replace a changed association.
+
+Directory/package tracking and conflict resolution are separate slices.
 The complete specification defines the signed-app and multi-device acceptance
 gates; isolated real-file tests do not establish live iCloud delivery.
