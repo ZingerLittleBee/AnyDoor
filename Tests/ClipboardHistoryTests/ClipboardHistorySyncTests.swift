@@ -270,7 +270,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await source.cloud.switchAccount(to: "account-b")
         let unchangedB = await source.cloud.currentUploads()
         XCTAssertEqual(unchangedB, beforeB)
-        await source.sender.resumeSync()
+        await source.sender.retrySync()
         let completedB = await source.sender.syncStatus()
         XCTAssertEqual(completedB.cloudReset?.stage, .completed)
         let clearedB = await source.cloud.currentUploads()

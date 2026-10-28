@@ -123,7 +123,7 @@ extension ClipboardHistoryModule {
             try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
             try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL, retry_not_before = NULL WHERE id = 1")
         }
-        syncSuspended = true
+        syncSuspended = !(try hasPendingCloudResets())
         setSyncPhase(.disabled)
     }
 
@@ -190,7 +190,7 @@ extension ClipboardHistoryModule {
                     try retireLocalSyncCollection(accountID: journal.account.identifier, in: database)
                     try saveCloudReset(journal, in: database)
                 }
-                syncSuspended = true
+                syncSuspended = !(try hasPendingCloudResets())
                 setSyncPhase(.disabled)
                 return
             }
@@ -239,7 +239,7 @@ extension ClipboardHistoryModule {
                 try saveCloudReset(journal, in: database)
                 try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL, retry_not_before = NULL WHERE id = 1")
             }
-            syncSuspended = true
+            syncSuspended = !(try hasPendingCloudResets())
             setSyncPhase(.disabled)
         } catch is CancellationError {
             return
