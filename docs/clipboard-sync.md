@@ -21,7 +21,7 @@ that are not selected, including private tags on an otherwise shared entry, stay
 ## Download files and complete folders
 
 Text, rich text, links, colors, images, files, folders, and application packages can
-travel with an entry. Source paths and bookmarks do not travel to another Mac.
+travel with an entry. AnyDoor's local tracking paths and bookmarks are not shared.
 
 Each top-level file, folder, or package version of **5,000,000 original bytes or
 less** downloads automatically. A version above that size stays a placeholder until
