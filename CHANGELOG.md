@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.10] - 2026-10-28
+
 ### Fixed
 
 - Clear Notifications and other panel actions no longer stop responding after
