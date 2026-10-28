@@ -7,6 +7,38 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
+    func testCloudResetConfirmationAndRetryRemainAvailableWithSyncOffAndKeysDenied() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let cloud = ResetSettingsSyncTransport()
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: directory, keyStore: SettingsSyncLocalKeyStore(),
+            syncServices: .init(transport: cloud, keys: UnavailableSettingsSyncKeys(), pollingInterval: nil)
+        ))
+        let local = try await module.capture(.init(source: .unknown, content: .text("local history")))
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        await model.prepareReset()
+        XCTAssertNotNil(model.resetConfirmation)
+        model.cancelResetConfirmation()
+        let before = await cloud.currentPhase()
+        XCTAssertEqual(before, "active")
+        await model.prepareReset()
+        let confirmation = try XCTUnwrap(model.resetConfirmation)
+        // SwiftUI dismisses the confirmation binding before the async action
+        // necessarily runs. The selected token must survive that dismissal.
+        model.cancelResetConfirmation()
+        await model.confirmReset(confirmation)
+        XCTAssertFalse(model.status.isEnabled)
+        XCTAssertTrue(model.isResetPending)
+        XCTAssertEqual(model.status.cloudReset?.failure, .failed(.network))
+        await model.retry()
+        XCTAssertEqual(model.status.cloudReset?.stage, .completed)
+        XCTAssertFalse(model.isResetPending)
+        let retained = try await module.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+    }
+
     func testDeniedKeyAccessOffersSystemRecoveryWithoutEnablingASecondAccount() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         removeClipboardHistoryDirectoryAfterTest(directory)
@@ -250,4 +282,43 @@ private actor HeldSettingsSyncTransport: ClipboardSyncTransport {
         accountRequest?.resume(throwing: CancellationError())
         accountRequest = nil
     }
+}
+
+private actor ResetSettingsSyncTransport: ClipboardSyncTransport {
+    private let scope = ClipboardSyncAccount(container: "test", environment: "test", owner: "reset-settings")
+    private var descriptor: ClipboardSyncControl?
+    private var failCleanup = true
+    func account() -> ClipboardSyncAccount { scope }
+    func currentPhase() -> String? { descriptor?.phase }
+    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? {
+        if descriptor == nil {
+            descriptor = ClipboardSyncControl(accountID: scope.identifier, keyID: UUID(), keyCheck: Data(repeating: 0, count: 32),
+                epoch: UUID(), phase: "active", serverToken: Data([1]))
+        }
+        return descriptor
+    }
+    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
+        .init(records: [], cursor: nil, hasMore: false)
+    }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.corruptData
+    }
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        guard descriptor == control, account == scope else { throw ClipboardSyncServiceError.conflict }
+        let next = ClipboardSyncControl(accountID: control.accountID, keyID: control.keyID, keyCheck: control.keyCheck,
+            epoch: epoch, phase: phase, serverToken: Data(UUID().uuidString.utf8))
+        descriptor = next
+        return next
+    }
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncCleanupPage {
+        if failCleanup { failCleanup = false; throw ClipboardSyncServiceError.network(retryAfter: nil) }
+        return .init(control: control, cursor: nil, deletedRecordCount: 0, hasMore: false)
+    }
+    func cancel() {}
 }

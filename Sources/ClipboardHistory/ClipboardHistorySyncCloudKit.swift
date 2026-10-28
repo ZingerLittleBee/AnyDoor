@@ -314,6 +314,106 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         }
     }
 
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
+                    for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl {
+        let generation = cancellationGeneration
+        let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
+        let allowed = (control.phase == "active" && phase == "resetting" && epoch != control.epoch)
+            || (control.phase == "resetting" && phase == "stopped" && epoch == control.epoch)
+            || (control.phase == "stopped" && phase == "active" && epoch != control.epoch)
+        guard allowed, control.accountID == account.identifier, control.serverToken != nil else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        let next = ClipboardSyncControl(accountID: control.accountID, keyID: control.keyID,
+            keyCheck: control.keyCheck, epoch: epoch, phase: phase, serverToken: control.serverToken)
+        do {
+            let record = try controlRecord(next, account: account)
+            let saved = try await saveAtomically([record], database: database)
+            try checkCancellation(generation)
+            guard let result = saved[record.recordID] else { throw ClipboardSyncServiceError.corruptData }
+            return try decodeControl(result, account: account)
+        } catch {
+            try checkCancellation(generation)
+            throw Self.failure(error)
+        }
+    }
+
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl,
+                   cursor: Data?) async throws -> ClipboardSyncCleanupPage {
+        let generation = cancellationGeneration
+        let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
+        do {
+            guard let current = try await self.control(for: account), current.phase == "resetting",
+                  control.phase == "resetting", current.epoch == control.epoch,
+                  current.keyID == control.keyID, current.keyCheck == control.keyCheck else {
+                throw ClipboardSyncServiceError.missingRemoteState
+            }
+            try checkCancellation(generation)
+            let fetched: NativeChanges
+            do {
+                fetched = try await fetchChanges(zoneID(account), token: try cursor.map(Self.decodeChangeToken), database: database)
+            } catch {
+                try checkCancellation(generation)
+                guard Self.hasCode(error, .changeTokenExpired) else { throw error }
+                fetched = try await fetchChanges(zoneID(account), token: nil, database: database)
+            }
+            try checkCancellation(generation)
+            var ids: [CKRecord.ID] = []
+            for record in fetched.records {
+                guard record.recordID.zoneID == zoneID(account) else { throw ClipboardSyncServiceError.accountChanged }
+                switch record.recordType {
+                case Self.controlType:
+                    _ = try decodeControl(record, account: account)
+                case Self.objectType:
+                    let metadata = try decodeMetadata(record)
+                    guard metadata.epoch != current.epoch else { throw ClipboardSyncServiceError.corruptData }
+                    ids.append(record.recordID)
+                case Self.chunkType:
+                    guard let value = record["epoch"] as? String, let epoch = UUID(uuidString: value), epoch != current.epoch,
+                          let operation = record["operationID"] as? String, let operationID = UUID(uuidString: operation),
+                          let key = record["keyID"] as? String, UUID(uuidString: key) != nil,
+                          let index = record["chunkIndex"] as? NSNumber, index.intValue >= 0,
+                          record.recordID.recordName == "chunk.\(operationID.uuidString.lowercased()).\(index.intValue)",
+                          (record["chunkDigest"] as? Data)?.count == 32 else { throw ClipboardSyncServiceError.corruptData }
+                    ids.append(record.recordID)
+                default: throw ClipboardSyncServiceError.unsupportedVersion
+                }
+            }
+            // The page may be replayed after an ambiguous successful deletion.
+            // Refetch metadata only and omit already absent records. A concurrent
+            // cleaner must still win the same control CAS before deleting any.
+            if !ids.isEmpty {
+                let live = try await fetchRecords(ids, desiredKeys: Self.metadataKeys, database: database)
+                try checkCancellation(generation)
+                ids = try ids.filter { id in
+                    guard let result = live[id] else { throw ClipboardSyncServiceError.corruptData }
+                    switch result {
+                    case .success: return true
+                    case .failure(let error):
+                        if Self.hasCode(error, .unknownItem) { return false }
+                        throw error
+                    }
+                }
+            }
+            var advanced = current
+            if !ids.isEmpty {
+                let fence = try controlRecord(current, account: account)
+                let saved = try await saveAtomically([fence], deleting: ids, database: database)
+                try checkCancellation(generation)
+                guard let result = saved[fence.recordID] else { throw ClipboardSyncServiceError.corruptData }
+                advanced = try decodeControl(result, account: account)
+            }
+            let token = try NSKeyedArchiver.archivedData(withRootObject: fetched.token, requiringSecureCoding: true)
+            return ClipboardSyncCleanupPage(control: advanced, cursor: token, deletedRecordCount: ids.count,
+                hasMore: fetched.moreComing || !ids.isEmpty)
+        } catch {
+            try checkCancellation(generation)
+            throw Self.failure(error)
+        }
+    }
+
     func cancel() {
         // Safe before activation: cancelling must not construct a container,
         // inspect the system account, or touch synchronizable Keychain items.
@@ -552,19 +652,25 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         }
     }
 
-    private func saveAtomically(_ records: [CKRecord], database: CKDatabase) async throws -> [CKRecord.ID: CKRecord] {
-        let operation = CKModifyRecordsOperation(recordsToSave: records)
+    private func saveAtomically(_ records: [CKRecord], deleting ids: [CKRecord.ID] = [], database: CKDatabase) async throws -> [CKRecord.ID: CKRecord] {
+        let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: ids)
         operation.savePolicy = .ifServerRecordUnchanged
         operation.isAtomic = true
         let results = OSAllocatedUnfairLock(initialState: [CKRecord.ID: Result<CKRecord, Error>]())
         operation.perRecordSaveBlock = { id, result in results.withLock { $0[id] = result } }
+        let deletions = OSAllocatedUnfairLock(initialState: [CKRecord.ID: Result<Void, Error>]())
+        operation.perRecordDeleteBlock = { id, result in deletions.withLock { $0[id] = result } }
         return try await run(operation, database: database) { continuation in
             operation.modifyRecordsResultBlock = { outcome in
                 let collected = results.withLock { $0 }
                 do {
                     // Prefer the actual CAS/account error over sibling
                     // batchRequestFailed errors in an atomic operation.
-                    let errors = collected.values.compactMap { result -> Error? in
+                    let deleted = deletions.withLock { $0 }
+                    let deleteErrors = deleted.values.compactMap { result -> Error? in
+                        if case .failure(let error) = result { return error }; return nil
+                    }
+                    let errors = deleteErrors + collected.values.compactMap { result -> Error? in
                         if case .failure(let error) = result { return error }
                         return nil
                     }
@@ -575,7 +681,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                         throw substantive
                     }
                     try outcome.get()
-                    guard collected.count == records.count else { throw ClipboardSyncServiceError.corruptData }
+                    guard collected.count == records.count, deleted.count == ids.count else { throw ClipboardSyncServiceError.corruptData }
                     continuation.resume(returning: try collected.mapValues { try $0.get() })
                 } catch { continuation.resume(throwing: error) }
             }

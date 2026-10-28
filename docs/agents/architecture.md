@@ -89,7 +89,7 @@ remote inbox, and imported history in its existing SQLCipher store. The additive
 `v14_clipboard_sync` migration keeps those records separate from local content and
 leaves the device-only history master key unchanged. The current slice transfers
 existing and newly eligible single-item plain text for one selected tag. Other
-content, updates, withdrawal, conflict handling, and cloud reset follow the
+content, updates, withdrawal, and conflict handling follow the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Every device starts disabled. Constructing the production services does not access
@@ -127,11 +127,29 @@ Missing key material and unavailable Keychain services remain waiting states;
 they do not establish that Passwords & Keychain sync is disabled. Interaction
 restrictions, explicit access denial, and integrity/recovery failures are shown
 separately. Settings links to Apple's recovery guidance and never replaces a key
-or deletes cloud content to repair access. Disabled devices perform no account
-or key work; active runs revalidate the concrete account after awaited service
+or deletes cloud content to repair access. Disabled devices perform no ordinary sync account or key work. An explicitly
+confirmed, unfinished cloud clear resumes its account-scoped cleanup; active runs revalidate the concrete account after awaited service
 responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
+
+Cloud reset uses the additive `v20_clipboard_sync_reset` journal. The typed
+confirmation binds the visible account and collection; execution revalidates the
+current system account. The permanent control record first moves by atomic CAS
+to a resetting epoch, then each bounded metadata-only cleanup page deletes
+content and advances that same control in one atomic operation. Control, zone,
+shared key, local history, tag definitions, and memberships remain intact.
+Only confirmed stopped authority completes the clear. Ambiguous responses replay
+from durable progress; a newer manually activated epoch supersedes the old clear
+without touching newer content or claiming observed completion.
+
+Offline peers revoke participation and retire old publication queues when they
+observe retirement or another epoch. Manual activation reuses the existing key,
+creates a new active epoch by CAS, and requires fresh tag selection for local
+backfill. Reset does not remove independent local-only or cross-account exclusion
+records. Settings exposes preparation, confirmed deletion progress, interruption,
+and completion even while ordinary sync is off. See
+[cloud-reset evidence](../testing/clipboard-sync-signing.md#cloud-reset-evidence).
 
 ### Launch-time SwiftData seeding/migration
 
