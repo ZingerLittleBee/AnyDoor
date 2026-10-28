@@ -5,6 +5,44 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testAccountSwitchRejectsHeldFileResponseWithoutReplacingWorkingCopy() async throws {
+        let fixture = try await makeLinkedFixture()
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let original = try Data(contentsOf: working.url)
+        try Data(repeating: 0x72, count: 2 * 1_024 * 1_024).write(to: fixture.original)
+        await fixture.sender.retrySync()
+        let published = try await fixture.sender.page(.init())
+        XCTAssertNotEqual(published.entries.first?.syncFiles.first?.versionID, working.baseVersionID)
+        let uploads = await fixture.cloud.uploadCount()
+        await fixture.cloud.holdNextDownload()
+        let transfer = Task { await fixture.receiver.retrySync() }
+        try await eventually { await fixture.cloud.downloadIsHeld() }
+
+        await fixture.cloud.switchAccount(to: "another-linked-file-user")
+        await fixture.cloud.releaseDownload()
+        await transfer.value
+
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(status.phase, .failed(.accountChanged))
+        XCTAssertEqual(try Data(contentsOf: working.url), original)
+        let account = await fixture.cloud.account()
+        let untouched = await fixture.cloud.control(for: account)
+        XCTAssertNil(untouched, "A late response cannot consent to another account")
+        let after = await fixture.cloud.uploadCount()
+        XCTAssertEqual(after, uploads)
+        try await fixture.receiver.closeStoreForTesting()
+        let restarted = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await restarted.retrySync()
+        let persisted = await restarted.syncStatus()
+        XCTAssertFalse(persisted.isEnabled)
+        XCTAssertEqual(try Data(contentsOf: working.url), original)
+        let afterRestart = await fixture.cloud.uploadCount()
+        XCTAssertEqual(afterRestart, uploads)
+    }
+
+    @MainActor
     func testCloudResetReclaimsPartialDownloadAndRejectsLateSuccessfulResponse() async throws {
         let fixture = try await makeLinkedFixture()
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
