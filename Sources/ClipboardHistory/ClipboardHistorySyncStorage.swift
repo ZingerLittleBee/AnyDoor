@@ -90,6 +90,7 @@ extension ClipboardHistoryModule {
         try pool.write { database in
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
+            try stageSyncMetadata(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
             guard !tags.isEmpty else { return }
             let rows = try Row.fetchCursor(database, sql: """
@@ -121,6 +122,7 @@ extension ClipboardHistoryModule {
                     """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
                 try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
+                try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }
         }
     }
@@ -190,6 +192,8 @@ extension ClipboardHistoryModule {
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
                 try importSyncTagState(state, account: account, record: record, in: database)
+            case .metadata(let metadata):
+                try importSyncMetadata(metadata, account: account, record: record, in: database)
             case .fileBody:
                 throw ClipboardSyncServiceError.unsupportedVersion
             }

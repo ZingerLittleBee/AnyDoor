@@ -13,7 +13,7 @@ extension ClipboardHistoryModule {
                 }
                 let accountID = settings.accountID ?? ""
                 let uploaded = try Int.fetchOne(database, sql: """
-                    SELECT COUNT(*) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
+                    SELECT COUNT(DISTINCT subject_id) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
                     """, arguments: [accountID]) ?? 0
                 let received = try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_sync_entries WHERE account_id = ? AND origin = 'remote'",
                     arguments: [accountID]) ?? 0

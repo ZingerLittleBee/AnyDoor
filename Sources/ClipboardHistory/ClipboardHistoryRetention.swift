@@ -790,6 +790,7 @@ extension ClipboardHistoryModule {
                         in: database
                     )
                 }
+                try recordSyncFavoriteChange(isFavorite, entryID: storedID, in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 return MutationApplyResult(

@@ -184,6 +184,7 @@ extension ClipboardHistoryModule {
             """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
         try seedSyncMemberships(content.tags, sharedID: sharedID, localID: localID,
             account: account, epoch: record.epoch, in: database)
+        try seedSyncEntryMetadata(content, account: account, record: record, in: database)
     }
 
     func validatedSyncSnapshot(_ content: ClipboardSyncEntryContent) throws -> PasteboardSnapshot? {

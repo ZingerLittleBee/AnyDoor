@@ -1,0 +1,133 @@
+import Foundation
+import GRDB
+
+struct ClipboardSyncMetadataRevision: Codable, Equatable, Comparable, Sendable {
+    let counter: Int64
+    let operationID: String
+    static let initial = Self(counter: 0, operationID: "")
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.counter == rhs.counter ? lhs.operationID < rhs.operationID : lhs.counter < rhs.counter
+    }
+}
+
+enum ClipboardSyncMetadataValue: Codable, Equatable, Sendable {
+    case favorite(Bool)
+
+    var field: String { switch self { case .favorite: "favorite" } }
+}
+
+struct ClipboardSyncMetadataContent: Codable, Equatable, Sendable {
+    let id: UUID
+    let revision: ClipboardSyncMetadataRevision
+    let value: ClipboardSyncMetadataValue
+}
+
+extension ClipboardHistoryModule {
+    static func createSyncContentSchema(in database: Database) throws {
+        try database.execute(sql: """
+            CREATE TABLE clipboard_sync_metadata_clock (id INTEGER PRIMARY KEY CHECK(id = 1), counter INTEGER NOT NULL);
+            INSERT INTO clipboard_sync_metadata_clock VALUES (1, 0);
+            CREATE TABLE clipboard_sync_metadata (
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, shared_id TEXT NOT NULL,
+                field TEXT NOT NULL, value BLOB NOT NULL, pending INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account_id, epoch, shared_id, field)
+            ) WITHOUT ROWID;
+            """)
+    }
+
+    func recordSyncFavoriteChange(_ favorite: Bool, entryID: String, in database: Database) throws {
+        for row in try Row.fetchAll(database, sql: """
+            SELECT account_id, epoch, shared_id FROM clipboard_sync_entries WHERE local_entry_id = ?
+            """, arguments: [entryID]) {
+            guard let id = UUID(uuidString: row["shared_id"]) else { throw ClipboardSyncServiceError.corruptData }
+            let current = try Int64.fetchOne(database, sql: "SELECT counter FROM clipboard_sync_metadata_clock WHERE id = 1") ?? 0
+            guard current < Int64.max - 1 else { throw ClipboardSyncServiceError.localStorage }
+            try database.execute(sql: "UPDATE clipboard_sync_metadata_clock SET counter = counter + 1 WHERE id = 1")
+            let operation = ClipboardSyncMetadataContent(id: id,
+                revision: .init(counter: current + 1, operationID: UUID().uuidString.lowercased()), value: .favorite(favorite))
+            try saveSyncMetadata(operation, accountID: row["account_id"], epoch: row["epoch"], pending: true, in: database)
+        }
+    }
+
+    func stageSyncMetadata(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT metadata.value FROM clipboard_sync_metadata AS metadata
+            JOIN clipboard_sync_entries AS shared ON shared.account_id = metadata.account_id
+                AND shared.epoch = metadata.epoch AND shared.shared_id = metadata.shared_id
+            WHERE metadata.account_id = ? AND metadata.epoch = ? AND metadata.pending = 1
+              AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
+                  JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
+                  WHERE membership.entry_id = shared.local_entry_id AND selected.account_id = metadata.account_id AND selected.selected = 1)
+            ORDER BY metadata.shared_id, metadata.field
+            """, arguments: [account.identifier, control.epoch.uuidString])
+        for row in rows {
+            let value: Data = row["value"]
+            let operation = try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: value)
+            guard let operationID = UUID(uuidString: operation.revision.operationID) else { throw ClipboardSyncServiceError.corruptData }
+            let upload = try ClipboardSyncCodec.seal(.metadata(operation), account: account, control: control, key: key, operationID: operationID)
+            try storeSyncUpload(upload, subjectID: operation.id.uuidString.lowercased(), account: account, in: database)
+            try database.execute(sql: """
+                UPDATE clipboard_sync_metadata SET pending = 0 WHERE account_id = ? AND epoch = ? AND shared_id = ? AND field = ?
+                """, arguments: [account.identifier, control.epoch.uuidString, operation.id.uuidString.lowercased(), operation.value.field])
+        }
+    }
+
+    func seedSyncEntryMetadata(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,
+                               record: ClipboardSyncRemoteRecord, in database: Database) throws {
+        let initial = ClipboardSyncMetadataContent(id: content.id, revision: .initial, value: .favorite(content.favorite))
+        if try syncMetadata(id: content.id, field: initial.value.field, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) == nil {
+            try saveSyncMetadata(initial, accountID: account.identifier, epoch: record.epoch.uuidString, pending: false, in: database)
+        }
+        if let current = try syncMetadata(id: content.id, field: initial.value.field, accountID: account.identifier,
+                                          epoch: record.epoch.uuidString, in: database) {
+            try applySyncMetadata(current, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+        }
+    }
+
+    func importSyncMetadata(_ operation: ClipboardSyncMetadataContent, account: ClipboardSyncAccount,
+                            record: ClipboardSyncRemoteRecord, in database: Database) throws {
+        guard operation.revision.counter > 0, operation.revision.counter < Int64.max - 1,
+              UUID(uuidString: operation.revision.operationID) == record.operationID else { throw ClipboardSyncServiceError.corruptData }
+        try database.execute(sql: "UPDATE clipboard_sync_metadata_clock SET counter = MAX(counter, ?) WHERE id = 1",
+            arguments: [operation.revision.counter])
+        if let current = try syncMetadata(id: operation.id, field: operation.value.field, accountID: account.identifier,
+                                          epoch: record.epoch.uuidString, in: database), current.revision >= operation.revision { return }
+        // The register is durable even when the entry has not arrived yet.
+        try saveSyncMetadata(operation, accountID: account.identifier, epoch: record.epoch.uuidString, pending: false, in: database)
+        try applySyncMetadata(operation, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+    }
+
+    private func syncMetadata(id: UUID, field: String, accountID: String, epoch: String, in database: Database) throws -> ClipboardSyncMetadataContent? {
+        try Data.fetchOne(database, sql: """
+            SELECT value FROM clipboard_sync_metadata WHERE account_id = ? AND epoch = ? AND shared_id = ? AND field = ?
+            """, arguments: [accountID, epoch, id.uuidString.lowercased(), field]).map {
+                try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: $0)
+            }
+    }
+
+    private func saveSyncMetadata(_ operation: ClipboardSyncMetadataContent, accountID: String, epoch: String,
+                                  pending: Bool, in database: Database) throws {
+        try database.execute(sql: """
+            INSERT INTO clipboard_sync_metadata(account_id, epoch, shared_id, field, value, pending) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, epoch, shared_id, field) DO UPDATE SET value = excluded.value, pending = excluded.pending
+            """, arguments: [accountID, epoch, operation.id.uuidString.lowercased(), operation.value.field,
+                try JSONEncoder().encode(operation), pending])
+    }
+
+    private func applySyncMetadata(_ operation: ClipboardSyncMetadataContent, accountID: String, epoch: String, in database: Database) throws {
+        guard let localID = try String.fetchOne(database, sql: """
+            SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
+            """, arguments: [accountID, epoch, operation.id.uuidString.lowercased()]),
+            try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)", arguments: [localID]) == true else { return }
+        switch operation.value {
+        case .favorite(let favorite):
+            let protected = try Bool.fetchOne(database, sql: "SELECT is_protected FROM clipboard_retention_state WHERE entry_id = ?", arguments: [localID]) ?? false
+            try database.execute(sql: "UPDATE clipboard_entries SET is_favorite = ? WHERE id = ?", arguments: [favorite, localID])
+            let remainsProtected = try recomputeProtection(for: localID, in: database)
+            if protected, !remainsProtected {
+                try database.execute(sql: "UPDATE clipboard_retention_state SET retention_started_at = ? WHERE entry_id = ?",
+                    arguments: [now().timeIntervalSince1970, localID])
+            }
+        }
+    }
+}

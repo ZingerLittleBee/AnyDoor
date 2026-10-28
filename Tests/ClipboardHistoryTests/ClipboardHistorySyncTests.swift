@@ -8,6 +8,55 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testFavoriteUpdatesSurviveRestartAndReorderingWithoutReplacingRichContentOrPrivateTags() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-favorite-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x87, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0x88, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-favorite.\(UUID())"))
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        let html = Data("<b>keep rich content</b>".utf8)
+        item.setString("keep rich content", forType: .string)
+        item.setData(html, forType: .html)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let capture) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected rich history")
+        }
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let privateTag = try await second.createTagDefinition(named: "Receiver private", assigningTo: capture.entryID)
+        let recentLocal = try await second.capture(.init(source: .unknown, content: .text("recent receiver-only history")))
+        try await first.setSyncEnabled(false)
+        _ = try await first.apply(.setFavorite(capture.entryID, true))
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x87, time: 3_000, root: root)
+        try await reopened.setSyncEnabled(true)
+        await second.retrySync()
+        let page = try await second.page(.init())
+        let received = try XCTUnwrap(page.entries.first { $0.id == capture.entryID })
+        XCTAssertEqual(page.entries.first?.id, recentLocal.entryID)
+        XCTAssertTrue(received.isFavorite)
+        XCTAssertEqual(received.tagIDs, [tag.definition.id, privateTag.definition.id])
+        let content = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        XCTAssertEqual(content.items, [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "keep rich content"), .data(typeIdentifier: "public.html", html),
+        ])])
+        let uploaded = await reopened.syncStatus()
+        XCTAssertEqual(uploaded.uploadedEntryCount, 1)
+        await cloud.reverseDelivery()
+        let third = makeModule(services: services, keyByte: 0x89, time: 4_000)
+        try await third.setSyncEnabled(true)
+        let reversed = try await third.page(.init())
+        XCTAssertEqual(reversed.entries.count, 1)
+        XCTAssertTrue(try XCTUnwrap(reversed.entries.first).isFavorite)
+        XCTAssertEqual(reversed.entries.first?.capturedAt, Date(timeIntervalSince1970: 1_000))
+    }
+
+    @MainActor
     func testStandardColorAndExplicitRecognitionTextKeepTheirRepresentationsAndFacets() async throws {
         let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
         let first = makeModule(services: services, keyByte: 0x85, time: 1_000)
