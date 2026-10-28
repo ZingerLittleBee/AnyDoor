@@ -124,16 +124,24 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
                 let memberships = Set(try String.fetchAll(database,
                     sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID]))
-                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) },
+                // A retained local copy can share its old UUID with a newly
+                // imported entry in this epoch. Explicitly publishing that copy
+                // allocates a distinct cloud identity without replacing either.
+                let identityInUse = try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_entries
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ?)
+                    """, arguments: [account.identifier, control.epoch.uuidString, localID]) == true
+                let sharedID = identityInUse ? UUID() : id
+                let content = try syncEntryContent(id: id, sharedID: sharedID, tags: tags.filter { memberships.contains($0.id) },
                     account: account, control: control, key: key, in: database)
                 let upload = try ClipboardSyncCodec.seal(.entry(content), account: account, control: control, key: key)
-                try storeSyncUpload(upload, subjectID: localID, account: account, in: database)
+                try storeSyncUpload(upload, subjectID: sharedID.uuidString.lowercased(), account: account, in: database)
                 try database.execute(sql: """
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
-                    """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
+                    """, arguments: [account.identifier, control.epoch.uuidString, sharedID.uuidString.lowercased(), localID, upload.record.recordID])
                 try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
-                try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
+                try seedSyncMemberships(content.tags, sharedID: sharedID.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
                 try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }

@@ -62,6 +62,8 @@ extension ClipboardHistoryModule {
             JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = shared.account_id
                 AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id
             WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID))
+        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_reset_exclusions AS retired
+                    WHERE retired.account_id = \(accountID) AND retired.local_entry_id = entry.id)
         AND NOT EXISTS (SELECT 1 FROM clipboard_sync_tag_blocked_entries AS blocked
                     WHERE blocked.account_id = \(accountID) AND blocked.local_entry_id = entry.id)
         AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership

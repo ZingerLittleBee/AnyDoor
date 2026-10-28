@@ -9,7 +9,10 @@ extension ClipboardHistoryModule {
             return try database.read { database in
                 let settings = try syncSettings(in: database)
                 let recovery = try syncRecovery(in: database)
-                let reset = try cloudReset(in: database)?.status
+                var reset = try cloudReset(in: database)?.status
+                if let current = reset, current.isPending, syncPhase == .failed(.localStorage) {
+                    reset = .init(stage: current.stage, deletedRecordCount: current.deletedRecordCount, failure: syncPhase)
+                }
                 let phase = syncPhase == .disabled ? recovery.phase ?? .connecting : syncPhase
                 let accountID = settings.accountID ?? ""
                 let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
@@ -37,9 +40,15 @@ extension ClipboardHistoryModule {
         _ = try await writableDatabase()
         guard generation == syncGeneration else { return }
         if enabled, let reset = try currentCloudReset(), reset.status.isPending {
-            syncSuspended = false
-            await retrySync()
-            return
+            guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
+            let account = try await services.transport.account()
+            try await waitForWriteTurn()
+            guard generation == syncGeneration else { return }
+            if account == reset.account {
+                syncSuspended = false
+                await retrySync()
+                return
+            }
         }
         try syncWrite { database in
             try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = ? WHERE id = 1", arguments: [enabled])
@@ -47,10 +56,10 @@ extension ClipboardHistoryModule {
             try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL WHERE id = 1")
         }
         setSyncPhase(enabled ? .connecting : .disabled)
-        let pendingReset = (try? currentCloudReset()).map { $0.status.isPending } ?? false
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard enabled || pendingReset else { return }
         syncSuspended = false
-        await runSync(allowAccountBinding: true)
+        await runSync(allowAccountBinding: enabled)
     }
 
     public func setSyncTagSelected(_ tagID: String, selected: Bool) async throws {
@@ -70,6 +79,10 @@ extension ClipboardHistoryModule {
                 """, arguments: [accountID, tagID, selected])
             if selected {
                 try database.execute(sql: """
+                    DELETE FROM clipboard_sync_reset_exclusions WHERE account_id = ?
+                      AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
+                    """, arguments: [accountID, tagID])
+                try database.execute(sql: """
                     DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
                       AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
                     """, arguments: [accountID, tagID])
@@ -83,7 +96,7 @@ extension ClipboardHistoryModule {
     /// Resumes only stored local consent, after the host has completed migration.
     public func resumeSync() async {
         guard availability == .ready else { return }
-        let pendingReset = (try? currentCloudReset()).map { $0.status.isPending } ?? false
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard syncStatus().isEnabled || pendingReset else { return }
         syncSuspended = false
         await retrySync()
@@ -128,9 +141,9 @@ extension ClipboardHistoryModule {
         }
         let generation = syncGeneration
         let bindingAuthorized = syncAccountBindingGeneration == generation
-        let pendingReset = (try? currentCloudReset()).map { $0.status.isPending } ?? false
+        let pendingReset = (try? hasPendingCloudResets()) ?? false
         let task = Task {
-            if pendingReset { await self.performCloudReset(generation: generation) }
+            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation) }
             else { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
         }
         syncTask = task
@@ -198,7 +211,7 @@ extension ClipboardHistoryModule {
         return state
     }
 
-    private func performSync(generation: UInt64, allowAccountBinding: Bool) async {
+    func performSync(generation: UInt64, allowAccountBinding: Bool) async {
         guard let services = syncServices else {
             await finishSync(.capabilityUnavailable, generation: generation)
             return
@@ -210,6 +223,14 @@ extension ClipboardHistoryModule {
             try admitSync(generation)
             _ = try await writableDatabase()
             try admitSync(generation)
+            if let reset = try currentCloudReset(accountID: account.identifier), reset.status.isPending {
+                try syncWrite { database in
+                    try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ?, enabled = 0 WHERE id = 1",
+                        arguments: [account.identifier])
+                }
+                await performCloudReset(generation: generation)
+                return
+            }
             var state = try syncWrite { database in
                 let previous = try syncSettings(in: database).accountID
                 if let previous, previous != account.identifier, !allowAccountBinding {
@@ -284,7 +305,8 @@ extension ClipboardHistoryModule {
             }
             state.candidate = nil
             try syncWrite { database in
-                try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0, journal = NULL WHERE id = 1")
+                try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
+                try database.execute(sql: "DELETE FROM clipboard_sync_resets WHERE account_id = ?", arguments: [account.identifier])
             }
             state.control = control
             try syncWrite { try saveSyncAccount(state, in: $0) }
@@ -392,7 +414,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func finishSync(_ phase: ClipboardHistorySyncPhase, generation: UInt64,
+    func finishSync(_ phase: ClipboardHistorySyncPhase, generation: UInt64,
                             retryAfter: TimeInterval? = nil) async {
         do {
             try await waitForWriteTurn()
