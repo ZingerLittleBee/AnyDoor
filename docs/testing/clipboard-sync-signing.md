@@ -208,3 +208,61 @@ and live CloudKit conflict delivery are **NOT RUN**. Signed two-Mac acceptance
 remains **SKIPPED (user request)**. A separately authorized native lane should use
 synthetic files, save on both Macs while offline, inspect both candidates, select
 one, then repeat with a large undownloaded candidate and interruption/relaunch.
+
+## Directory, file lifecycle, and application evidence
+
+[Directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift)
+cover complete trees, portable metadata/resource forks, recursive changes, and the
+original-byte download threshold independently of encoded transfer size.
+[File lifecycle tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryFileLifecycleTests.swift),
+[rejoin tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryFileRejoinTests.swift), and
+[delayed-response tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryFileLifecycleRaceTests.swift)
+cover retained working copies, full version ancestry, unpublished saved-work
+preservation, bounded cache cleanup, account changes, and Cloud Reset. These use
+real temporary files and SQLCipher stores with external cloud/key adapters.
+
+[Application tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationUpdateTests.swift)
+and [boundary tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationBoundaryTests.swift)
+verify separate download/Apply consent, stale confirmations, complete packages,
+and an actual pre-application v27-plus-v29 store upgrading through v28. The
+[Host tests](../../Tests/AnyDoorTests/ClipboardApplicationUpdatePresentationTests.swift)
+exercise the production sheet model and real module. [Recovery tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationRecoveryTests.swift)
+retain complete packages across Off, interrupted exchange, concurrent retry, and
+changed target identity.
+
+Native application cases construct disposable AppKit packages, sign their nested
+and outer code ad hoc, verify the received signature without re-signing, and launch
+only the owned fixture executable. They observe the exact process and filesystem
+identity, refuse a running associated application, and verify normal owned exits.
+This is local native process/filesystem evidence, not Developer ID trust,
+notarization, Gatekeeper, installed AnyDoor UI acceptance, or live iCloud delivery.
+The final running-state refresh is an observation boundary, not a system-wide lock
+against every subsequent process launch.
+
+The recorded runs below used the documented `check-swift.sh` runner and completed
+with normal exit 0. Counts apply to their exact commits and scopes; overlapping
+runs are not a single unique total. Earlier broad results are not represented as
+later final-commit results.
+
+| Commit | Scope | Selected/executed | Passed | Skipped | Failed | Exit |
+| --- | --- | --- | --- | --- | --- | --- |
+| `9e3fad1809e61078bfb2b594a2ca5626d452445a` | Actual directory + file-lifecycle integration: all 23 lifecycle/race/rejoin cases, seven tree cases, permissions, migration, and related Host suites | 59 | 59 | 0 | 0 | 0 |
+| `3b34e7fb027407e526477c37e116da020939e48e` | Application implementation broad linked/directory/lifecycle/sync/module/paste/Host regression | 317 | 316 | 1 | 0 | 0 |
+| `daef9ad417bbd39b083a26528c22dad5401ff523` | Final application recovery/admission corrections, native application cases, and affected Host/localization suites | 82 | 82 | 0 | 0 | 0 |
+
+The one skip is the existing child-only `testProductionKeychainCrossIdentityChildProbe`;
+it is not Keychain-delivery evidence. The final application command was:
+
+```sh
+scripts/check-swift.sh --allow-toolchain-mismatch -- --filter 'ClipboardHistoryApplicationFixtureTests|ClipboardHistoryLinkedFileTests.*Application|ClipboardApplicationUpdatePresentationTests|ClipboardHistoryPresentationModelTests|ClipboardHistoryLinkedFilePresentationTests|LocalizationCoverageTests|testInterruptedReplacementAdoptsInstalledVersionAndPreservesLaterSave|testFileIdentityPauseRevokesAReplacementAfterItsBytesWereVerified'
+```
+
+These runs used local Xcode `27A9275` / Swift 6.4 with the explicit toolchain override;
+they do not establish compatibility with pinned CI `27A266a` or the minimum macOS
+runtime. The final cross-module privacy/copy/backup/metadata acceptance run is
+pending and is not represented by these earlier runs.
+
+Developer ID profile and Production schema configuration are complete as recorded
+above. Signed two-Mac acceptance remains **SKIPPED at the owner's request**. Actual
+CloudKit and synchronizable Keychain delivery, installed application GUI/picker
+interaction, and native privacy/TCC consent are not established by these tests.
