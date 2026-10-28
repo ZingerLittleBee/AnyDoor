@@ -87,6 +87,11 @@ extension ClipboardHistoryLinkedFileTests {
 
         try await assertRejectedTree(fixture.receiver, entryID: fixture.entryID, working: working,
             rejectedVersion: versionID, sentinel: sentinel, protectedBytes: protectedBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: working.url.path).sorted(),
+            attack == .symlinkDescendant ? ["escape-link", "payload.txt"] : ["payload.txt"])
+        if attack == .symlinkDescendant {
+            XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: working.url.appendingPathComponent("escape-link").path), outside.path)
+        }
         let downloads = await fixture.cloud.downloadedFileVersions()
         XCTAssertTrue(downloads.contains(versionID), "The authenticated malformed body must reach the real receiving parser")
         if reopen {
