@@ -17,7 +17,11 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
         let descriptor = open(url.path, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { return nil }
         var status = stat()
-        guard fstat(descriptor, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+        var pathStatus = stat()
+        guard fstat(descriptor, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              ClipboardSyncFileIO.isAvailable(path: url.path, identity: identity),
+              lstat(url.path, &pathStatus) == 0,
+              pathStatus.st_dev == status.st_dev, pathStatus.st_ino == status.st_ino else {
             close(descriptor)
             return nil
         }

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import XCTest
 
@@ -6,10 +7,102 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFileIdentityPauseRevokesAReplacementAfterItsBytesWereVerified() async throws {
+        let barrier = LinkedReplacementBarrier()
+        defer { barrier.release() }
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeReplacement { barrier.pause() }
+            return false
+        })
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        try Data("remote version reaching final replacement".utf8).write(to: fixture.original)
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+        let receive = Task { await fixture.receiver.retrySync() }
+        try await eventually { barrier.isWaiting }
+        let current = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let displayed = try XCTUnwrap(current.first)
+
+        try await fixture.receiver.setFileLocationPaused(.init(entryID: fixture.entryID,
+            locationID: displayed.id, expectedRevision: displayed.revision), paused: true)
+        barrier.release()
+        await receive.value
+
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
+        let paused = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(paused.first?.state, .paused)
+    }
+
+    @MainActor
+    func testFileIdentityNativeRenameAndParentMoveRefreshTheSameLocation() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(initial.first)
+        let directory = fixture.root.appendingPathComponent("Moved parent")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let moved = directory.appendingPathComponent("Moved notes.txt")
+
+        try FileManager.default.moveItem(at: fixture.original, to: moved)
+
+        try await eventually {
+            let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return locations.first?.url.resolvingSymlinksInPath() == moved.resolvingSymlinksInPath()
+        }
+        let renamedParent = fixture.root.appendingPathComponent("Renamed parent")
+        try FileManager.default.moveItem(at: directory, to: renamedParent)
+        let finalURL = renamedParent.appendingPathComponent("Moved notes.txt")
+        try await eventually {
+            await fixture.sender.retrySync()
+            let current = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return current.first?.url.resolvingSymlinksInPath() == finalURL.resolvingSymlinksInPath()
+        }
+        let locations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(locations.first?.id, original.id)
+        XCTAssertEqual(locations.first?.url.resolvingSymlinksInPath(), finalURL.resolvingSymlinksInPath())
+        XCTAssertGreaterThan(try XCTUnwrap(locations.first?.revision), original.revision)
+        let materialized = try await fixture.sender.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing moved source") }
+        XCTAssertEqual(file.currentURL.resolvingSymlinksInPath(), finalURL.resolvingSymlinksInPath())
+    }
+
+    @MainActor
+    func testFileIdentityPermissionLossPausesAndRestorationResumesWithoutEmptyPublication() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(initial.first)
+        let before = await fixture.cloud.uploadCount()
+        XCTAssertEqual(chmod(fixture.original.path, 0), 0)
+        defer { _ = chmod(fixture.original.path, 0o600) }
+        XCTAssertNotEqual(access(fixture.original.path, R_OK), 0, "The fixture must genuinely deny file reads")
+
+        await fixture.sender.retrySync()
+
+        let unavailable = try await fixture.sender.page(.init())
+        XCTAssertEqual(unavailable.entries.first?.linkedFileLocations.first?.state, .unavailable)
+        XCTAssertEqual(unavailable.entries.first?.syncFiles.first?.state, .localUnavailable)
+        let peerLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let peer = try XCTUnwrap(peerLocations.first)
+        XCTAssertEqual(try Data(contentsOf: peer.url), Data("initial linked bytes".utf8))
+        XCTAssertEqual(chmod(fixture.original.path, 0o600), 0)
+        await fixture.sender.retrySync()
+        let restored = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(restored.first?.id, original.id)
+        XCTAssertEqual(restored.first?.baseVersionID, original.baseVersionID)
+        XCTAssertEqual(restored.first?.state, .current)
+        let after = await fixture.cloud.uploadCount()
+        XCTAssertEqual(after, before)
+    }
+
+    @MainActor
     func testFileIdentityPauseKeepsWorkingBytesUntilExplicitResume() async throws {
         let fixture = try await makeLinkedFixture()
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
         let working = try XCTUnwrap(locations.first)
+        let initialInode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: working.url.path)[.systemFileNumber] as? NSNumber)
         let selection = ClipboardHistoryFileLocationSelection(entryID: fixture.entryID,
             locationID: working.id, expectedRevision: working.revision)
 
@@ -31,6 +124,8 @@ extension ClipboardHistoryLinkedFileTests {
         try await fixture.receiver.setFileLocationPaused(.init(entryID: fixture.entryID,
             locationID: paused.id, expectedRevision: paused.revision), paused: false)
         try await eventually { (try? Data(contentsOf: working.url)) == remote }
+        let appliedInode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: working.url.path)[.systemFileNumber] as? NSNumber)
+        XCTAssertNotEqual(appliedInode, initialInode, "The owned replacement journal must admit the verified new filesystem object")
         do {
             try await fixture.receiver.setFileLocationPaused(selection, paused: true)
             XCTFail("A stale pause control must not affect a changed linked location")
@@ -67,6 +162,10 @@ extension ClipboardHistoryLinkedFileTests {
         } catch ClipboardHistoryModuleError.fileReferencesUnavailable { }
         let selection = ClipboardHistoryFileLocationSelection(entryID: fixture.entryID,
             locationID: original.id, expectedRevision: ambiguous.revision)
+        do {
+            try await fixture.sender.setFileLocationPaused(selection, paused: false)
+            XCTFail("Resume must not bypass the explicit identity decision")
+        } catch ClipboardHistoryModuleError.operationUnavailable { }
 
         let associated = try await fixture.sender.reassociateFileLocation(.init(selection: selection, url: fixture.original))
 

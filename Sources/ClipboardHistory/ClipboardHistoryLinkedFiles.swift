@@ -133,7 +133,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.storageFailure
         }
         let path: String = row["path"]
-        let available = ClipboardSyncFileIO.isAvailable(path: path, identity: row["identity"])
+        let available = ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: row["identity"], nativeIdentity: row["native_identity"])
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
             url: URL(fileURLWithPath: path), kind: kind,
             state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,

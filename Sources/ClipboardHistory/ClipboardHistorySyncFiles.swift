@@ -102,14 +102,14 @@ extension ClipboardHistoryModule {
     private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
         in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
         let rows = try Row.fetchAll(database, sql: """
-            SELECT path, bookmark, identity, state, base_version_id FROM clipboard_sync_linked_locations
+            SELECT path, bookmark, identity, native_identity, state, base_version_id FROM clipboard_sync_linked_locations
             WHERE account_id = ? AND epoch = ? AND object_id = ?
             ORDER BY CASE kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, id
             """, arguments: [accountID, epoch, objectID.uuidString])
         for row in rows where !["unavailable", "detached", "identityUncertain"].contains(row["state"] as String) {
             let path: String = row["path"]
             let identity: Data = row["identity"]
-            if ClipboardSyncFileIO.isAvailable(path: path, identity: identity),
+            if ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: identity, nativeIdentity: row["native_identity"]),
                let versionID = UUID(uuidString: row["base_version_id"]) {
                 return (true, (path, row["bookmark"], identity, versionID))
             }
