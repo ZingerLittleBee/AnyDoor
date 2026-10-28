@@ -674,9 +674,13 @@ extension ClipboardHistoryModule {
                         in: database
                     )
                 }
+                let currentSharedScope: [String]
+                if case .clear = payload.operation {
+                    currentSharedScope = try Self.syncDeletionScope(entryIDs: currentIDs, in: database)
+                } else { currentSharedScope = [] }
                 let sortedCurrentIDs = currentIDs.sorted()
                 guard currentRevision == payload.revision,
-                    sortedCurrentIDs == payload.entryIDs
+                    sortedCurrentIDs == payload.entryIDs, currentSharedScope == payload.sharedScope
                 else {
                     return ConfirmationApplyResult(
                         outcome: .stale(
@@ -1385,7 +1389,11 @@ extension ClipboardHistoryModule {
         let payload = ConfirmationPayload(
             operation: operation,
             revision: try Self.historyRevision(in: database),
-            entryIDs: entryIDs.sorted()
+            entryIDs: entryIDs.sorted(),
+            sharedScope: try {
+                guard case .clear = operation else { return [] }
+                return try Self.syncDeletionScope(entryIDs: entryIDs, in: database)
+            }()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -1700,4 +1708,5 @@ private struct ConfirmationPayload: Codable {
     let operation: ConfirmationOperation
     let revision: Int64
     let entryIDs: [String]
+    let sharedScope: [String]
 }

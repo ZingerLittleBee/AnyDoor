@@ -46,6 +46,21 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, sharedID]) ?? false
     }
 
+    static func syncDeletionScope(entryIDs: [String], in database: Database) throws -> [String] {
+        var identities = Set<String>()
+        for id in entryIDs {
+            for row in try Row.fetchAll(database, sql: """
+                SELECT account_id, epoch, shared_id FROM clipboard_sync_entries AS shared WHERE local_entry_id = ?
+                  AND NOT EXISTS (SELECT 1 FROM clipboard_sync_deletions AS deleted
+                    WHERE deleted.account_id = shared.account_id AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id)
+                """, arguments: [id]) {
+                let fields: [String] = [row["account_id"], row["epoch"], row["shared_id"]]
+                identities.insert(fields.joined(separator: "/"))
+            }
+        }
+        return identities.sorted()
+    }
+
     static func sharedDeletionCount(entryIDs: [String], in database: Database) throws -> Int {
         try entryIDs.reduce(0) { count, id in
             let shared = try Bool.fetchOne(database, sql: """

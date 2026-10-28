@@ -8,6 +8,23 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testClearConfirmationRefreshesWhenLocalHistoryBecomesShared() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0x9F, time: 1_000)
+        let captured = try await module.capture(.init(source: .unknown, content: .text("share after preview")))
+        let tag = try await module.createTagDefinition(named: "Scope change", assigningTo: captured.entryID)
+        try await module.setSyncTagSelected(tag.definition.id, selected: true)
+        let localPreview = try await module.previewClearHistory(scope: .includingProtected)
+        XCTAssertEqual(localPreview.sharedAffectedCount, 0)
+        try await module.setSyncEnabled(true)
+        let outcome = try await module.confirm(localPreview.token)
+        guard case .stale(let updated) = outcome else { return XCTFail("Sharing changes the disclosed deletion scope") }
+        XCTAssertEqual(updated.sharedAffectedCount, 1)
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [captured.entryID])
+    }
+
     func testDeletionCleanupResumesAfterLostProviderResponseAndRestart() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
