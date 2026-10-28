@@ -64,4 +64,3 @@ public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {
         self.eligibleEntryCount = eligibleEntryCount
     }
 }
-
