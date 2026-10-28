@@ -6,6 +6,34 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFilePreservationSurvivesRestartAfterCopyAndLaterSourceSave() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.syncFilePreservationAfterCopy]))
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        let saved = Data("work already copied before the interrupted transaction".utf8)
+        try saved.write(to: working.url)
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+        try await fixture.receiver.closeStoreForTesting()
+        let newer = Data("independent user save after the preservation interruption".utf8)
+        try newer.write(to: working.url)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+
+        let notices = try await reopened.preservedSyncEdits()
+
+        XCTAssertEqual(notices.count, 1)
+        let notice = try XCTUnwrap(notices.first)
+        let materialized = try await reopened.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing retained saved copy") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), saved)
+        XCTAssertEqual(try Data(contentsOf: working.url), newer)
+        let repeated = try await reopened.preservedSyncEdits()
+        XCTAssertEqual(repeated.map(\.id), [notice.id])
+    }
+
+    @MainActor
     func testFileDeletionReclaimsEncryptedTransfersButKeepsOrdinaryWorkingFile() async throws {
         let bytes = Data(repeating: 0x75, count: 20_000_000)
         let fixture = try await makeLinkedFixture(initialBytes: bytes)

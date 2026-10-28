@@ -16,13 +16,20 @@ struct ClipboardSyncPreservedFileSource: Codable, Sendable {
     var control: ClipboardSyncControl? = nil
 }
 
+private struct ClipboardSyncPreservedFileArtifact: Codable, Sendable {
+    let url: URL
+    let identity: Data
+    let digest: Data
+    let byteCount: Int64
+}
+
 extension ClipboardHistoryModule {
     static func createSyncFilePreservationSchema(in database: Database) throws {
         try database.execute(sql: """
             CREATE TABLE clipboard_sync_file_preservations (
                 id TEXT PRIMARY KEY NOT NULL, account_id TEXT NOT NULL, epoch TEXT NOT NULL,
                 shared_id TEXT NOT NULL, source_id TEXT NOT NULL, source BLOB NOT NULL,
-                completed INTEGER NOT NULL DEFAULT 0, preserved_digest BLOB,
+                completed INTEGER NOT NULL DEFAULT 0, preserved_digest BLOB, artifact BLOB,
                 UNIQUE(account_id, epoch, shared_id, source_id)
             );
             """)
@@ -138,8 +145,32 @@ extension ClipboardHistoryModule {
             let destination = syncWorkingRoot.appendingPathComponent("Preserved Files", isDirectory: true)
                 .appendingPathComponent(id, isDirectory: true).appendingPathComponent(source.location.url.lastPathComponent)
             let proof: ClipboardLinkedFileProof?
-            do { proof = try await preparePreservedSyncFile(source, destination: destination) }
+            do {
+                if let data: Data = row["artifact"] {
+                    let artifact = try JSONDecoder().decode(ClipboardSyncPreservedFileArtifact.self, from: data)
+                    proof = try await Task.detached {
+                        let verified = try ClipboardLinkedFileIO.inspect(artifact.url, expectedIdentity: artifact.identity)
+                        guard verified.digest == artifact.digest, verified.byteCount == artifact.byteCount else {
+                            throw ClipboardHistoryModuleError.operationUnavailable
+                        }
+                        return verified
+                    }.value
+                } else {
+                    proof = try await preparePreservedSyncFile(source, destination: destination)
+                    if let proof {
+                        let artifact = ClipboardSyncPreservedFileArtifact(url: proof.url, identity: proof.identity,
+                            digest: proof.digest, byteCount: proof.byteCount)
+                        try await waitForWriteTurn()
+                        guard storeEpoch == epoch else { throw ClipboardHistoryModuleError.operationUnavailable }
+                        try syncWrite { database in
+                            try database.execute(sql: "UPDATE clipboard_sync_file_preservations SET artifact = ? WHERE id = ? AND completed = 0",
+                                arguments: [try JSONEncoder().encode(artifact), id])
+                        }
+                    }
+                }
+            }
             catch { continue } // Inaccessible or changing saved work stays durable and retryable.
+            try faultInjector.check(.syncFilePreservationAfterCopy)
             try await waitForWriteTurn()
             guard storeEpoch == epoch else { throw ClipboardHistoryModuleError.operationUnavailable }
             try syncWrite { database in
@@ -221,8 +252,12 @@ extension ClipboardLinkedFileIO {
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: destination.path) {
             let existing = try inspect(destination)
-            guard existing.digest == source.digest, existing.byteCount == source.byteCount else { throw ClipboardHistoryModuleError.operationUnavailable }
-            return existing
+            if existing.digest == source.digest, existing.byteCount == source.byteCount { return existing }
+            // A crash before recording the verified output, or a later user
+            // edit of that visible output, must not cause an overwrite or a
+            // permanently stuck retry. Keep it and publish a fresh copy.
+            return try preserveIndependent(source, at: destination.deletingLastPathComponent()
+                .appendingPathComponent(destination.lastPathComponent + " (Recovered " + UUID().uuidString + ")"))
         }
         try FileManager.default.copyItem(at: source.url, to: destination)
         let copy = try inspect(destination)
