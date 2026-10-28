@@ -65,6 +65,25 @@ extension ClipboardHistoryModule {
         let state = try JSONDecoder().decode(ClipboardSyncAccountState.self, from: data)
         guard let control = state.control, control.epoch.uuidString == epoch else { return }
         for row in try Row.fetchAll(database, sql: """
+            SELECT version.*, event.metadata AS event_metadata FROM clipboard_sync_file_versions AS version
+            JOIN clipboard_sync_outbox AS event ON event.record_id = version.publication_record_id
+            WHERE version.account_id = ? AND version.epoch = ? AND event.acknowledged = 0 AND EXISTS (
+              SELECT 1 FROM clipboard_sync_file_members AS member WHERE member.entry_id = ?
+                AND member.account_id = version.account_id AND member.epoch = version.epoch AND member.object_id = version.object_id)
+            """, arguments: [accountID, epoch, entryID]) {
+            let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+            guard let source = sources[descriptor.objectID], let body = descriptor.body,
+                  let directory = try String.fetchOne(database, sql: "SELECT directory FROM clipboard_sync_file_uploads WHERE record_id = ?", arguments: [body.recordID]) else { continue }
+            let event = try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: row["event_metadata"])
+            let chunks = try Data.fetchAll(database, sql: "SELECT ciphertext FROM clipboard_sync_chunks WHERE record_id = ? ORDER BY chunk_index", arguments: [event.recordID])
+            let prepared = ClipboardSyncPreparedFileVersion(descriptor: descriptor,
+                parents: try JSONDecoder().decode([UUID].self, from: row["parents"]), uploadDirectory: URL(fileURLWithPath: directory),
+                sourceURL: source.location.url, bookmark: source.location.bookmark, identity: source.location.identity,
+                publication: .init(record: event, chunks: chunks))
+            try captureFrozenSyncFilePreservation(prepared, source: source, account: state.account,
+                control: control, sharedID: sharedID, in: database)
+        }
+        for row in try Row.fetchAll(database, sql: """
             SELECT object_id, journal FROM clipboard_sync_file_resolutions AS resolution
             WHERE account_id = ? AND epoch = ? AND phase != 'complete' AND EXISTS (
               SELECT 1 FROM clipboard_sync_file_members AS member WHERE member.entry_id = ?
@@ -72,23 +91,32 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, entryID]) {
             let journal = try JSONDecoder().decode(ClipboardSyncFileResolutionJournal.self, from: row["journal"])
             for prepared in journal.prepared {
-                guard var source = sources[prepared.descriptor.objectID], let body = prepared.descriptor.body else { continue }
+                guard let source = sources[prepared.descriptor.objectID], let body = prepared.descriptor.body else { continue }
                 let committed = try Bool.fetchOne(database, sql: """
                     SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 1)
                       AND EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 1)
                     """, arguments: [body.recordID, prepared.publication.record.recordID]) ?? false
                 guard !committed else { continue }
-                source.frozen = prepared; source.account = state.account; source.control = control
-                try database.execute(sql: """
-                    INSERT OR IGNORE INTO clipboard_sync_file_preservations(id, account_id, epoch, shared_id, source_id, source)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """, arguments: [UUID().uuidString.lowercased(), accountID, epoch, sharedID,
-                        "version:" + prepared.descriptor.versionID.uuidString, try JSONEncoder().encode(source)])
-                for record in [body, prepared.publication.record] {
-                    try rememberSyncFileRecord(record, objectID: prepared.descriptor.objectID.uuidString,
-                        sharedID: sharedID, accountID: accountID, in: database)
-                }
+                try captureFrozenSyncFilePreservation(prepared, source: source, account: state.account,
+                    control: control, sharedID: sharedID, in: database)
             }
+        }
+    }
+
+    private static func captureFrozenSyncFilePreservation(_ prepared: ClipboardSyncPreparedFileVersion,
+        source original: ClipboardSyncPreservedFileSource, account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, sharedID: String, in database: Database) throws {
+        guard let body = prepared.descriptor.body else { return }
+        var source = original
+        source.frozen = prepared; source.account = account; source.control = control
+        try database.execute(sql: """
+            INSERT OR IGNORE INTO clipboard_sync_file_preservations(id, account_id, epoch, shared_id, source_id, source)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, arguments: [UUID().uuidString.lowercased(), account.identifier, control.epoch.uuidString, sharedID,
+                "version:" + prepared.descriptor.versionID.uuidString, try JSONEncoder().encode(source)])
+        for record in [body, prepared.publication.record] {
+            try rememberSyncFileRecord(record, objectID: prepared.descriptor.objectID.uuidString,
+                sharedID: sharedID, accountID: account.identifier, in: database)
         }
     }
 
@@ -129,6 +157,7 @@ extension ClipboardHistoryModule {
             }
             publishMutation()
         }
+        try await reclaimDeletedSyncFileTransfers()
     }
 
     private func preparePreservedSyncFile(_ source: ClipboardSyncPreservedFileSource, destination: URL) async throws -> ClipboardLinkedFileProof? {

@@ -87,6 +87,7 @@ extension ClipboardHistoryModule {
         guard UUID(uuidString: sharedID) != nil else { throw ClipboardSyncServiceError.corruptData }
         guard try !isSyncDeleted(sharedID, accountID: accountID, epoch: epoch, in: database) else { return }
         try rememberSyncFileOwnership(sharedID: sharedID, accountID: accountID, epoch: epoch, in: database)
+        try captureSyncFileCleanup(sharedID: sharedID, accountID: accountID, epoch: epoch, in: database)
         try database.execute(sql: """
             INSERT INTO clipboard_sync_deletions(account_id, epoch, shared_id, record_id, origin) VALUES (?, ?, ?, ?, ?)
             """, arguments: [accountID, epoch, sharedID, recordID, origin])

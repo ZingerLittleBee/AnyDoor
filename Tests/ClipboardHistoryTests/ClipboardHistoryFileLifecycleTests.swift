@@ -6,6 +6,55 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFileDeletionReclaimsEncryptedTransfersButKeepsOrdinaryWorkingFile() async throws {
+        let bytes = Data(repeating: 0x75, count: 20_000_000)
+        let fixture = try await makeLinkedFixture(initialBytes: bytes)
+        let page = try await fixture.receiver.page(.init())
+        let working = try XCTUnwrap(page.entries.first?.linkedFileLocations.first)
+        let before = try await fixture.receiver.storageUsage()
+
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+
+        let after = try await fixture.receiver.storageUsage()
+        XCTAssertLessThan(after + 15_000_000, before, "The encrypted transfer is reclaimable after its owned work is safely retained")
+        XCTAssertEqual(try Data(contentsOf: working.url), bytes)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), bytes)
+        let notices = try await fixture.receiver.preservedSyncEdits()
+        XCTAssertTrue(notices.isEmpty, "An unchanged already-shared file is not unuploaded local work")
+    }
+
+    @MainActor
+    func testFileDeletionPreservesQueuedVersionAndLaterSaveAndPurgesPartialUploads() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let frozen = Data("immutable pending version with uploaded segments".utf8)
+        try frozen.write(to: fixture.original)
+        try await eventually { !(await fixture.cloud.partialFileRecordIDs()).isEmpty }
+        try await fixture.sender.setSyncEnabled(false)
+        let newer = Data("new local work after the pending version was frozen".utf8)
+        try newer.write(to: fixture.original)
+        await fixture.cloud.failCommits(false)
+        _ = try await fixture.receiver.apply(.delete(fixture.entryID))
+        await fixture.receiver.retrySync()
+
+        try await fixture.sender.setSyncEnabled(true)
+
+        let notices = try await fixture.sender.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let value = try await fixture.sender.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing unpublished branch") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        let partial = await fixture.cloud.partialFileRecordIDs()
+        XCTAssertTrue(partial.isEmpty, "The cleanup ledger must own segments whose manifest never committed")
+    }
+
+    @MainActor
     func testFileDeletionPreservesInterruptedFrozenBranchAndNewerSavedWork() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]))
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

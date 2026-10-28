@@ -404,6 +404,9 @@ extension ClipboardHistoryModule {
                                 try database.execute(sql: "UPDATE clipboard_sync_outbox SET acknowledged = 1 WHERE record_id = ?",
                                     arguments: [upload.record.recordID])
                                 try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
+                                if upload.record.kind == .fileBody {
+                                    try recordSyncFileRestorationAcknowledged(upload.record, account: account, in: database)
+                                }
                             }
                             try saveSyncAccount(state, in: database)
                             if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
@@ -464,6 +467,7 @@ extension ClipboardHistoryModule {
                 }
             }
             state.lastCompletedAt = now()
+            try await resumeSyncFilePreservations()
             try acknowledgeLinkedFileVersions(account: account, control: control)
             try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
