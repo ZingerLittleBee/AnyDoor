@@ -5,6 +5,25 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testSyncTagsShowExistingEligibleTextWithoutEnablingDevice() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clipboard-sync-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: root, keyStore: SyncTestLocalKeyStore()
+        ))
+        let captured = try await module.capture(ClipboardHistoryCaptureRequest(
+            source: .unknown, content: .text("shared later")
+        ))
+        let tag = try await module.createTagDefinition(named: "Work", assigningTo: captured.entryID)
+        let choices = try await module.syncTags()
+        XCTAssertEqual(choices, [ClipboardHistorySyncTag(
+            id: tag.definition.id, displayName: "Work", isSelected: false, eligibleEntryCount: 1
+        )])
+        let status = await module.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+    }
+
     func testNewDeviceStartsDisabledAndKeepsLocalHistoryUsable() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-sync-\(UUID())")
