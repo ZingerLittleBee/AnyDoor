@@ -8,6 +8,29 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testLegacyTextSnapshotAppliesEarlierFavoriteMetadata() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0x96, time: 1_000)
+        try await module.setSyncEnabled(true)
+        let id = UUID()
+        let operationID = UUID()
+        try await publishFixture(.metadata(.init(id: id,
+            revision: .init(counter: 1, operationID: operationID.uuidString.lowercased()), value: .favorite(true))),
+            operationID: operationID, cloud: cloud, keys: keys)
+        try await publishFixture(.text(.init(id: id, text: "legacy text", capturedAt: Date(timeIntervalSince1970: 500),
+            sourceBundleID: nil, sourceDisplayName: nil, sourceProvenance: "unknown", favorite: false,
+            tags: [.init(id: "legacy-shared", name: "Legacy")])), cloud: cloud, keys: keys)
+        await module.retrySync()
+        let page = try await module.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertTrue(entry.isFavorite)
+        XCTAssertEqual(page.entries.count, 1)
+        let content = try await module.materialize(.init(entryID: entry.id, purpose: .plainTextPaste))
+        XCTAssertEqual(content.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "legacy text")])])
+    }
+
     @MainActor
     func testLaterRecognitionResultsSurviveRestartAndReverseDeliveryWithoutReprocessing() async throws {
         let cloud = SyncTestCloud()
@@ -1273,6 +1296,17 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(firstStatus.uploadedEntryCount, 1)
         XCTAssertEqual(secondStatus.receivedEntryCount, 1)
         XCTAssertEqual(secondStatus.phase, .upToDate)
+    }
+
+    private func publishFixture(_ content: ClipboardSyncContent, operationID: UUID = UUID(),
+                                cloud: SyncTestCloud, keys: SyncTestKeys) async throws {
+        let account = try await cloud.account()
+        let descriptor = try await cloud.control(for: account)
+        let control = try XCTUnwrap(descriptor)
+        let loaded = await keys.load(account: account, keyID: control.keyID)
+        let key = try XCTUnwrap(loaded)
+        let upload = try ClipboardSyncCodec.seal(content, account: account, control: control, key: key, operationID: operationID)
+        _ = try await cloud.commit(upload, for: account, control: control)
     }
 
     private func makeModule(

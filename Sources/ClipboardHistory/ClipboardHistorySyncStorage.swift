@@ -260,51 +260,11 @@ extension ClipboardHistoryModule {
 
     private func importSyncText(_ text: ClipboardSyncTextContent, account: ClipboardSyncAccount,
                                 record: ClipboardSyncRemoteRecord, in database: Database) throws {
-        guard !text.text.isEmpty, text.text.utf8.count <= PasteboardSnapshot.maximumByteCount,
-              !text.tags.isEmpty, ClipboardHistoryCaptureSourceProvenance(rawValue: text.sourceProvenance) != nil else {
-            throw ClipboardSyncServiceError.corruptData
-        }
-        let sharedID = text.id.uuidString.lowercased()
-        let existing = try String.fetchOne(database, sql: """
-            SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
-            """, arguments: [account.identifier, record.epoch.uuidString, sharedID])
-        // Updates are a subsequent vertical slice. Redelivery never recaptures.
-        guard existing == nil else { return }
-        var localID = sharedID
-        if try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)", arguments: [localID]) == true {
-            localID = UUID().uuidString.lowercased()
-        }
-        for tag in text.tags { try importSyncTag(tag, account: account, recordID: record.recordID, in: database) }
-        try database.execute(sql: """
-            INSERT INTO clipboard_entries(id, captured_at, last_captured_at, source_bundle_id,
-                source_display_name, source_provenance, preview_text, is_favorite)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, arguments: [localID, text.capturedAt.timeIntervalSince1970, text.capturedAt.timeIntervalSince1970,
-                text.sourceBundleID, text.sourceDisplayName, text.sourceProvenance, Self.boundedPreviewText(text.text), text.favorite])
-        try database.execute(sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)", arguments: [localID])
-        try database.execute(sql: """
-            INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, text_value)
-            VALUES (?, 0, 0, 'text', 'public.utf8-plain-text', ?)
-            """, arguments: [localID, text.text])
-        try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'text')", arguments: [localID])
-        for tag in text.tags {
-            try database.execute(sql: "INSERT INTO clipboard_entry_tags(entry_id, tag_id) VALUES (?, ?)", arguments: [localID, tag.id])
-        }
-        try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, ?, 1)",
-            arguments: [localID, text.capturedAt.timeIntervalSince1970])
-        try Self.insertSearchField(value: text.text, kind: "exactText", index: 0,
-            rankingGroup: Self.searchRankingGroup(for: "exactText"), entryID: localID, into: database, faultInjector: faultInjector)
-        let identity = try CanonicalIdentity(snapshot: PasteboardSnapshot(items: [
-            PasteboardSnapshot.Item(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: text.text)])
-        ], extraFacets: [], allowsTextInference: true), fingerprintDigest: fingerprintDigest)
-        try database.execute(sql: """
-            INSERT INTO clipboard_duplicate_candidates(fingerprint, entry_id, canonical_byte_count, created_at) VALUES (?, ?, ?, ?)
-            """, arguments: [identity.fingerprint, localID, identity.canonicalByteCount, text.capturedAt.timeIntervalSince1970])
-        try database.execute(sql: """
-            INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
-            VALUES (?, ?, ?, ?, ?, 'remote')
-            """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
-        try seedSyncMemberships(text.tags, sharedID: sharedID, localID: localID,
-            account: account, epoch: record.epoch, in: database)
+        guard !text.text.isEmpty else { throw ClipboardSyncServiceError.corruptData }
+        try importSyncEntryContent(.init(id: text.id, capturedAt: text.capturedAt,
+            sourceBundleID: text.sourceBundleID, sourceDisplayName: text.sourceDisplayName,
+            sourceProvenance: text.sourceProvenance, favorite: text.favorite, tags: text.tags,
+            items: [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: text.text)])],
+            facets: ["text"], recognition: .init()), account: account, record: record, in: database)
     }
 }
