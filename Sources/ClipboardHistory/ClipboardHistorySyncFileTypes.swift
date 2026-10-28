@@ -62,10 +62,14 @@ struct ClipboardSyncFileDescriptor: Codable, Equatable, Sendable {
     let state: ClipboardSyncFileSourceState
     /// Absence denotes the bounded JSON body used by the initial file protocol.
     let bodyFormat: ClipboardSyncFileBodyFormat?
+    let kind: ClipboardSyncFileKind?
+    let encodedByteCount: Int64?
+
+    var streamByteCount: Int64? { bodyFormat == .treeSegmentsV1 ? encodedByteCount : originalByteCount }
 
     init(objectID: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?,
          contentDigest: Data?, body: ClipboardSyncRemoteRecord?, state: ClipboardSyncFileSourceState,
-         bodyFormat: ClipboardSyncFileBodyFormat? = nil) {
+         bodyFormat: ClipboardSyncFileBodyFormat? = nil, kind: ClipboardSyncFileKind? = nil, encodedByteCount: Int64? = nil) {
         self.objectID = objectID
         self.versionID = versionID
         self.displayName = displayName
@@ -74,12 +78,17 @@ struct ClipboardSyncFileDescriptor: Codable, Equatable, Sendable {
         self.body = body
         self.state = state
         self.bodyFormat = bodyFormat
+        self.kind = kind
+        self.encodedByteCount = encodedByteCount
     }
 }
 
 enum ClipboardSyncFileBodyFormat: String, Codable, Sendable {
     case segmentsV1
+    case treeSegmentsV1
 }
+
+enum ClipboardSyncFileKind: String, Codable, Sendable { case file, directory }
 
 struct ClipboardSyncFileVersionContent: Codable, Equatable, Sendable {
     let descriptor: ClipboardSyncFileDescriptor
