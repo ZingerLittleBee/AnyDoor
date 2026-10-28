@@ -1098,6 +1098,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let fixture = try TemporaryDatabase(in: self)
         let legacy = try ClipboardHistoryModule.openDatabase(at: fixture.url, databaseKey: fixture.key,
             migrationTarget: "v14_clipboard_sync")
+        addTeardownBlock { try legacy.close() }
         try await legacy.write { database in
             try database.execute(sql: "INSERT INTO clipboard_tag_definitions(id, display_name, display_order) VALUES ('retained-tag', 'Work', 0)")
             try database.execute(sql: "INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, locally_authorized) VALUES ('', 'retained-tag', 1, 1)")

@@ -39,6 +39,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         _ = try await first.apply(.setTags(capture.entryID, []))
         await cloud.holdNextPurge()
         let cleanup = Task { await first.retrySync() }
+        addTeardownBlock { await cloud.releasePurge(); await cleanup.value }
         await cloud.waitForHeldPurge()
         _ = try await first.apply(.setTags(capture.entryID, [tag.id]))
         await cloud.releasePurge()
@@ -166,6 +167,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         _ = try await second.apply(.editText(capture.entryID, "keep this unpublished edit"))
         await cloud.holdNextEntryCommit()
         let upload = Task { await second.retrySync() }
+        addTeardownBlock { await cloud.releaseEntryCommit(); await upload.value }
         await cloud.waitForHeldEntryCommit()
         try await first.setSyncTagSelected(tag.id, selected: false)
         await cloud.releaseEntryCommit()
@@ -192,6 +194,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         try await first.setSyncTagSelected(tag.id, selected: true)
         await cloud.holdNextEntryCommit()
         let upload = Task { try await first.setSyncEnabled(true) }
+        addTeardownBlock { await cloud.releaseEntryCommit(); _ = await upload.result }
         await cloud.waitForHeldEntryCommit()
         _ = try await first.deleteTagDefinition(id: tag.id)
         await cloud.releaseEntryCommit()
@@ -713,6 +716,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         _ = try await second.apply(.editText(shared.entryID, "save this offline draft"))
         await cloud.holdNextEntryCommit()
         let upload = Task { await second.resumeSync() }
+        addTeardownBlock { await cloud.releaseEntryCommit(); await upload.value }
         await cloud.waitForHeldEntryCommit()
         _ = try await first.apply(.delete(shared.entryID))
         await first.retrySync()
@@ -1091,6 +1095,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let recognizer = SyncTestRecognizer(results: [.ocr: ["obsolete image words"], .qr: ["anydoor://obsolete/image"]], held: true)
         let first = makeModule(services: services, keyByte: 0x9A, time: 1_000, recognizer: recognizer)
         let second = makeModule(services: services, keyByte: 0x9B, time: 2_000)
+        addTeardownBlock { await recognizer.release() }
         try await first.setAutomaticImageTextIndexingEnabled(true)
         let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-edited-image.\(UUID())"))
         defer { pasteboard.releaseGlobally() }
@@ -1175,6 +1180,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-late-recognition-\(UUID())")
         let first = makeModule(services: services, keyByte: 0x93, time: 1_000, root: root, recognizer: recognizer)
         let second = makeModule(services: services, keyByte: 0x94, time: 2_000)
+        addTeardownBlock { await recognizer.release() }
         try await first.setAutomaticImageTextIndexingEnabled(true)
         let captured = try await first.capture(.init(source: .unknown, content: .bitmap(try makeSyncBitmap(), provenance: .image)))
         let tag = try await first.createTagDefinition(named: "Images", assigningTo: captured.entryID)
