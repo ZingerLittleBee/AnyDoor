@@ -120,7 +120,8 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
                 let memberships = Set(try String.fetchAll(database,
                     sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID]))
-                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) }, in: database)
+                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) },
+                    account: account, control: control, key: key, in: database)
                 let upload = try ClipboardSyncCodec.seal(.entry(content), account: account, control: control, key: key)
                 try storeSyncUpload(upload, subjectID: localID, account: account, in: database)
                 try database.execute(sql: """

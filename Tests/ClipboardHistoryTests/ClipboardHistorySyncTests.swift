@@ -31,11 +31,16 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let tag = try await first.createTagDefinition(named: "Shared files", assigningTo: captured.entryID)
         try await first.setSyncTagSelected(tag.definition.id, selected: true)
         try await first.setSyncEnabled(true)
+        let senderStatus = await first.syncStatus()
+        XCTAssertEqual(senderStatus.phase, .upToDate)
         pasteboard.clearContents()
         pasteboard.setString("leave the current clipboard alone", forType: .string)
         let generation = pasteboard.changeCount
 
         try await second.setSyncEnabled(true)
+
+        let receiverStatus = await second.syncStatus()
+        XCTAssertEqual(receiverStatus.phase, .upToDate)
 
         let page = try await second.page(.init(tagID: tag.definition.id))
         let received = try XCTUnwrap(page.entries.first)

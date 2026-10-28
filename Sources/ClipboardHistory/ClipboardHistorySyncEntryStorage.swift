@@ -2,7 +2,8 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
-    func syncEntryContent(id: UUID, tags: [ClipboardSyncTagContent], in database: Database) throws -> ClipboardSyncEntryContent {
+    func syncEntryContent(id: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
+                          control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntryContent {
         let storedID = id.uuidString.lowercased()
         guard let entry = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_entries WHERE id = ?", arguments: [storedID]) else {
             throw ClipboardSyncServiceError.localStorage
@@ -11,13 +12,16 @@ extension ClipboardHistoryModule {
             sql: "SELECT item_index FROM clipboard_items WHERE entry_id = ? ORDER BY item_index", arguments: [storedID])
         let items = try itemIndices.map { itemIndex in
             let rows = try Row.fetchAll(database, sql: """
-                SELECT kind, type_identifier, text_value, data_value FROM clipboard_representations
+                SELECT kind, type_identifier, text_value, data_value, representation_index FROM clipboard_representations
                 WHERE entry_id = ? AND item_index = ? ORDER BY representation_index
                 """, arguments: [storedID, itemIndex])
             return ClipboardSyncItemContent(representations: try rows.map { row in
                 switch row["kind"] as String {
                 case "text": return .text(typeIdentifier: row["type_identifier"], value: row["text_value"])
                 case "richText": return .richText(typeIdentifier: row["type_identifier"], data: row["data_value"])
+                case "fileReference":
+                    return .file(try syncFileDescriptor(entryID: storedID, itemIndex: itemIndex,
+                        representationIndex: row["representation_index"], account: account, control: control, key: key, in: database))
                 default: throw ClipboardSyncServiceError.unsupportedVersion
                 }
             })
@@ -37,7 +41,7 @@ extension ClipboardHistoryModule {
             SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
             """, arguments: [account.identifier, record.epoch.uuidString, sharedID]) == nil else { return }
         let snapshot = try validatedSyncSnapshot(content)
-        let identity = try CanonicalIdentity(snapshot: snapshot, fingerprintDigest: fingerprintDigest)
+        let identity = try snapshot.map { try CanonicalIdentity(snapshot: $0, fingerprintDigest: fingerprintDigest) }
         var localID = sharedID
         if try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)", arguments: [localID]) == true {
             localID = UUID().uuidString.lowercased()
@@ -45,6 +49,7 @@ extension ClipboardHistoryModule {
         for tag in content.tags { try importSyncTag(tag, account: account, recordID: record.recordID, in: database) }
         let preview = content.items.flatMap(\.representations).compactMap { representation -> String? in
             if case .text(_, let value) = representation { return value }
+            if case .file(let file) = representation { return file.displayName }
             return nil
         }.first.map(Self.boundedPreviewText)
         try database.execute(sql: """
@@ -77,7 +82,18 @@ extension ClipboardHistoryModule {
                             rankingGroup: Self.searchRankingGroup(for: "richText"), entryID: localID, into: database, faultInjector: faultInjector)
                         searchIndex += 1
                     }
-                case .bitmap, .color, .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .file(let descriptor):
+                    try database.execute(sql: """
+                        INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, data_value)
+                        VALUES (?, ?, ?, 'fileReference', 'public.file-url', ?)
+                        """, arguments: [localID, itemIndex, representationIndex, try JSONEncoder().encode(descriptor)])
+                    try importSyncFileDescriptor(descriptor, entryID: localID, itemIndex: itemIndex,
+                        representationIndex: representationIndex, account: account, record: record, in: database)
+                    try Self.insertSearchField(value: descriptor.displayName, kind: "fileName", index: searchIndex,
+                        rankingGroup: Self.searchRankingGroup(for: "fileName"), entryID: localID,
+                        into: database, faultInjector: faultInjector)
+                    searchIndex += 1
+                case .bitmap, .color: throw ClipboardSyncServiceError.unsupportedVersion
                 }
             }
         }
@@ -89,16 +105,18 @@ extension ClipboardHistoryModule {
         }
         try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, ?, 1)",
             arguments: [localID, content.capturedAt.timeIntervalSince1970])
-        try database.execute(sql: """
-            INSERT INTO clipboard_duplicate_candidates(fingerprint, entry_id, canonical_byte_count, created_at) VALUES (?, ?, ?, ?)
-            """, arguments: [identity.fingerprint, localID, identity.canonicalByteCount, content.capturedAt.timeIntervalSince1970])
+        if let identity {
+            try database.execute(sql: """
+                INSERT INTO clipboard_duplicate_candidates(fingerprint, entry_id, canonical_byte_count, created_at) VALUES (?, ?, ?, ?)
+                """, arguments: [identity.fingerprint, localID, identity.canonicalByteCount, content.capturedAt.timeIntervalSince1970])
+        }
         try database.execute(sql: """
             INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
             VALUES (?, ?, ?, ?, ?, 'remote')
             """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
     }
 
-    func validatedSyncSnapshot(_ content: ClipboardSyncEntryContent) throws -> PasteboardSnapshot {
+    func validatedSyncSnapshot(_ content: ClipboardSyncEntryContent) throws -> PasteboardSnapshot? {
         guard !content.items.isEmpty, !content.tags.isEmpty,
               content.capturedAt.timeIntervalSince1970.isFinite,
               ClipboardHistoryCaptureSourceProvenance(rawValue: content.sourceProvenance) != nil,
@@ -106,9 +124,10 @@ extension ClipboardHistoryModule {
             throw ClipboardSyncServiceError.corruptData
         }
         var byteCount = 0
+        var containsFile = false
         let items = try content.items.map { item in
             guard !item.representations.isEmpty else { throw ClipboardSyncServiceError.corruptData }
-            return PasteboardSnapshot.Item(representations: try item.representations.map { representation in
+            return PasteboardSnapshot.Item(representations: try item.representations.compactMap { representation -> PasteboardSnapshot.Representation? in
                 let result: PasteboardSnapshot.Representation
                 let bytes: Int
                 switch representation {
@@ -124,13 +143,20 @@ extension ClipboardHistoryModule {
                     }
                     bytes = data.count
                     result = .data(typeIdentifier: typeIdentifier, value: data)
-                case .bitmap, .color, .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .file(let descriptor):
+                    guard ClipboardSyncFileIO.validFilename(descriptor.displayName) else { throw ClipboardSyncServiceError.corruptData }
+                    containsFile = true
+                    return nil
+                case .bitmap, .color: throw ClipboardSyncServiceError.unsupportedVersion
                 }
                 guard bytes <= PasteboardSnapshot.maximumByteCount - byteCount else { throw ClipboardSyncServiceError.corruptData }
                 byteCount += bytes
                 return result
             })
         }
+        // File identity belongs to the shared descriptor, never a source path
+        // or a fabricated bookmark. Shared entry receipts handle redelivery.
+        guard !containsFile else { return nil }
         return PasteboardSnapshot(items: items,
             extraFacets: Set(content.facets.compactMap(ClipboardHistoryFacet.init(rawValue:))), allowsTextInference: false)
     }
