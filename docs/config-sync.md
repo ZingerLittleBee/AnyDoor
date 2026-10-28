@@ -65,7 +65,9 @@ server. Notes:
 
 Config Sync no longer transfers clipboard tags. Native Clipboard Sync owns shared
 selection, tag identities, and selected associations through its encrypted channel.
-Its remaining content and lifecycle workflows are being implemented separately.
+Selected content, complete file/directory versions, and their sharing lifecycle
+use that same channel. See the [Clipboard Sync guide](clipboard-sync.md) for
+per-device activation, selected tags, downloads, and linked copies.
 Existing local tags and their history associations stay in place,
 and explicit Config Backup export/import still includes tag definitions.
 

@@ -48,22 +48,8 @@ not fresh runtime verification of the operating system.
 | Script Plugins | [PRD](prds/2026-07-21-script-plugin-runtime.md), [JavaScriptCore runtime](adr/0008-script-plugins-run-on-javascriptcore.md), [capability sandbox](adr/0009-capabilities-are-the-script-plugin-sandbox.md) |
 | Quicklinks | [PRD](prds/2026-07-09-quicklinks.md), [template semantics](adr/0001-untyped-quicklink-template.md) |
 | Image Conversion | [PRD](prds/2026-07-06-image-conversion.md), [target size](prds/2026-07-10-image-target-size-compression.md), [technical design](designs/2026-07-10-image-target-size-compression.md), [ImageIO](adr/0002-imageio-for-target-size-compression.md), [metadata policy](adr/0003-target-size-metadata-policy.md), [preview reuse](adr/0004-exact-preview-reuses-final-candidate.md) |
+| Clipboard Sync | [User guide](clipboard-sync.md), [specification](prds/2026-10-28-clipboard-icloud-sync.md), [runtime boundaries](agents/architecture.md#clipboard-sync), [encryption](adr/0026-encrypt-clipboard-sync-end-to-end.md), [linked files](adr/0027-track-linked-clipboard-files-bidirectionally.md), [tag ownership](adr/0028-move-tag-sync-out-of-config-sync.md), [acceptance evidence](testing/clipboard-sync-signing.md) |
 | Config Sync | [User guide](config-sync.md), [CRDT decision](adr/0010-crdt-sync-over-dumb-storage.md) |
-
-## Designs in progress
-
-- [Clipboard iCloud Sync](prds/2026-10-28-clipboard-icloud-sync.md) is the
-  implementation specification published as [issue #163](https://github.com/ZingerLittleBee/AnyDoor/issues/163)
-  with the `ready-for-agent` label. Its first native slice supports explicit device
-  activation, shared multi-tag selection, explicit same-name identity merging,
-  and encrypted plain-text history transfer; the
-  remaining content and lifecycle workflows are still in progress. See the
-  [runtime boundaries](agents/architecture.md#clipboard-sync) and
-  [provisioning requirements](releasing.md). The automatic Config Sync tag-channel retirement is reflected in the current
-  [Config Sync contract](config-sync.md#clipboard-tags-after-upgrading). Its decisions cover
-  [end-to-end encryption](adr/0026-encrypt-clipboard-sync-end-to-end.md),
-  [linked file changes](adr/0027-track-linked-clipboard-files-bidirectionally.md),
-  and [tag synchronization ownership](adr/0028-move-tag-sync-out-of-config-sync.md).
 
 The [ADR directory](adr/) contains the remaining decisions. The indexes link current references without
 copying their full contracts; update the owning document rather than adding another parallel summary.

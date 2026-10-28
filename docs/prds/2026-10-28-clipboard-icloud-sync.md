@@ -1,11 +1,10 @@
 # Spec: Tag-selected iCloud Clipboard Sync
 
-- **Status:** published, ready for agent implementation
+- **Status:** implementation available; acceptance evidence recorded separately
 - **Tracker:** GitHub Issues, ZingerLittleBee/AnyDoor
 - **Issue:** [#163](https://github.com/ZingerLittleBee/AnyDoor/issues/163)
-- **Triage label:** ready-for-agent
 - **Date:** 2026-10-28
-- **Implementation:** not started
+- **Implementation:** content, tags, files, directories, application updates, and shared lifecycle implemented; see the [runtime boundaries](../agents/architecture.md#clipboard-sync) and [acceptance evidence](../testing/clipboard-sync-signing.md) for validation status.
 
 ## Problem Statement
 
@@ -217,11 +216,11 @@ Protect content, file names, and tag names with application-level end-to-end enc
 
 ## Further Notes
 
-This specification defines the accepted product behavior. The feature has not been implemented or runtime-validated.
+This specification defines the accepted product behavior. Implementation and isolated local verification are recorded in the runtime reference and acceptance record. Apple provisioning and schema configuration are complete; signed two-Mac acceptance is skipped at the owner's request. Local adapters and temporary application fixtures do not establish live CloudKit or synchronizable Keychain delivery.
 
 Relevant existing decisions are ADR-0012 (tag protection), ADR-0014 (local-history encryption), ADR-0015 (original file references), and ADR-0025 (the deep history module). The accompanying new decisions are ADR-0026 (sync end-to-end encryption), ADR-0027 (bidirectional linked files), and ADR-0028 (tag-sync ownership). Their accepted behavior is included above so this issue does not depend on unpublished local documents.
 
-Apple documents [CloudKit support for Developer ID distribution](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) and the [CloudKit capability setup](https://developer.apple.com/documentation/cloudkit/enabling-cloudkit-in-your-app). [Data Protection Keychain access](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) also requires the appropriate signing and provisioning. Those requirements are not yet satisfied or tested by this feature's implementation.
+Apple documents [CloudKit support for Developer ID distribution](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/) and the [CloudKit capability setup](https://developer.apple.com/documentation/cloudkit/enabling-cloudkit-in-your-app). [Data Protection Keychain access](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) also requires the appropriate signing and provisioning. The owner-authorized Developer ID profile, release-secret, and Production schema setup is recorded in the [provisioning acceptance record](../testing/clipboard-sync-signing.md#provisioning-setup). That configuration is separate from signed-app and live-service behavior verification.
 
 [Private CloudKit storage](https://developer.apple.com/documentation/cloudkit/ckcontainer/privateclouddatabase) uses the user's iCloud quota. [CKAsset](https://developer.apple.com/documentation/cloudkit/ckasset) exchanges local files and uses download staging, so its application-supplied content must remain encrypted outside the explicit working-copy boundary.
 

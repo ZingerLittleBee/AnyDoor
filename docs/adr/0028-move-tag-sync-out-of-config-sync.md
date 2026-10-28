@@ -12,7 +12,9 @@ and the automatic Config Sync tag channel is now retired. Native Clipboard Sync
 now handles shared selection, names, and selected memberships through encrypted
 operations. Losing the final selected tag withdraws cloud content while retaining
 local copies; explicit selection or reassignment rejoins the original identity.
-Further tracked-file lifecycle workflows remain in progress.
+Tracked files and complete directories now use the same withdrawal, rejoin,
+deletion, preservation, and Cloud Reset authority; retained copies alone do not
+authorize republishing. See the [runtime boundary](../agents/architecture.md#clipboard-sync).
 
 Keeping both channels was rejected: Config Sync previously serialized the
 complete tag list as a plaintext setting, which would bypass the selected-tag
