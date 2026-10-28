@@ -295,7 +295,7 @@ extension ClipboardHistoryModule {
             plain.update(data: data); encrypted.update(data: bytes)
             count += Int64(data.count); cipherCount += Int64(bytes.count)
         }
-        guard count == prepared.descriptor.originalByteCount, Data(plain.finalize()) == prepared.descriptor.contentDigest,
+        guard count == prepared.descriptor.streamByteCount, Data(plain.finalize()) == prepared.descriptor.contentDigest,
               cipherCount == body.encryptedByteCount, Data(encrypted.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
     }
 }

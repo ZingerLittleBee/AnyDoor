@@ -11,7 +11,7 @@ struct ClipboardSyncFileCandidate: Sendable {
     let snapshot: ClipboardSyncFileSnapshot
 }
 
-struct ClipboardSyncFileSnapshot: Sendable, Equatable {
+struct ClipboardSyncFileSnapshot: Codable, Sendable, Equatable {
     let device: Int32
     let inode: UInt64
     let size: Int64
@@ -40,6 +40,10 @@ enum ClipboardSyncFilePublication {
     static func construct(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
         root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data
     ) async throws -> ClipboardSyncFileCandidate {
+        if descriptor.bodyFormat == .treeSegmentsV1 {
+            return try constructTree(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
+                root: root, account: account, control: control, key: key)
+        }
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
         defer { close(directory) }
         var parent = stat()
@@ -115,9 +119,19 @@ enum ClipboardSyncFilePublication {
         guard fstatat(directory, sourceName, &source, AT_SYMLINK_NOFOLLOW) == 0,
               ClipboardSyncFileSnapshot(source) == candidate.snapshot else { throw ClipboardSyncServiceError.localStorage }
         try faults.check(.syncFileBeforePublication)
+        if descriptor.bodyFormat == .treeSegmentsV1 {
+            let measurement = try ClipboardFileTree(url.appendingPathComponent(sourceName)).stream { _ in }
+            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
+                  measurement.encoded == descriptor.encodedByteCount else { throw ClipboardSyncServiceError.corruptData }
+        }
         if let pending = candidate.pendingName {
-            guard linkat(directory, pending, directory, candidate.name, 0) == 0 else { throw ClipboardSyncServiceError.localStorage }
-            guard unlinkat(directory, pending, 0) == 0, fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
+            if descriptor.bodyFormat == .treeSegmentsV1 {
+                guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardSyncServiceError.localStorage }
+            } else {
+                guard linkat(directory, pending, directory, candidate.name, 0) == 0,
+                      unlinkat(directory, pending, 0) == 0 else { throw ClipboardSyncServiceError.localStorage }
+            }
+            guard fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
         }
         let destination = url.appendingPathComponent(candidate.name)
         var atPath = stat()
@@ -148,10 +162,13 @@ enum ClipboardSyncFilePublication {
         var parent = stat()
         guard fstat(directory, &parent) == 0, parent.st_dev == candidate.parentDevice,
               parent.st_ino == candidate.parentInode else { return }
-        _ = unlinkat(directory, pending, 0)
+        var value = stat()
+        guard fstatat(directory, pending, &value, AT_SYMLINK_NOFOLLOW) == 0,
+              value.st_dev == candidate.snapshot.device, value.st_ino == candidate.snapshot.inode else { return }
+        try? FileManager.default.removeItem(at: candidate.directory.appendingPathComponent(pending))
     }
 
-    private static func openDirectory(root: URL, accountID: String,
+    static func openDirectory(root: URL, accountID: String,
         descriptor: ClipboardSyncFileDescriptor) throws -> (Int32, URL) {
         guard ClipboardSyncFileIO.validFilename(descriptor.displayName), accountID.count == 64,
               accountID.allSatisfy(\.isHexDigit) else { throw ClipboardSyncServiceError.corruptData }

@@ -127,7 +127,8 @@ enum ClipboardLinkedIdentityResolution {
         var visited = Set<String>()
         for url in candidates where visited.insert(url.path).inserted {
             var status = stat()
-            guard lstat(url.path, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else { continue }
+            guard lstat(url.path, &status) == 0,
+                  [mode_t(S_IFREG), mode_t(S_IFDIR)].contains(status.st_mode & mode_t(S_IFMT)) else { continue }
             let native = try ClipboardLinkedNativeIdentity.read(url, status: status)
             let sameObject = ClipboardSyncFileIO.isAvailable(path: url.path, identity: source.identity)
             let proven = source.nativeIdentity.map { expected in native.map { expected.provesContinuity(with: $0) } == true } ?? sameObject
