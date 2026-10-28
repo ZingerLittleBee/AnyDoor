@@ -89,7 +89,8 @@ extension ClipboardHistoryModule {
     }
 
     func importSyncEntryContent(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,
-                                record: ClipboardSyncRemoteRecord, prepared: ClipboardSyncPreparedEntry? = nil, in database: Database) throws {
+                                record: ClipboardSyncRemoteRecord, prepared: ClipboardSyncPreparedEntry? = nil,
+                                initialRecordID: String? = nil, in database: Database) throws {
         let sharedID = content.id.uuidString.lowercased()
         guard try String.fetchOne(database, sql: """
             SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
@@ -183,7 +184,7 @@ extension ClipboardHistoryModule {
         try database.execute(sql: """
             INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
             VALUES (?, ?, ?, ?, ?, 'remote')
-            """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
+            """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, initialRecordID ?? record.recordID])
         try seedSyncMemberships(content.tags, sharedID: sharedID, localID: localID,
             account: account, epoch: record.epoch, in: database)
         try seedSyncEntryMetadata(content, account: account, record: record, in: database)

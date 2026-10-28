@@ -11,6 +11,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
     public let phase: ClipboardHistorySyncPhase
     public let uploadedEntryCount: Int
     public let receivedEntryCount: Int
+    public let withdrawnEntryCount: Int
     public let lastCompletedAt: Date?
     public let canClearCloudData: Bool
     public let cloudReset: ClipboardHistoryCloudResetStatus?
@@ -20,6 +21,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         phase: ClipboardHistorySyncPhase = .disabled,
         uploadedEntryCount: Int = 0,
         receivedEntryCount: Int = 0,
+        withdrawnEntryCount: Int = 0,
         lastCompletedAt: Date? = nil,
         cloudReset: ClipboardHistoryCloudResetStatus? = nil,
         canClearCloudData: Bool = false
@@ -28,6 +30,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         self.phase = phase
         self.uploadedEntryCount = uploadedEntryCount
         self.receivedEntryCount = receivedEntryCount
+        self.withdrawnEntryCount = withdrawnEntryCount
         self.lastCompletedAt = lastCompletedAt
         self.cloudReset = cloudReset
         self.canClearCloudData = canClearCloudData
@@ -76,16 +79,18 @@ public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {
     public let displayName: String
     public let isSelected: Bool
     public let eligibleEntryCount: Int
-    public let canDeselect: Bool
+    public let withdrawalEntryCount: Int
+    public let rejoinEntryCount: Int
     public let requiresLocalAuthorization: Bool
 
     public init(id: String, displayName: String, isSelected: Bool, eligibleEntryCount: Int,
-                canDeselect: Bool = true, requiresLocalAuthorization: Bool = false) {
+                withdrawalEntryCount: Int = 0, rejoinEntryCount: Int = 0, requiresLocalAuthorization: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.isSelected = isSelected
         self.eligibleEntryCount = eligibleEntryCount
-        self.canDeselect = canDeselect
+        self.withdrawalEntryCount = withdrawalEntryCount
+        self.rejoinEntryCount = rejoinEntryCount
         self.requiresLocalAuthorization = requiresLocalAuthorization
     }
 }
