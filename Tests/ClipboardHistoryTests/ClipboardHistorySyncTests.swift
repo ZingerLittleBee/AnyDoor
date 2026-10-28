@@ -558,6 +558,53 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testExplicitLargeFileDownloadPublishesTheCompleteVersion() async throws {
+        let bytes = Data(repeating: 0x5D, count: 5_000_001)
+        let fixture = try await fileFixture(names: ["Manual.bin"], contents: [bytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let pending = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(pending.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.map(\.state), [.complete])
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let reference) = content.items[0].representations[0] else { return XCTFail("Missing complete file") }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), bytes)
+    }
+
+    @MainActor
+    func testEachLargeVersionRequiresItsOwnDownloadAndKeepsTheOldCompleteFile() async throws {
+        let firstBytes = Data(repeating: 0x35, count: 5_000_001)
+        let fixture = try await fileFixture(names: ["Versioned.bin"], contents: [firstBytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let originalPage = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(originalPage.entries.first)
+        let first = try XCTUnwrap(entry.syncFiles.first)
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: first.id, versionID: first.versionID)
+        let newer = Data(repeating: 0x62, count: 5_000_002)
+        try newer.write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: first.id)
+        await fixture.receiver.retrySync()
+
+        let updated = try await fixture.receiver.page(.init())
+        let second = try XCTUnwrap(updated.entries.first?.syncFiles.first)
+        XCTAssertNotEqual(second.versionID, first.versionID)
+        XCTAssertEqual(second.availableVersionID, first.versionID)
+        let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let oldFile) = old.items[0].representations[0] else { return XCTFail("Old file was lost") }
+        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), firstBytes)
+
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: first.id, versionID: second.versionID)
+        let latest = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let latestFile) = latest.items[0].representations[0] else { return XCTFail("Missing update") }
+        XCTAssertEqual(try Data(contentsOf: latestFile.currentURL), newer)
+        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), firstBytes)
+    }
+
+    @MainActor
     func testReopeningAfterWorkingFileRemovalDoesNotClaimACompleteFile() async throws {
         let fixture = try await fileFixture(names: ["Removable.txt"], contents: [Data("complete bytes".utf8)])
         try await fixture.receiver.setSyncEnabled(true)

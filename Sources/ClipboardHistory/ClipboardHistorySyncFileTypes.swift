@@ -6,13 +6,16 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
     public let displayName: String
     public let originalByteCount: Int64?
     public let state: ClipboardHistorySyncFileState
+    public let availableVersionID: UUID?
 
-    public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState) {
+    public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState,
+        availableVersionID: UUID? = nil) {
         self.id = id
         self.versionID = versionID
         self.displayName = displayName
         self.originalByteCount = originalByteCount
         self.state = state
+        self.availableVersionID = availableVersionID
     }
 }
 
@@ -23,6 +26,7 @@ public enum ClipboardHistorySyncFileState: String, Sendable {
     case sourceUnavailable
     case localUnavailable
     case unsupportedKind
+    case updateAvailable
 }
 
 /// This descriptor travels inside the authenticated, encrypted entry envelope.

@@ -228,6 +228,8 @@ extension ClipboardHistoryModule {
                 try importSyncMetadata(metadata, account: account, record: record, in: database)
             case .fileBody:
                 throw ClipboardSyncServiceError.unsupportedVersion
+            case .fileVersion(let version):
+                try importSyncFileVersion(version, account: account, record: record, in: database)
             case .tagMerge(let merge):
                 try applySyncTagMerge(merge, accountID: account.identifier, locallyConfirmed: false, in: database)
                 try applyAllSyncMemberships(account: account, epoch: record.epoch, in: database)
