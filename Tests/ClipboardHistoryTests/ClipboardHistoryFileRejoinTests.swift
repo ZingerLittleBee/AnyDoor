@@ -5,6 +5,39 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testReceiverRejoinRestoresIdenticalPurgedCiphertextWithoutChangingVersion() async throws {
+        let bytes = Data(repeating: 0x59, count: 6 * 1_024 * 1_024)
+        let fixture = try await makeLinkedFixture(initialBytes: bytes)
+        let initial = try await fixture.receiver.page(.init())
+        let file = try XCTUnwrap(initial.entries.first?.syncFiles.first)
+        let tag = try XCTUnwrap(initial.entries.first?.tagIDs.first)
+        let uploaded = await fixture.cloud.uploadedRecords()
+        let original = try XCTUnwrap(uploaded.first { $0.record.kind == .fileBody && $0.record.operationID == file.versionID })
+        try await fixture.sender.setSyncTagSelected(tag, selected: false)
+        await fixture.receiver.retrySync()
+        try await fixture.sender.setSyncEnabled(false)
+        let removed = await fixture.cloud.visibleRecords()
+        XCTAssertFalse(removed.contains(original.record))
+
+        try await fixture.receiver.setSyncTagSelected(tag, selected: true)
+
+        let visible = await fixture.cloud.visibleRecords()
+        XCTAssertTrue(visible.contains(original.record))
+        let account = await fixture.cloud.account()
+        let restored = try await fixture.cloud.download(original.record, for: account)
+        XCTAssertEqual(restored, original.chunks, "Restoration must reuse the exact immutable ciphertext")
+        let fresh = makeLinkedModule(root: fixture.root.appendingPathComponent("Fresh exact rejoin"), services: fixture.services, key: 0x53)
+        try await fresh.setSyncEnabled(true)
+        try await fresh.requestSyncFileDownload(entryID: fixture.entryID, objectID: file.id, versionID: file.versionID)
+        let page = try await fresh.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [fixture.entryID])
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.id, file.id)
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.versionID, file.versionID)
+        let locations = try await fresh.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(locations.first?.url)), bytes)
+    }
+
+    @MainActor
     func testFileRejoinRestoresNonRootAncestryForFreshReceiver() async throws {
         let fixture = try await makeLinkedFixture()
         let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
