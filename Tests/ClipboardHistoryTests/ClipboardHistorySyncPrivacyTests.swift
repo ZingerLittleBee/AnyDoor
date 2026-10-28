@@ -8,6 +8,88 @@ import os
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testFrozenConflictAndCleanupJournalsStayEncryptedAcrossRestart() async throws {
+        let initial = Data("private initial retention birch meadow".utf8)
+        let frozen = Data("private frozen retention coral valley".utf8)
+        let newer = Data("private newer retention indigo orchard".utf8)
+        let remote = Data("private remote retention copper garden".utf8)
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]), initialBytes: initial)
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let markers = [String(decoding: initial, as: UTF8.self), String(decoding: frozen, as: UTF8.self),
+            String(decoding: newer, as: UTF8.self), String(decoding: remote, as: UTF8.self), fixture.original.path,
+            "private preservation tag emerald river", fixture.original.lastPathComponent]
+        let probe = PrivacyArtifactProbe(roots: [fixture.root.appendingPathComponent("Sender"), fixture.receiverRoot], markers: markers)
+        probe.allowVisible(working.url)
+        _ = try await fixture.receiver.createTagDefinition(named: "private preservation tag emerald river", assigningTo: fixture.entryID)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try remote.write(to: fixture.original)
+        try frozen.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+        for candidate in plan.candidates where candidate.availability == .available {
+            let url = try XCTUnwrap(candidate.localURL)
+            XCTAssertTrue([initial, frozen, remote].contains(try Data(contentsOf: url)))
+            probe.allowVisible(url)
+        }
+        do {
+            _ = try await fixture.receiver.resolveFileConflict(plan, choosing: .localLocation(working.id))
+            XCTFail("Expected the already-frozen branch to survive interruption")
+        } catch ClipboardHistoryStorageError.injected(.fileConflictAfterBranchFreeze) { }
+        probe.scan(stage: "frozen-conflict")
+        try await fixture.receiver.setSyncEnabled(false)
+        try await fixture.receiver.closeStoreForTesting()
+        try newer.write(to: working.url)
+        _ = try await fixture.sender.apply(.delete(fixture.entryID))
+        await fixture.sender.retrySync()
+        let interrupted = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52,
+            faultInjector: .init(points: [.syncFileCleanupBeforeRemoval]))
+        probe.scan(stage: "reopened-preparation")
+        try await interrupted.setSyncEnabled(true)
+        let notices = try await interrupted.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var preserved: [URL: Data] = [:]
+        for notice in notices {
+            let materialized = try await interrupted.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = materialized.items.first?.representations.first else {
+                return XCTFail("Expected visible, independent preserved work")
+            }
+            preserved[file.currentURL] = try Data(contentsOf: file.currentURL)
+            probe.allowVisible(file.currentURL)
+        }
+        XCTAssertEqual(Set(preserved.values), [frozen, newer])
+        let transfers = fixture.receiverRoot.appendingPathComponent("SyncTransfers")
+        let retained = privacyCiphertextFiles(in: transfers)
+        XCTAssertFalse(retained.isEmpty, "Interrupted cleanup must leave real encrypted owned artifacts to inspect")
+        probe.scan(stage: "pending-cleanup")
+        try await interrupted.closeStoreForTesting()
+        let resumed = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await resumed.resumeSync()
+        await resumed.retrySync()
+        let replayedNotices = try await resumed.preservedSyncEdits()
+        XCTAssertEqual(Set(replayedNotices.map(\.id)), Set(notices.map(\.id)))
+        XCTAssertTrue(privacyCiphertextFiles(in: transfers).isEmpty)
+        for (url, bytes) in preserved { XCTAssertEqual(try Data(contentsOf: url), bytes) }
+        XCTAssertEqual(try Data(contentsOf: working.url), newer)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), remote)
+        probe.scan(stage: "completed-cleanup")
+        for upload in await fixture.cloud.uploadedRecords() {
+            try PrivacyArtifactProbe.assertEncrypted([JSONEncoder().encode(upload.record)] + upload.chunks, markers: markers)
+        }
+        let evidence = probe.evidence
+        XCTAssertTrue(evidence.errors.isEmpty, evidence.errors.joined(separator: "\n"))
+        XCTAssertEqual(evidence.stages, ["frozen-conflict", "reopened-preparation", "pending-cleanup", "completed-cleanup"])
+        XCTAssertGreaterThan(evidence.encryptedFiles, 0)
+    }
+
+    private func privacyCiphertextFiles(in root: URL) -> [URL] {
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey])
+        return (files?.allObjects as? [URL] ?? []).filter { $0.pathExtension == "ciphertext" }
+    }
+
+    @MainActor
     func testInterruptedTreeArtifactsKeepContentNamesAndMetadataEncrypted() async throws {
         guard let privateTemporaryPath = ProcessInfo.processInfo.environment[PrivacySubprocess.rootKey] else {
             let result = try await PrivacySubprocess.run(bundle: Bundle(for: Self.self).bundleURL,
