@@ -12,8 +12,12 @@ final class ClipboardFileTreeOutput {
         let handle = dup(parentDescriptor)
         guard handle >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var expected = stat(), atPath = stat()
-        guard fstat(handle, &expected) == 0, lstat(destination.deletingLastPathComponent().path, &atPath) == 0,
-              expected.st_dev == atPath.st_dev, expected.st_ino == atPath.st_ino else {
+        guard fstat(handle, &expected) == 0, lstat(destination.deletingLastPathComponent().path, &atPath) == 0 else {
+            let code = errno
+            close(handle)
+            throw ClipboardHistoryStorageError.fileOperationFailed(code)
+        }
+        guard expected.st_dev == atPath.st_dev, expected.st_ino == atPath.st_ino else {
             close(handle)
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
@@ -41,7 +45,12 @@ final class ClipboardFileTreeOutput {
         guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var created = stat()
         let expectedKind = header.kind == "directory" ? S_IFDIR : header.kind == "link" ? S_IFLNK : S_IFREG
-        guard fstat(fd, &created) == 0, created.st_mode & mode_t(S_IFMT) == mode_t(expectedKind) else {
+        guard fstat(fd, &created) == 0 else {
+            let code = errno
+            close(fd)
+            throw ClipboardHistoryStorageError.fileOperationFailed(code)
+        }
+        guard created.st_mode & mode_t(S_IFMT) == mode_t(expectedKind) else {
             close(fd)
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
@@ -64,7 +73,8 @@ final class ClipboardFileTreeOutput {
         guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(fd) }
         var status = stat()
-        guard fstat(fd, &status) == 0, status.st_dev == expected.device, status.st_ino == expected.inode,
+        guard fstat(fd, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard status.st_dev == expected.device, status.st_ino == expected.inode,
               status.st_mode & mode_t(S_IFMT) == expected.mode & mode_t(S_IFMT) else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
@@ -76,8 +86,8 @@ final class ClipboardFileTreeOutput {
 
     func snapshot() throws -> ClipboardSyncFileSnapshot {
         var current = stat(), path = stat()
-        guard fstat(root, &current) == 0, fstatat(parent, name, &path, AT_SYMLINK_NOFOLLOW) == 0,
-              current.st_dev == path.st_dev, current.st_ino == path.st_ino else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+        guard fstat(root, &current) == 0, fstatat(parent, name, &path, AT_SYMLINK_NOFOLLOW) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard current.st_dev == path.st_dev, current.st_ino == path.st_ino else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
         return .init(current)
     }
 

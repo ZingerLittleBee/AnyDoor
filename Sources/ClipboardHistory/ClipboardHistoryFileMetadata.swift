@@ -24,7 +24,9 @@ enum ClipboardFileMetadata {
         guard size >= 0, size <= maximumAttributeBytes else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var names = try allocate(size)
         if size > 0 {
-            guard names.withUnsafeMutableBytes({ flistxattr(fd, $0.baseAddress?.assumingMemoryBound(to: CChar.self), $0.count, 0) }) == size else {
+            let read = names.withUnsafeMutableBytes { flistxattr(fd, $0.baseAddress?.assumingMemoryBound(to: CChar.self), $0.count, 0) }
+            guard read >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard read == size else {
                 throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
         }
@@ -62,8 +64,12 @@ enum ClipboardFileMetadata {
         if fork < 0, !writing, errno == ENOENT || errno == ENOATTR || errno == ENOTSUP { return nil }
         guard fork >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var fileStatus = stat(), forkStatus = stat()
-        guard fstat(fd, &fileStatus) == 0, fstat(fork, &forkStatus) == 0,
-              fileStatus.st_dev == forkStatus.st_dev, fileStatus.st_ino == forkStatus.st_ino,
+        guard fstat(fd, &fileStatus) == 0, fstat(fork, &forkStatus) == 0 else {
+            let code = errno
+            close(fork)
+            throw ClipboardHistoryStorageError.fileOperationFailed(code)
+        }
+        guard fileStatus.st_dev == forkStatus.st_dev, fileStatus.st_ino == forkStatus.st_ino,
               forkStatus.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
             close(fork)
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
