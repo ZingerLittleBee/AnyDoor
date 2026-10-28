@@ -110,6 +110,268 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteTextVersionArrivingBeforeFileRootDoesNotDownloadRemovedFile() async throws {
+        let fixture = try await fileFixture(names: ["Original attachment.txt"], contents: [Data("old attachment".utf8)],
+            exactText: "original file label")
+        let initial = try await fixture.sender.page(.init())
+        let entryID = try XCTUnwrap(initial.entries.first?.id)
+        _ = try await fixture.sender.apply(.editText(entryID, "replacement text"))
+        await fixture.sender.retrySync()
+        await fixture.cloud.replayAllChangesInReverseOrder()
+
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.receiver.retrySync()
+
+        let received = try await fixture.receiver.page(.init())
+        XCTAssertEqual(received.entries.map(\.id), [entryID])
+        XCTAssertEqual(received.entries.first?.syncFiles, [])
+        let content = try await fixture.receiver.materialize(.init(entryID: entryID, purpose: .normalPaste))
+        XCTAssertEqual(content.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "replacement text")])])
+        let downloads = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(downloads, 0)
+        let plan = try await fixture.receiver.textEditPlan(for: entryID)
+        XCTAssertFalse(plan.hasConflict)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.receiverRoot.appendingPathComponent("Linked Working Copies").path))
+    }
+
+    @MainActor
+    func testEditingFileBearingTextDoesNotReviveItsPendingFile() async throws {
+        let fixture = try await fileFixture(names: ["Obsolete.txt"], contents: [Data("obsolete bytes".utf8)],
+            receiverFaults: .init(points: [.syncFileBeforePublication]), exactText: "original label")
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        _ = try await fixture.receiver.apply(.editText(entry.id, "edited text"))
+        let downloadsBefore = await fixture.cloud.fileBodyDownloadCount()
+        await fixture.receiver.retrySync()
+        let edited = try await fixture.receiver.page(.init())
+        XCTAssertEqual(edited.entries.first?.syncFiles, [])
+        let downloadsAfter = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(downloadsAfter, downloadsBefore)
+        let materialized = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        XCTAssertEqual(materialized.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "edited text")])])
+    }
+
+    @MainActor
+    func testOrderedFileNamesAndBytesAreEncryptedOutsideVisibleWorkingCopies() async throws {
+        let names = ["Confidential first.txt", "Confidential second.txt"]
+        let bytes = [Data("first confidential file body".utf8), Data("second confidential file body".utf8)]
+        let fixture = try await fileFixture(names: names, contents: bytes)
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let materialized = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        let files = materialized.items.flatMap(\.representations).compactMap { representation -> ClipboardHistoryMaterializedFileReference? in
+            if case .file(let file) = representation { return file }
+            return nil
+        }
+        XCTAssertEqual(files.map(\.displayName), names)
+        XCTAssertEqual(try files.map { try Data(contentsOf: $0.currentURL) }, bytes)
+        let secrets = bytes + names.map { Data($0.utf8) } + fixture.sourceURLs.map { Data($0.path.utf8) }
+        for upload in await fixture.cloud.currentUploads() {
+            for artifact in upload.chunks + [try JSONEncoder().encode(upload.record)] {
+                for secret in secrets { XCTAssertNil(artifact.range(of: secret)) }
+            }
+        }
+        let workingRoot = fixture.receiverRoot.appendingPathComponent("Linked Working Copies").resolvingSymlinksInPath().pathComponents
+        XCTAssertTrue(files.allSatisfy { $0.currentURL.resolvingSymlinksInPath().pathComponents.starts(with: workingRoot) })
+        let persisted = try XCTUnwrap(FileManager.default.enumerator(at: fixture.receiverRoot, includingPropertiesForKeys: [.isRegularFileKey]))
+        for url in persisted.allObjects.compactMap({ $0 as? URL })
+            where !url.resolvingSymlinksInPath().pathComponents.starts(with: workingRoot) {
+            guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { continue }
+            let artifact = try Data(contentsOf: url)
+            for secret in secrets { XCTAssertNil(artifact.range(of: secret)) }
+        }
+    }
+
+    @MainActor
+    func testWorkingRootSymlinkCannotRedirectFilePublication() async throws {
+        let fixture = try await fileFixture(names: ["Safe.txt"], contents: [Data("must stay confined".utf8)])
+        let outside = fixture.root.appendingPathComponent("Unrelated")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: fixture.receiverRoot.appendingPathComponent("Linked Working Copies"), withDestinationURL: outside)
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.map(\.state), [.waitingForDownload])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outside.path), [])
+    }
+
+    @MainActor
+    func testFileBackfillReadsCurrentBytesAndKeepsUnavailableMembersInOrder() async throws {
+        let fixture = try await fileFixture(names: ["Edited.txt", "Gone.txt"],
+            contents: [Data("old capture".utf8), Data("gone".utf8)], beforeEnable: { urls in
+                try Data("current file version".utf8).write(to: urls[0])
+                try FileManager.default.removeItem(at: urls[1])
+            })
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(entry.syncFiles.map(\.displayName), ["Edited.txt", "Gone.txt"])
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.complete, .sourceUnavailable])
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+            XCTFail("One unavailable member must block the whole entry")
+        } catch ClipboardHistoryModuleError.syncFilesPending(let id, let count) {
+            XCTAssertEqual(id, entry.id)
+            XCTAssertEqual(count, 1)
+        }
+        let workingRoot = fixture.receiverRoot.appendingPathComponent("Linked Working Copies")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: workingRoot, includingPropertiesForKeys: nil))
+            .allObjects.compactMap { $0 as? URL }.filter { $0.lastPathComponent == "Edited.txt" }
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(files.first)), Data("current file version".utf8))
+    }
+
+    @MainActor
+    func testCorruptFileBodyStaysPendingAndNeverPublishesPlaintext() async throws {
+        let fixture = try await fileFixture(names: ["Confidential.txt"], contents: [Data("secret file content".utf8)])
+        await fixture.cloud.damageNextFileBodyDownload()
+        try await fixture.receiver.setSyncEnabled(true)
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertEqual(status.phase, .failed(.corruptData))
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForDownload])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.receiverRoot.appendingPathComponent("Linked Working Copies").path))
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+            XCTFail("Unverified content must not materialize")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+        await fixture.receiver.retrySync()
+        let repaired = try await fixture.receiver.page(.init())
+        XCTAssertEqual(repaired.entries[0].syncFiles.map(\.state), [.complete])
+        XCTAssertEqual(repaired.entries.count, 1)
+    }
+
+    @MainActor
+    func testFilePublicationInterruptionsRecoverAfterReopenWithoutDuplicateEntries() async throws {
+        for point in [ClipboardHistoryFaultPoint.syncFileBeforePublication, .syncFileAfterPublication] {
+            let fixture = try await fileFixture(names: ["Recovered.txt"], contents: [Data("recoverable".utf8)],
+                receiverFaults: .init(points: [point]))
+            try await fixture.receiver.setSyncEnabled(true)
+            let pending = try await fixture.receiver.page(.init())
+            XCTAssertEqual(pending.entries.count, 1)
+            XCTAssertEqual(pending.entries[0].syncFiles.map(\.state), [.waitingForDownload])
+            try await fixture.receiver.closeStoreForTesting()
+            let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
+            await reopened.resumeSync()
+            let recovered = try await reopened.page(.init())
+            XCTAssertEqual(recovered.entries.map(\.id), pending.entries.map(\.id))
+            XCTAssertEqual(recovered.entries[0].syncFiles.map(\.state), [.complete])
+            let content = try await reopened.materialize(.init(entryID: recovered.entries[0].id, purpose: .normalPaste))
+            guard case .file(let file) = content.items[0].representations[0] else { return XCTFail("Missing recovered file") }
+            XCTAssertEqual(try Data(contentsOf: file.currentURL), Data("recoverable".utf8))
+        }
+    }
+
+    @MainActor
+    func testLargeFileMetadataRemainsPendingWithoutImplicitBodyDownload() async throws {
+        let fixture = try await fileFixture(names: ["Large.bin"], contents: [Data(repeating: 0x48, count: 5_000_001)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(entry.syncFiles.map(\.originalByteCount), [5_000_001])
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForUpload])
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .hostAction))
+            XCTFail("Preview or copy must not implicitly download a pending file")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+        let downloads = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(downloads, 0)
+    }
+
+    @MainActor
+    func testReopeningAfterWorkingFileRemovalDoesNotClaimACompleteFile() async throws {
+        let fixture = try await fileFixture(names: ["Removable.txt"], contents: [Data("complete bytes".utf8)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let file) = content.items[0].representations[0] else { return XCTFail("Missing working file") }
+        try FileManager.default.removeItem(at: file.currentURL)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
+        let reopenedPage = try await reopened.page(.init())
+        XCTAssertEqual(reopenedPage.entries.count, 1)
+        XCTAssertFalse(reopenedPage.entries[0].syncFiles.allSatisfy { $0.state == .complete })
+        do {
+            _ = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+            XCTFail("A removed working file must not materialize")
+        } catch ClipboardHistoryModuleError.fileReferencesUnavailable(let id, let count) {
+            XCTAssertEqual(id, entry.id)
+            XCTAssertEqual(count, 1)
+        }
+    }
+
+    @MainActor
+    func testSavingSyncedFileCreatesIndependentCopyAndRefusesCollision() async throws {
+        let fixture = try await fileFixture(names: ["Notes.txt"], contents: [Data("original version".utf8)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let destination = fixture.root.appendingPathComponent("Saved notes.txt")
+
+        let saved = try await fixture.receiver.exportFiles(entry.id, to: [destination])
+
+        XCTAssertEqual(saved, [destination])
+        XCTAssertEqual(try Data(contentsOf: destination), Data("original version".utf8))
+        try Data("independent edit".utf8).write(to: destination)
+        do {
+            _ = try await fixture.receiver.exportFiles(entry.id, to: [destination])
+            XCTFail("An existing destination must not be overwritten")
+        } catch {}
+        let materialized = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items[0].representations[0] else { return XCTFail("Missing working file") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), Data("original version".utf8))
+        XCTAssertEqual(try Data(contentsOf: destination), Data("independent edit".utf8))
+        let uploadsBefore = await fixture.cloud.currentUploads().count
+        await fixture.receiver.retrySync()
+        let uploadsAfter = await fixture.cloud.currentUploads().count
+        XCTAssertEqual(uploadsAfter, uploadsBefore)
+    }
+
+    @MainActor
+    private func fileFixture(names: [String], contents: [Data],
+        receiverFaults: ClipboardHistoryFaultInjector = .init(),
+        exactText: String? = nil,
+        beforeEnable: ([URL]) throws -> Void = { _ in }
+    ) async throws -> (
+        sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule, cloud: SyncTestCloud,
+        services: ClipboardSyncServices, root: URL, receiverRoot: URL, sourceURLs: [URL]
+    ) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-files-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000)
+        let receiverRoot = root.appendingPathComponent("Receiver")
+        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot, faults: receiverFaults)
+        let urls = try zip(names, contents).map { name, data in
+            let url = root.appendingPathComponent(name)
+            try data.write(to: url)
+            return url
+        }
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-file-fixture.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        let items = urls.map { url in
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            if let exactText { item.setString(exactText, forType: .string) }
+            return item
+        }
+        XCTAssertTrue(pasteboard.writeObjects(items))
+        let result = try await sender.capture(.init(pasteboard: pasteboard), source: .unknown)
+        guard case .captured(let captured) = result else { throw ClipboardHistoryModuleError.operationUnavailable }
+        let tag = try await sender.createTagDefinition(named: "Files", assigningTo: captured.entryID)
+        try await sender.setSyncTagSelected(tag.definition.id, selected: true)
+        try beforeEnable(urls)
+        try await sender.setSyncEnabled(true)
+        return (sender, receiver, cloud, services, root, receiverRoot, urls)
+    }
+
+    @MainActor
     func testSharedRichTextEditKeepsMetadataAndLateInitialContentCannotRestoreOldFormats() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -1260,6 +1522,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
     private func makeModule(
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
+        faults: ClipboardHistoryFaultInjector = .init(),
         recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
@@ -1268,6 +1531,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         return trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: SyncTestLocalKeyStore(byte: keyByte),
+            faultInjector: faults,
             now: clock ?? { Date(timeIntervalSince1970: time) },
             visionRecognizer: recognizer,
             syncServices: services
@@ -1370,6 +1634,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
+    private var damagesFileBody = false
+    private var fileBodyDownloads = 0
+    func damageNextFileBodyDownload() { damagesFileBody = true }
+    func fileBodyDownloadCount() -> Int { fileBodyDownloads }
     private var reversesAllChanges = false
     private var reversesDelivery = false
     func reverseDelivery() { reversesDelivery = true }
@@ -1430,11 +1698,13 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
         try checkAccount(account)
+        if record.kind == .fileBody { fileBodyDownloads += 1 }
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if damagesDownload {
+        if damagesDownload || (damagesFileBody && record.kind == .fileBody) {
             damagesDownload = false
+            if record.kind == .fileBody { damagesFileBody = false }
             var changed = upload.chunks
             changed[0][0] ^= 1
             return changed

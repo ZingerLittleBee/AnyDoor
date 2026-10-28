@@ -34,7 +34,7 @@ struct ClipboardHistoryRow: View {
             isSelected ? Color.accentColor.opacity(0.18) : .clear,
             in: .rect(cornerRadius: 6)
         )
-        .task(id: entry.id) {
+        .task(id: entry.filePresentationIdentity) {
             preview = await presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
@@ -92,6 +92,7 @@ struct ClipboardHistoryRow: View {
     }
 
     private var subtitleText: String? {
+        if let status = entry.syncFileStatusText { return status }
         guard let text = entry.previewText else { return nil }
         let lineCount = text.split(whereSeparator: \.isNewline).count
         return lineCount > 1

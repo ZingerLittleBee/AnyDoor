@@ -392,7 +392,8 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   of 128 MiB across the canonical plaintext bytes of all Standard Clipboard
   Representations selected for persistence, plus a 64-megapixel decoded-image
   limit, both aggregated across the complete Clipboard Entry. Referenced file
-  contents do not count because AnyDoor never reads or stores them. Exceeding
+  contents do not count because capture stores references without reading their
+  contents. Opted-in Clipboard Sync reads file content separately. Exceeding
   either limit rejects the entire history entry, leaves the system pasteboard
   unchanged, and shows a non-modal “content too large” notice, rate-limited so
   repeated rejections raise one notice rather than a stream. It never silently
