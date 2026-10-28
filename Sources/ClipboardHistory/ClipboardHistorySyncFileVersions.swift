@@ -100,7 +100,7 @@ extension ClipboardHistoryModule {
             try storeSyncFileUpload(frozen.upload, objectID: objectID, account: account, in: database)
             try storeSyncFileDescriptor(descriptor, account: account, epoch: control.epoch,
                 localPath: sourceURL.path, bookmark: bookmark, identity: expectedSourceIdentity,
-                transferState: "complete", parents: parents, in: database)
+                transferState: "complete", parents: parents, publicationRecordID: event.record.recordID, in: database)
             try storeSyncUpload(event, subjectID: objectID.uuidString, account: account, in: database)
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)
@@ -151,7 +151,7 @@ extension ClipboardHistoryModule {
         }
         try validateSyncFileDescriptor(version.descriptor, epoch: record.epoch, keyID: record.keyID)
         try storeSyncFileDescriptor(version.descriptor, account: account, epoch: record.epoch,
-            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", parents: version.parents, in: database)
+            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", parents: version.parents, publicationRecordID: record.recordID, in: database)
     }
 
     static func reduceSyncFileVersions(descriptor: ClipboardSyncFileDescriptor, accountID: String,

@@ -13,7 +13,7 @@ extension ClipboardHistoryModule {
 
     static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
         try Row.fetchAll(database, sql: """
-            SELECT version.descriptor, completed.version_id AS complete_version_id,
+            SELECT member.account_id, member.epoch, version.descriptor, completed.version_id AS complete_version_id,
                    completed.transfer_state, completed.local_path, completed.local_identity
             FROM clipboard_sync_file_members AS member
             JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
@@ -41,9 +41,11 @@ extension ClipboardHistoryModule {
                     case .unsupportedKind: .unsupportedKind
                     }
                 }
+                let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
-                    availableVersionID: available ? completeVersion : nil)
+                    availableVersionID: available ? completeVersion : nil, transferredByteCount: transfer.bytes,
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending)
             }
     }
 
@@ -230,7 +232,7 @@ extension ClipboardHistoryModule {
     ) throws {
         try validateSyncFileDescriptor(descriptor, epoch: record.epoch, keyID: record.keyID)
         try storeSyncFileDescriptor(descriptor, account: account, epoch: record.epoch,
-            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", in: database)
+            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", publicationRecordID: record.recordID, in: database)
         try database.execute(sql: """
             INSERT INTO clipboard_sync_file_members
                 (account_id, epoch, entry_id, item_index, representation_index, object_id, version_id, origin)
@@ -242,7 +244,7 @@ extension ClipboardHistoryModule {
     func storeSyncFileDescriptor(
         _ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID,
         localPath: String?, bookmark: Data?, identity: Data?, transferState: String,
-        parents: [UUID] = [], in database: Database
+        parents: [UUID] = [], publicationRecordID: String? = nil, in database: Database
     ) throws {
         let data = try JSONEncoder().encode(descriptor)
         if let existing = try Data.fetchOne(database, sql: """
@@ -264,10 +266,10 @@ extension ClipboardHistoryModule {
         try database.execute(sql: """
             INSERT INTO clipboard_sync_file_versions
                 (account_id, epoch, object_id, version_id, descriptor, transfer_state,
-                 local_path, local_bookmark, local_identity, parents)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 local_path, local_bookmark, local_identity, parents, publication_record_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString,
-                descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity, try JSONEncoder().encode(parents)])
+                descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity, try JSONEncoder().encode(parents), publicationRecordID])
         try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
             epoch: epoch, complete: transferState == "complete", in: database)
     }
@@ -285,7 +287,7 @@ extension ClipboardHistoryModule {
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
-                      AND member.origin = 'remote' AND \(Self.liveSyncFileMember))
+                      AND \(Self.liveSyncFileMember))
                 """, arguments: [account.identifier, control.epoch.uuidString]).map {
                     try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: $0)
                 }
@@ -294,6 +296,7 @@ extension ClipboardHistoryModule {
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }
+            do {
             let output: ClipboardSyncPublishedFile
             if descriptor.bodyFormat == .segmentsV1 {
                 guard let completed = try await receiveSegmentedSyncFile(descriptor, account: account, control: control,
@@ -342,6 +345,10 @@ extension ClipboardHistoryModule {
                 try faultInjector.check(.databaseTransaction)
             }
             publishMutation()
+            } catch {
+                try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
+                throw error
+            }
         }
     }
 

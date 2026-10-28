@@ -605,6 +605,39 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testInterruptedLargeDownloadRetainsProgressAndRetriesOnlyMissingSegmentsAfterReopen() async throws {
+        let bytes = Data(repeating: 0x68, count: 9_000_001)
+        let fixture = try await fileFixture(names: ["Resume.bin"], contents: [bytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let initialPage = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(initialPage.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.failFileSegmentOnce(at: 1)
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let interruptedPage = try await fixture.receiver.page(.init())
+        let interrupted = try XCTUnwrap(interruptedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(interrupted.transferredByteCount, 4_194_304)
+        XCTAssertEqual(interrupted.transferFailure, .network)
+        XCTAssertEqual(interrupted.state, .waitingForDownload)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
+        let persistedPage = try await reopened.page(.init())
+        let persisted = try XCTUnwrap(persistedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(persisted.transferredByteCount, 4_194_304)
+        XCTAssertEqual(persisted.transferFailure, .network)
+        await reopened.resumeSync()
+        let completedPage = try await reopened.page(.init())
+        let completed = try XCTUnwrap(completedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(completed.state, .complete)
+        XCTAssertNil(completed.transferFailure)
+        let indices = await fixture.cloud.requestedFileSegments()
+        XCTAssertEqual(indices, [0, 1, 1, 2])
+        let content = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let reference) = content.items[0].representations[0] else { return XCTFail("Missing complete file") }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), bytes)
+    }
+
+    @MainActor
     func testReopeningAfterWorkingFileRemovalDoesNotClaimACompleteFile() async throws {
         let fixture = try await fileFixture(names: ["Removable.txt"], contents: [Data("complete bytes".utf8)])
         try await fixture.receiver.setSyncEnabled(true)
@@ -2170,6 +2203,10 @@ private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {
 }
 
 private actor SyncTestCloud: ClipboardSyncTransport {
+    private var failedFileSegment: Int?
+    private var fileSegmentRequests: [Int] = []
+    func failFileSegmentOnce(at index: Int) { failedFileSegment = index }
+    func requestedFileSegments() -> [Int] { fileSegmentRequests }
     private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
@@ -2296,6 +2333,11 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return try commit(.init(record: upload.record, chunks: chunks), for: account, control: control)
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) throws -> Data {
+        fileSegmentRequests.append(index)
+        if failedFileSegment == index {
+            failedFileSegment = nil
+            throw ClipboardSyncServiceError.network(retryAfter: nil)
+        }
         let chunks = try download(record, for: account)
         guard chunks.indices.contains(index) else { throw ClipboardSyncServiceError.corruptData }
         return chunks[index]

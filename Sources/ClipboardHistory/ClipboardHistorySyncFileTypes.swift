@@ -7,16 +7,35 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
     public let originalByteCount: Int64?
     public let state: ClipboardHistorySyncFileState
     public let availableVersionID: UUID?
+    public let transferredByteCount: Int64
+    public let transferFailure: ClipboardHistorySyncFileFailure?
+    public let downloadRequested: Bool
+    public let uploadPending: Bool
 
     public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState,
-        availableVersionID: UUID? = nil) {
+        availableVersionID: UUID? = nil, transferredByteCount: Int64 = 0,
+        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false) {
         self.id = id
         self.versionID = versionID
         self.displayName = displayName
         self.originalByteCount = originalByteCount
         self.state = state
         self.availableVersionID = availableVersionID
+        self.transferredByteCount = transferredByteCount
+        self.transferFailure = transferFailure
+        self.downloadRequested = downloadRequested
+        self.uploadPending = uploadPending
     }
+}
+
+public enum ClipboardHistorySyncFileFailure: String, Codable, Sendable {
+    case network, quota, localStorage, corruptData, accessDenied, accountChanged, keyUnavailable, unavailable
+}
+
+struct ClipboardSyncOwnedFileTransfer: Sendable {
+    let objectID: UUID
+    let versionID: UUID
+    let record: ClipboardSyncRemoteRecord
 }
 
 public enum ClipboardHistorySyncFileState: String, Sendable {

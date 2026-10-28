@@ -290,6 +290,9 @@ extension ClipboardHistoryModule {
                     }
                     try await admitSync(generation, account: account, services: services)
                     control = refreshed
+                } catch {
+                    try recordSyncFileUploadFailure(error, record: upload.record, generation: generation)
+                    throw error
                 }
             }
             state.lastCompletedAt = now()
