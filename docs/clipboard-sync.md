@@ -56,6 +56,10 @@ current location and choose the intended file; its contents are preserved. A rem
 top-level source detaches that location without deleting other shared copies. Removing
 an item inside a tracked folder is a change to that folder's contents.
 
+After replacing a linked file or folder, AnyDoor keeps the previous output beside
+it with an `AnyDoor update` suffix. An editor may still save through its old open
+file descriptor, so these visible copies are retained for you to review and remove.
+
 ## Conflicts and application updates
 
 Concurrent edits remain available for review. Open the text or file conflict action,
