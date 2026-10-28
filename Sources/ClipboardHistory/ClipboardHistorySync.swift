@@ -61,13 +61,20 @@ extension ClipboardHistoryModule {
             let accountID = try syncSettings(in: database).accountID ?? ""
             // Final-tag withdrawal has its own lifecycle. Additional selected
             // collections already share the same any-tag eligibility query.
-            guard selected else {
+            guard try selected || canDeselectSyncTag(tagID, accountID: accountID, in: database) else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             try database.execute(sql: """
-                INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, locally_authorized) VALUES (?, ?, 1, 1)
-                ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = 1, locally_authorized = 1
-                """, arguments: [accountID, tagID])
+                INSERT INTO clipboard_sync_tags(account_id, tag_id, selected, locally_authorized) VALUES (?, ?, ?, 1)
+                ON CONFLICT(account_id, tag_id) DO UPDATE SET selected = excluded.selected, locally_authorized = 1
+                """, arguments: [accountID, tagID, selected])
+            if selected {
+                try database.execute(sql: """
+                    DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
+                      AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
+                    """, arguments: [accountID, tagID])
+            }
+            try Self.bumpHistoryRevision(in: database)
         }
         publishSyncStatus()
         if !syncSuspended { await retrySync() }

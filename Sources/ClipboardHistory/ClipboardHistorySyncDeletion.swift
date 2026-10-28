@@ -192,7 +192,8 @@ extension ClipboardSyncContent {
         case .textEdit(let value): value.id.uuidString.lowercased()
         case .entry(let value): value.id.uuidString.lowercased()
         case .tagMembership(let value): value.sharedID
-        case .deletion, .tag, .tagState, .fileBody: nil
+        case .metadata(let value): value.id.uuidString.lowercased()
+        case .deletion, .tag, .tagState, .tagMerge, .fileBody: nil
         }
     }
 }
