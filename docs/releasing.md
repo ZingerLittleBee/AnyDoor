@@ -57,7 +57,7 @@ flowchart LR
 | `test` | macOS | `contents: read` | none | Reuses `ci.yml` through `workflow_call` on the tag commit, skipping its universal build. |
 | `build` | macOS (`xcode-27`) | `contents: read` | none | `build.sh` and `assemble.sh`: universal release build, assembled but unsigned `AnyDoor.app`. Uses no cache. |
 | `plugins` | ubuntu | `contents: read` | none | `pnpm verify`, then deterministic `plugin-<id>.zip` archives. |
-| `package-signed` | macOS (`xcode-27`) | `contents: read`, `id-token: write`, `attestations: write` | all release secrets | Developer ID signing, notarization and stapling of the app and DMG, Sparkle zip, appcast, `SHA256SUMS`, build provenance attestation. |
+| `package-signed` | macOS (`xcode-27`) | `contents: read`, `id-token: write`, `attestations: write` | all release secrets | Profile-authorized Developer ID signing, notarization and stapling of the app and DMG, Sparkle zip, appcast, `SHA256SUMS`, build provenance attestation. |
 | `publish` | ubuntu | `contents: write`, `attestations: read` | none | Verifies `SHA256SUMS` and attestations, then `publish_release.py`: binds one draft by release id (the tag must peel to the built commit), uploads with retry and reconciliation, compares remote assets by sha256 digest, and publishes that id with `make_latest=false` once it is the tag's only release. |
 | `feed` | ubuntu | `contents: read` | Cloudflare (`feed-production`) | [`deploy-feed.yml`](../.github/workflows/deploy-feed.yml): requires an immutable Release, verifies the `appcast.xml` asset against the release attestation, its feed signature against `SPARKLE_PUBLIC_ED_KEY`, and its content against the tag; rejects a rollback of either channel head; deploys it byte for byte and compares the live bytes. |
 | `latest` | ubuntu | `contents: write` | none | Stable only: marks the Release as latest once the feed is live, so the GitHub `latest/download/appcast.xml` path (clients up to 4.1.0) moves together with the canonical feed. Fails without changing anything if a newer Stable is already published. |
@@ -201,6 +201,26 @@ Dispatch it manually with `workflow_dispatch` to rehearse `main`.
 Neither rehearsal exercises Developer ID signing, notarization, the real Sparkle key,
 `publish`, or the deployments. The first real run is the cutover Beta.
 
+### Clipboard Sync capabilities
+
+Developer ID signing requires an explicit AnyDoor provisioning profile. The
+trusted signing job decodes `ANYDOOR_PROVISIONING_PROFILE_BASE64` into a temporary
+file and passes its path to `codesign.sh --profile`. The script validates the
+profile before signing, embeds it as `Contents/embedded.provisionprofile`, and
+generates concrete CloudKit and Keychain entitlements from `release.conf`.
+
+The profile must authorize the repository's team, explicit bundle identifier,
+selected signing certificate, production CloudKit container/environment, and
+application Keychain group. Expired, development, foreign, and insufficient
+profiles fail the release; the script never silently drops these capabilities.
+Final verification checks the embedded profile, the actual signing certificate,
+the Developer ID requirement, and the main executable's and app's entitlements.
+
+Ad-hoc rehearsals retain the limited base entitlements and report native Clipboard
+Sync as unavailable. They refuse an embedded profile or a `--profile` argument.
+These packaging checks do not prove iCloud access or cross-device Keychain delivery;
+use the separate [signed acceptance procedure](testing/clipboard-sync-signing.md).
+
 ## Repository setup
 
 These are repository-setting and credential changes. Each one needs the owner's
@@ -220,6 +240,7 @@ explicit go-ahead; nothing in this repository performs them.
    | --- | --- |
    | `DEVELOPER_ID_P12_BASE64` | Base64 of the Developer ID Application `.p12` (consider a CI-only certificate so a CI compromise revokes only that one) |
    | `DEVELOPER_ID_P12_PASSWORD` | The `.p12` export password |
+   | `ANYDOOR_PROVISIONING_PROFILE_BASE64` | Base64 of the Developer ID provisioning profile authorizing AnyDoor's CloudKit container and Data Protection Keychain group; see [signed acceptance setup](testing/clipboard-sync-signing.md) |
    | `ASC_API_KEY_P8` | Contents of the App Store Connect Team API key `.p8` (least-privileged role that can notarize; confirm on the first submission) |
    | `SPARKLE_ED_PRIVATE_KEY` | The existing Sparkle EdDSA private key, exported as below |
 

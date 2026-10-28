@@ -437,9 +437,29 @@ jobs:
         env:
           DEVELOPER_ID_SHA1: ${{ vars.DEVELOPER_ID_SHA1 }}
           KEYCHAIN_PATH: ${{ steps.keychain.outputs.keychain_path }}
+          ANYDOOR_PROVISIONING_PROFILE_BASE64: ${{ secrets.ANYDOOR_PROVISIONING_PROFILE_BASE64 }}
         run: |
+          profile_dir="$(mktemp -d "$RUNNER_TEMP/anydoor-profile.XXXXXX")"
+          trap 'rm -rf "$profile_dir"' EXIT
+          export PROFILE_PATH="$profile_dir/AnyDoor.provisionprofile"
+          python3 - <<'PY'
+          import base64
+          import binascii
+          import os
+          from pathlib import Path
+
+          encoded = "".join(os.environ.get("ANYDOOR_PROVISIONING_PROFILE_BASE64", "").split())
+          if not encoded:
+              raise SystemExit("ANYDOOR_PROVISIONING_PROFILE_BASE64 is required for Clipboard Sync signing")
+          try:
+              profile = base64.b64decode(encoded, validate=True)
+          except (binascii.Error, ValueError):
+              raise SystemExit("ANYDOOR_PROVISIONING_PROFILE_BASE64 must be valid base64") from None
+          os.umask(0o077)
+          Path(os.environ["PROFILE_PATH"]).write_bytes(profile)
+          PY
           scripts/release/codesign.sh --app "$RUNNER_TEMP/work/AnyDoor.app" \
-            --identity "$DEVELOPER_ID_SHA1" --keychain "$KEYCHAIN_PATH"
+            --identity "$DEVELOPER_ID_SHA1" --keychain "$KEYCHAIN_PATH" --profile "$PROFILE_PATH"
 
       # notarize.sh writes the API key into a private temp dir it removes on
       # exit, so the key file never outlives the step.
