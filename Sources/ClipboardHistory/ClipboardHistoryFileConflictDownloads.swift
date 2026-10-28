@@ -84,12 +84,60 @@ extension ClipboardHistoryModule {
             AND pin.download_requested = 1 AND pin.download_completed = 0)
         """
 
+    static let automaticFileConflictDownload = """
+        EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates AS candidate
+          WHERE candidate.account_id = version.account_id AND candidate.epoch = version.epoch
+            AND candidate.object_id = version.object_id AND candidate.version_id = version.version_id AND candidate.completed = 0)
+        """
+
+    /// The size rule applies to every conflicting head, including heads which
+    /// are not selected. Receiving those bytes does not choose their contents.
+    func stageAutomaticFileConflictDownloads(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws {
+        try syncWrite { database in
+            let objects = try String.fetchAll(database, SQLRequest<String>(literal: """
+                SELECT DISTINCT member.object_id FROM clipboard_sync_file_members AS member
+                JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                WHERE member.account_id = \(account.identifier) AND member.epoch = \(control.epoch.uuidString)
+                  AND \(SQL(sql: Self.liveSyncFileMember))
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+                """))
+            for object in objects {
+                let rows = try Row.fetchAll(database, sql: """
+                    SELECT version_id, parents, descriptor FROM clipboard_sync_file_versions
+                    WHERE account_id = ? AND epoch = ? AND object_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, object])
+                let nodes = try rows.map { row -> ClipboardSyncVersionNode in
+                    guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                    return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                }
+                let heads = ClipboardSyncVersionGraph.heads(nodes)
+                guard heads.count > 1, ClipboardSyncVersionGraph.isComplete(nodes),
+                      let current = try String.fetchOne(database, sql: """
+                        SELECT current_version_id FROM clipboard_sync_file_selections WHERE account_id = ? AND epoch = ? AND object_id = ?
+                        """, arguments: [account.identifier, control.epoch.uuidString, object]) else { continue }
+                for row in rows {
+                    let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+                    guard heads.contains(descriptor.versionID), descriptor.versionID.uuidString != current,
+                          descriptor.state == .available, let size = descriptor.originalByteCount,
+                          size <= Self.automaticSyncFileDownloadBytes else { continue }
+                    try database.execute(sql: """
+                        INSERT OR IGNORE INTO clipboard_sync_file_auto_candidates(account_id, epoch, object_id, version_id)
+                        VALUES (?, ?, ?, ?)
+                        """, arguments: [account.identifier, control.epoch.uuidString, object, descriptor.versionID.uuidString])
+                }
+            }
+        }
+    }
+
     func isFileConflictDownload(_ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID) throws -> Bool {
         try linkedRead { database in
             try Bool.fetchOne(database, sql: """
                 SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins
                   WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND download_requested = 1)
-                """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                  OR EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
         }
     }
 

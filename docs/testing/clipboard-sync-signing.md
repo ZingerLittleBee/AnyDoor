@@ -190,6 +190,9 @@ undownloaded. Choosing the local bytes makes no request for the unchosen body.
 Explicit candidate downloads preserve both current/complete selections and dirty
 linked bytes until confirmation. Retained interrupted branches can be recovered
 from local ciphertext without a cloud body request.
+Exact 5,000,000-byte and 5,000,001-byte non-current conflict heads verify automatic
+small-candidate receipt versus explicit large-candidate consent, with neither
+transfer selecting its contents or moving the last complete version.
 
 [Host conflict tests](../../Tests/AnyDoorTests/ClipboardFileConflictPresentationTests.swift)
 drive the production presentation model and real module for cancellation, stale

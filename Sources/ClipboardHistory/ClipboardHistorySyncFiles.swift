@@ -333,12 +333,14 @@ extension ClipboardHistoryModule {
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
         services: ClipboardSyncServices, generation: UInt64
     ) async throws {
+        try stageAutomaticFileConflictDownloads(account: account, control: control)
         let descriptors = try syncFileRead { database in
             try Data.fetchAll(database, sql: """
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
                 WHERE version.account_id = ? AND version.epoch = ?
-                  AND ((transfer_state != 'complete' AND version.version_id = choice.current_version_id) OR \(Self.pinnedFileConflictDownload))
+                  AND ((transfer_state != 'complete' AND version.version_id = choice.current_version_id)
+                    OR \(Self.pinnedFileConflictDownload) OR \(Self.automaticFileConflictDownload))
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
@@ -407,7 +409,9 @@ extension ClipboardHistoryModule {
                 let pinned = try Bool.fetchOne(database, sql: """
                     SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins WHERE account_id = ? AND epoch = ?
                       AND object_id = ? AND version_id = ? AND download_requested = 1)
-                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
+                      OR EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                        account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
                 if !pinned {
                     try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
                         epoch: control.epoch, complete: true, in: database)
@@ -415,6 +419,10 @@ extension ClipboardHistoryModule {
                 try database.execute(sql: """
                     UPDATE clipboard_sync_file_conflict_pins SET download_completed = 1
                     WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND download_requested = 1
+                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_auto_candidates SET completed = 1
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
                     """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
@@ -440,7 +448,9 @@ extension ClipboardHistoryModule {
                       AND (choice.current_version_id = \(descriptor.versionID.uuidString) OR EXISTS(
                         SELECT 1 FROM clipboard_sync_file_conflict_pins AS pin WHERE pin.account_id = member.account_id
                           AND pin.epoch = member.epoch AND pin.object_id = member.object_id
-                          AND pin.version_id = \(descriptor.versionID.uuidString) AND pin.download_requested = 1))
+                          AND pin.version_id = \(descriptor.versionID.uuidString) AND pin.download_requested = 1)
+                        OR EXISTS(SELECT 1 FROM clipboard_sync_file_auto_candidates AS candidate WHERE candidate.account_id = member.account_id
+                          AND candidate.epoch = member.epoch AND candidate.object_id = member.object_id AND candidate.version_id = \(descriptor.versionID.uuidString)))
                       AND \(SQL(sql: Self.liveSyncFileMember)) AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier))))
                 """)) ?? false
         }

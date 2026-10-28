@@ -7,6 +7,46 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testSmallNoncurrentConflictHeadDownloadsAutomaticallyWithoutSelection() async throws {
+        try await assertAutomaticConflictCandidate(byteCount: 5_000_000, expectedAvailable: true)
+    }
+
+    @MainActor
+    func testLargeNoncurrentConflictHeadRequiresItsOwnDownloadConsent() async throws {
+        try await assertAutomaticConflictCandidate(byteCount: 5_000_001, expectedAvailable: false)
+    }
+
+    @MainActor
+    private func assertAutomaticConflictCandidate(byteCount: Int, expectedAvailable: Bool) async throws {
+        let fixture = try await makeLinkedFixture()
+        let originalLocations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(originalLocations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        let currentBytes = Data("current independently published bytes".utf8)
+        try currentBytes.write(to: fixture.original)
+        try await fixture.sender.setSyncEnabled(true)
+        let before = try await fixture.sender.syncFileSelection(objectID: original.objectID)
+        try await fixture.sender.setSyncEnabled(false)
+        let otherID = UUID()
+        let candidateBytes = Data(repeating: 0x67, count: byteCount)
+        _ = try await commitConflictRemoteFile(bytes: candidateBytes, versionID: otherID,
+            parents: [original.baseVersionID], objectID: original.objectID,
+            root: fixture.root, services: fixture.services, cloud: fixture.cloud)
+        try await fixture.sender.setSyncEnabled(true)
+        let plan = try await fixture.sender.fileConflictPlan(entryID: fixture.entryID, objectID: original.objectID)
+        let candidate = try XCTUnwrap(plan.candidates.first { $0.id == .version(otherID) })
+        XCTAssertEqual(candidate.availability, expectedAvailable ? .available : .requiresDownload)
+        let after = try await fixture.sender.syncFileSelection(objectID: original.objectID)
+        XCTAssertEqual(after?.latest.versionID, before?.latest.versionID)
+        XCTAssertEqual(after?.complete?.descriptor.versionID, before?.complete?.descriptor.versionID)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), currentBytes)
+        let downloaded = await fixture.cloud.downloadedFileVersions()
+        XCTAssertEqual(downloaded.contains(otherID), expectedAvailable)
+        if expectedAvailable { XCTAssertEqual(try Data(contentsOf: XCTUnwrap(candidate.localURL)), candidateBytes) }
+    }
+
+    @MainActor
     func testDeletedEntryCannotResumeAnInterruptedResolutionOrBlockOtherSync() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.fileConflictAfterBranchFreeze]))
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)

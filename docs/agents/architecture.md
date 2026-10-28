@@ -251,7 +251,11 @@ those branches and one causal merge through the existing encrypted transfer path
 Saved changes or new heads invalidate the displayed choice. Existing final
 replacement admission still controls every physical linked-file update.
 
-An explicit candidate download authorizes only that object/version and publishes
+Every complete conflicting head at or below 5,000,000 bytes is obtained
+automatically, including non-current heads. Larger candidates require explicit
+per-version download consent. Candidate transfers use their own completion cursor
+and preserve existing working-file availability. An explicit candidate download
+authorizes only that object/version and publishes
 an ordinary verified file under the visible working root's `Conflict Versions`
 directory. It does not select the candidate or move the last complete version.
 Choosing an available old large version does not fetch unchosen newer bodies.

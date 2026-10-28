@@ -43,6 +43,11 @@ extension ClipboardHistoryModule {
                 download_completed INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(plan_id, version_id)
             ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_file_auto_candidates (
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, version_id TEXT NOT NULL,
+                completed INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account_id, epoch, object_id, version_id)
+            ) WITHOUT ROWID;
             """)
     }
 
