@@ -27,7 +27,8 @@ extension ClipboardHistoryModule {
                     arguments: [accountID]) ?? 0
                 return ClipboardHistorySyncStatus(isEnabled: true,
                     phase: phase,
-                    uploadedEntryCount: uploaded, receivedEntryCount: received, lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
+                    uploadedEntryCount: uploaded, receivedEntryCount: received,
+                    withdrawnEntryCount: try syncWithdrawnCount(accountID: accountID, in: database), lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
             }
         } catch {
             return ClipboardHistorySyncStatus(isEnabled: true, phase: .failed(.localStorage))
@@ -81,6 +82,9 @@ extension ClipboardHistoryModule {
                     DELETE FROM clipboard_sync_tag_blocked_entries WHERE account_id = ?
                       AND local_entry_id IN (SELECT entry_id FROM clipboard_entry_tags WHERE tag_id = ?)
                     """, arguments: [accountID, tagID])
+            }
+            if selected, let activation = try recordExplicitSyncTagActivation(tagID, in: database) {
+                try authorizeSyncRejoin(tagID: tagID, revision: activation, in: database)
             }
             try recordSyncWithdrawals(in: database)
             try Self.bumpHistoryRevision(in: database)
@@ -328,9 +332,12 @@ extension ClipboardHistoryModule {
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
-            try stageSyncBackfill(account: account, control: control, key: key)
             var conflicts = 0
-            while let upload = try nextSyncUpload(account: account, control: control) {
+            while true {
+                // A local tag mutation can arrive while a provider request is
+                // suspended. Drain its durable authority before another upload.
+                try stageSyncBackfill(account: account, control: control, key: key)
+                guard let upload = try nextSyncUpload(account: account, control: control) else { break }
                 do {
                     try await admitSync(generation, account: account, services: services)
                     guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",

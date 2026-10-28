@@ -36,7 +36,8 @@ extension ClipboardHistoryModule {
                 WHERE content.account_id = ? AND content.epoch = ? AND content.purged = 0
                   AND ((deleted.shared_id IS NOT NULL AND (deleted.origin = 'remote' OR EXISTS (
                     SELECT 1 FROM clipboard_sync_outbox AS marker WHERE marker.record_id = deleted.record_id AND marker.acknowledged = 1)))
-                    OR (withdrawal.withdrawn = 1 AND (withdrawal.origin = 'remote' OR EXISTS (
+                    OR (withdrawal.withdrawn = 1 AND json_extract(content.metadata, '$.kind') != 'tag'
+                      AND (withdrawal.origin = 'remote' OR EXISTS (
                     SELECT 1 FROM clipboard_sync_outbox AS marker WHERE marker.record_id = withdrawal.record_id AND marker.acknowledged = 1))))
                 ORDER BY content.record_id LIMIT 1
                 """, arguments: [account.identifier, control.epoch.uuidString])

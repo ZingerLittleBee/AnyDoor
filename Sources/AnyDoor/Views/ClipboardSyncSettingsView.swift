@@ -42,7 +42,7 @@ struct ClipboardSyncSettingsView: View {
                             Text(L(.settingsClipboardSyncTagCount, model.tagTitle(tag), tag.eligibleEntryCount))
                         }
                         .toggleStyle(.checkbox)
-                        .disabled(!isStoreReady || !model.canSelectTag || (tag.isSelected && !tag.canDeselect))
+                        .disabled(!isStoreReady || !model.canSelectTag)
                         Spacer()
                         let candidates = model.tags.filter {
                             $0.id != tag.id && $0.displayName == tag.displayName && ($0.isSelected || tag.isSelected)
@@ -61,6 +61,19 @@ struct ClipboardSyncSettingsView: View {
                             .disabled(!isStoreReady || !model.canSelectTag)
                         }
                     }
+                    if tag.isSelected && tag.withdrawalEntryCount > 0 {
+                        Text(L(.settingsClipboardSyncWithdrawalScope, tag.withdrawalEntryCount))
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if tag.rejoinEntryCount > 0 {
+                        Text(L(.settingsClipboardSyncRejoinScope, tag.rejoinEntryCount))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if tag.isSelected && tag.rejoinEntryCount > 0 {
+                        Button(L(.settingsClipboardSyncRejoinAction)) {
+                            Task { await model.selectTag(tag.id) }
+                        }
+                        .disabled(!isStoreReady || !model.canSelectTag)
+                    }
                     if tag.requiresLocalAuthorization {
                         Button(L(.settingsClipboardSyncAuthorizeRetained, model.tagTitle(tag))) {
                             Task { await model.selectTag(tag.id) }
@@ -73,11 +86,9 @@ struct ClipboardSyncSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if model.tags.contains(where: { $0.isSelected && !$0.canDeselect }) {
-                    LocalizedText(.settingsClipboardSyncSelectedTagHelp)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                LocalizedText(.settingsClipboardSyncSharingScope)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(alignment: .top) {
@@ -95,6 +106,11 @@ struct ClipboardSyncSettingsView: View {
                     }
                     .disabled(!isStoreReady || model.isPerformingAction)
                 }
+            }
+
+            if model.status.withdrawnEntryCount > 0 {
+                Text(L(.settingsClipboardSyncWithdrawnStatus, model.status.withdrawnEntryCount))
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             if !model.preservedEdits.isEmpty {

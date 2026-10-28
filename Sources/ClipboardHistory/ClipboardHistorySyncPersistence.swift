@@ -19,7 +19,8 @@ extension ClipboardHistoryModule {
                     try ClipboardHistorySyncTag(
                         id: row["id"], displayName: row["display_name"],
                         isSelected: selected.contains(row["id"]), eligibleEntryCount: row["eligible_count"],
-                        canDeselect: !selected.contains(row["id"]) || canDeselectSyncTag(row["id"], accountID: accountID, in: database),
+                        withdrawalEntryCount: syncTagWithdrawalCount(row["id"], accountID: accountID, in: database),
+                        rejoinEntryCount: syncWithdrawnCount(tagID: row["id"], accountID: accountID, in: database),
                         requiresLocalAuthorization: selected.contains(row["id"]) && syncTagRequiresLocalAuthorization(
                             row["id"], accountID: accountID, in: database)
                     )
@@ -40,28 +41,41 @@ extension ClipboardHistoryModule {
             """, arguments: [tagID, accountID]) ?? false
     }
 
-    /// Until withdrawal is available, changing selection must leave every
-    /// potentially shared entry eligible through another selected tag.
-    func canDeselectSyncTag(_ tagID: String, accountID: String, in database: Database) throws -> Bool {
-        try Int.fetchOne(database, sql: """
-            SELECT COUNT(*) FROM clipboard_entry_tags AS membership
-            WHERE membership.tag_id = ? AND NOT EXISTS (
-                SELECT 1 FROM clipboard_entry_tags AS other
+    private func syncTagWithdrawalCount(_ tagID: String, accountID: String, in database: Database) throws -> Int {
+        try Int.fetchOne(database, SQLRequest<Int>(literal: """
+            SELECT COUNT(*) FROM clipboard_entries AS entry
+            WHERE (\(Self.syncEntryPublicationAuthority(accountID: accountID)))
+              AND EXISTS (SELECT 1 FROM clipboard_sync_entries WHERE local_entry_id = entry.id AND account_id = \(accountID))
+              AND EXISTS (SELECT 1 FROM clipboard_entry_tags WHERE entry_id = entry.id AND tag_id = \(tagID))
+              AND NOT EXISTS (SELECT 1 FROM clipboard_entry_tags AS other
                 JOIN clipboard_sync_tags AS selected ON selected.tag_id = other.tag_id
-                WHERE other.entry_id = membership.entry_id AND other.tag_id != membership.tag_id
-                  AND selected.account_id = ? AND selected.selected = 1)
-            """, arguments: [tagID, accountID]) == 0
+                WHERE other.entry_id = entry.id AND other.tag_id != \(tagID)
+                  AND selected.account_id = \(accountID) AND selected.selected = 1)
+            """)) ?? 0
+    }
+
+    func syncWithdrawnCount(tagID: String? = nil, accountID: String, in database: Database) throws -> Int {
+        try Int.fetchOne(database, sql: """
+            SELECT COUNT(DISTINCT entry.id) FROM clipboard_entries AS entry
+            JOIN clipboard_sync_entries AS shared ON shared.local_entry_id = entry.id
+            JOIN clipboard_sync_withdrawals AS withdrawal ON withdrawal.account_id = shared.account_id
+                AND withdrawal.epoch = shared.epoch AND withdrawal.shared_id = shared.shared_id
+            WHERE shared.account_id = ? AND withdrawal.withdrawn = 1
+              AND (? IS NULL OR EXISTS (SELECT 1 FROM clipboard_entry_tags WHERE entry_id = entry.id AND tag_id = ?))
+              AND NOT EXISTS (SELECT 1 FROM clipboard_sync_deletions AS deleted WHERE deleted.account_id = shared.account_id
+                  AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id)
+            """, arguments: [accountID, tagID, tagID]) ?? 0
     }
 
     /// Publication authority for the fixed `entry` SQL alias. Values remain
     /// bound inside the literal so callers never manage this predicate's slots.
-    static func syncEntryPublicationAuthority(accountID: String) -> SQL {
+    static func syncEntryPublicationAuthority(accountID: String, includingWithdrawn: Bool = false) -> SQL {
         """
         NOT EXISTS (SELECT 1 FROM clipboard_sync_preserved_edits WHERE local_entry_id = entry.id)
-        AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
+        AND (\(includingWithdrawn) OR NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
             JOIN clipboard_sync_withdrawals AS withdrawal ON withdrawal.account_id = shared.account_id
                 AND withdrawal.epoch = shared.epoch AND withdrawal.shared_id = shared.shared_id
-            WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID) AND withdrawal.withdrawn = 1)
+            WHERE shared.local_entry_id = entry.id AND shared.account_id = \(accountID) AND withdrawal.withdrawn = 1))
         AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
             JOIN clipboard_sync_deletions AS deleted ON deleted.account_id = shared.account_id
                 AND deleted.epoch = shared.epoch AND deleted.shared_id = shared.shared_id

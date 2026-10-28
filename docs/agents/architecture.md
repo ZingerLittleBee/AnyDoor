@@ -93,7 +93,7 @@ encrypted version descriptors and bodies. `v15_clipboard_sync_tags` adds per-tag
 revisions, selected associations, merge aliases, and account-specific enrollment
 guards; `v19_clipboard_sync_files` stores file versions and ordered membership.
 Versioned text edits and explicit text conflict resolution are supported. Further
-file lifecycle, withdrawal, and cloud reset behavior follow the
+file lifecycle behavior follows the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Selected definitions and associations use independent encrypted operations;
@@ -106,9 +106,18 @@ converge by a persisted logical revision and operation identity, not delivery or
 A merge uses the smallest existing ID as the canonical identity, so overlapping
 merges converge without cycles. A remote merge never grants permission to move
 retained history between Apple Accounts; Settings exposes explicit local enrollment.
-Removing a selection that would lose the final matching tag remains unavailable
-until the withdrawal slice is implemented. Local copies still follow tag-protection
-and retention rules.
+Losing the final selected tag records an encrypted withdrawal in
+`v21_clipboard_sync_withdrawal`; another selected tag keeps the entry shared.
+Acknowledged withdrawal uses the same conditional cleanup ledger as permanent
+deletion to purge cloud content while retaining local history and minimal opaque
+association state. Local copies still follow tag-protection and retention rules.
+Explicit tag selection, reassignment, or a confirmed merge can rejoin the original
+shared identity. A rejoin checkpoint carries the original text ancestry and
+independent metadata/membership revisions, so retained offline edits use the
+existing conflict workflow and stale snapshots cannot restore old associations.
+Tag rename/replay alone never authorizes rejoining. Publication checks preserve
+independent deletion, saved-edit, account, and reset exclusions. Settings reports
+the local withdrawal/rejoin counts and the shared scope of selection changes.
 
 The initial encrypted entry envelope retains every supported item and standard
 representation in order: exact text and links, rich text bytes, standard colors,

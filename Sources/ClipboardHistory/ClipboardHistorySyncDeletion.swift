@@ -203,6 +203,7 @@ extension ClipboardHistoryModule {
 extension ClipboardSyncContent {
     var entrySubjectID: String? {
         switch self {
+        case .rejoin(let value): value.state.sharedID
         case .text(let value): value.id.uuidString.lowercased()
         case .textEdit(let value): value.id.uuidString.lowercased()
         case .entry(let value): value.id.uuidString.lowercased()

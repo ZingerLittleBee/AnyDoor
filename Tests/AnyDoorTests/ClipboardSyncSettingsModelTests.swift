@@ -7,6 +7,31 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
+    func testSettingsCanWithdrawAndRejoinTheLastTagWhileShowingItsLocalScope() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: directory,
+            keyStore: SettingsSyncLocalKeyStore(), syncServices: .init(
+                transport: SharingSettingsSyncTransport(), keys: SharingSettingsSyncKeys(), pollingInterval: nil)))
+        let capture = try await module.capture(.init(source: .unknown, content: .text("settings retained copy")))
+        let tag = try await module.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        let model = ClipboardSyncSettingsModel(module: module)
+        await model.setEnabled(true)
+        await model.selectTag(tag.id)
+        XCTAssertEqual(model.tags.first?.withdrawalEntryCount, 1)
+        await model.selectTag(tag.id, selected: false)
+        XCTAssertFalse(model.operationFailed)
+        XCTAssertEqual(model.status.phase, .upToDate)
+        XCTAssertEqual(model.status.withdrawnEntryCount, 1)
+        XCTAssertEqual(model.tags.first?.rejoinEntryCount, 1)
+        XCTAssertEqual(model.tags.first?.isSelected, false)
+        await model.selectTag(tag.id)
+        XCTAssertEqual(model.status.withdrawnEntryCount, 0)
+        XCTAssertEqual(model.tags.first?.isSelected, true)
+        let retained = try await module.page(.init()).entries
+        XCTAssertEqual(retained.map(\.id), [capture.entryID])
+    }
+
     func testCloudResetConfirmationAndRetryRemainAvailableWithSyncOffAndKeysDenied() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         removeClipboardHistoryDirectoryAfterTest(directory)
@@ -350,6 +375,52 @@ private actor ResetSettingsSyncTransport: ClipboardSyncTransport {
     func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) throws -> ClipboardSyncCleanupPage {
         if failCleanup { failCleanup = false; throw ClipboardSyncServiceError.network(retryAfter: nil) }
         return .init(control: control, cursor: nil, deletedRecordCount: 0, hasMore: false)
+    }
+    func cancel() {}
+}
+
+private actor SharingSettingsSyncKeys: ClipboardSyncKeyStoring {
+    private var values: [UUID: Data] = [:]
+    func load(account: ClipboardSyncAccount, keyID: UUID) -> Data? { values[keyID] }
+    func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) -> Data {
+        values[keyID] = key
+        return key
+    }
+}
+
+private actor SharingSettingsSyncTransport: ClipboardSyncTransport {
+    private var descriptor: ClipboardSyncControl?
+    private var uploads: [ClipboardSyncUpload] = []
+    func account() -> ClipboardSyncAccount { .init(container: "test", environment: "test", owner: "sharing-settings") }
+    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? { descriptor }
+    func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) -> ClipboardSyncControl {
+        descriptor = candidate
+        return candidate
+    }
+    func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
+        .init(records: uploads.map(\.record), cursor: nil, hasMore: false)
+    }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+        guard let upload = uploads.first(where: { $0.record.recordID == record.recordID }) else {
+            throw ClipboardSyncServiceError.recordUnavailable
+        }
+        return upload.chunks
+    }
+    func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        guard descriptor == control else { throw ClipboardSyncServiceError.conflict }
+        uploads.append(upload)
+        return advance(control)
+    }
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+        guard descriptor == control else { throw ClipboardSyncServiceError.conflict }
+        uploads.removeAll { $0.record.recordID == record.recordID }
+        return advance(control)
+    }
+    private func advance(_ control: ClipboardSyncControl) -> ClipboardSyncControl {
+        let next = ClipboardSyncControl(accountID: control.accountID, keyID: control.keyID, keyCheck: control.keyCheck,
+            epoch: control.epoch, phase: control.phase, serverToken: Data(UUID().uuidString.utf8))
+        descriptor = next
+        return next
     }
     func cancel() {}
 }

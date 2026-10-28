@@ -89,16 +89,15 @@ extension ClipboardHistoryModule {
             let localID: String = entry["local_entry_id"]
             let current = Set(try String.fetchAll(database,
                 sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID])).intersection(selected)
-            // Loss of the final matching tag is handled by withdrawal, not an
-            // empty content update that could erase retained local membership.
-            guard !current.isEmpty else { continue }
+            guard try !Self.isSyncDeleted(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database) else { continue }
+            let withdrawn = try Self.isSyncWithdrawn(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database)
             for tagID in selected.sorted() {
                 let previous = try Bool.fetchOne(database, sql: """
                     SELECT present FROM clipboard_sync_memberships
                     WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ?
                     """, arguments: [account.identifier, epoch.uuidString, sharedID, tagID]) ?? false
                 let present = current.contains(tagID)
-                guard previous != present else { continue }
+                guard previous != present, !withdrawn || !present else { continue }
                 try saveSyncMembership(.init(sharedID: sharedID, tagID: tagID, present: present,
                     revision: nextSyncTagRevision(in: database)), account: account, epoch: epoch, pending: true, in: database)
             }

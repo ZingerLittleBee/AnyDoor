@@ -8,6 +8,366 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testOfflineRenameCannotReactivateWithdrawnContentEvenWithALaterTagRevision() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xD2, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xD3, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("rename is not consent")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        let unrelated = ClipboardHistoryTagDefinition(id: "unrelated", displayName: "Unrelated")
+        _ = try await second.replaceTagDefinitions(with: [tag, unrelated])
+        for _ in 0..<5 { try await second.setSyncTagSelected(unrelated.id, selected: true) }
+        _ = try await second.renameTagDefinition(id: tag.id, to: "Renamed while offline")
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        await second.resumeSync()
+        await first.retrySync()
+        let published = await cloud.publishedUploads()
+        XCTAssertEqual(published.filter { $0.record.kind == .entry }.count, 1)
+        let fresh = makeModule(services: services, keyByte: 0xD4, time: 3_000)
+        try await fresh.setSyncEnabled(true)
+        let entries = try await fresh.page(.init()).entries
+        XCTAssertTrue(entries.isEmpty)
+    }
+
+    func testWithdrawalCleanupResumesAfterLostResponseAndRejectsLateCiphertextAfterRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = makeModule(services: services, keyByte: 0xD5, time: 1_000, root: root)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("cleanup withdrawal")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        await cloud.loseNextPurgeResponse()
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        let failed = await first.syncStatus()
+        XCTAssertEqual(failed.phase, .failed(.network))
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xD5, time: 2_000, root: root)
+        await reopened.resumeSync()
+        await cloud.redeliverPurgedContent()
+        let fresh = makeModule(services: services, keyByte: 0xD6, time: 3_000)
+        try await fresh.setSyncEnabled(true)
+        let freshEntries = try await fresh.page(.init()).entries
+        XCTAssertTrue(freshEntries.isEmpty)
+        let retained = try await reopened.page(.init()).entries
+        XCTAssertEqual(retained.map(\.id), [capture.entryID])
+        let current = await cloud.currentUploads()
+        XCTAssertTrue(current.filter { $0.record.kind == .entry }.isEmpty)
+    }
+
+    func testSharingScopeCountsExcludeOverlapAndWithdrawalRetainsTagProtection() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0xD1, time: 1_000)
+        let only = try await module.capture(.init(source: .unknown, content: .text("only work")))
+        let overlap = try await module.capture(.init(source: .unknown, content: .text("work and other")))
+        let work = try await module.createTagDefinition(named: "Work", assigningTo: only.entryID).definition
+        let other = try await module.createTagDefinition(named: "Other", assigningTo: overlap.entryID).definition
+        _ = try await module.apply(.setTags(overlap.entryID, [work.id, other.id]))
+        try await module.setSyncTagSelected(work.id, selected: true)
+        try await module.setSyncTagSelected(other.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let before = try await module.syncTags()
+        XCTAssertEqual(before.first { $0.id == work.id }?.withdrawalEntryCount, 1)
+        XCTAssertEqual(before.first { $0.id == other.id }?.withdrawalEntryCount, 0)
+        try await module.setSyncTagSelected(work.id, selected: false)
+        let withdrawn = await module.syncStatus()
+        let after = try await module.syncTags()
+        XCTAssertEqual(withdrawn.withdrawnEntryCount, 1)
+        XCTAssertEqual(after.first { $0.id == work.id }?.rejoinEntryCount, 1)
+        let unprotected = try await module.previewClearHistory(scope: .unprotectedOnly)
+        XCTAssertEqual(unprotected.affectedCount, 0)
+        let remaining = await cloud.currentUploads()
+        XCTAssertEqual(remaining.filter { $0.record.kind == .entry }.count, 1)
+        try await module.setSyncTagSelected(work.id, selected: true)
+        let rejoined = await module.syncStatus()
+        XCTAssertEqual(rejoined.withdrawnEntryCount, 0)
+    }
+
+    func testConfirmedTagMergeExplicitlyRejoinsWithdrawnHistory() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xCE, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("merge the retained collection")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        let other = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: tag.displayName)
+        _ = try await first.replaceTagDefinitions(with: [tag, other])
+        try await first.setSyncTagSelected(other.id, selected: true)
+        let preview = try await first.prepareSyncTagMerge(sourceID: tag.id, targetID: other.id)
+        XCTAssertEqual(preview.newlyEligibleEntryCount, 1)
+        try await first.mergeSyncTags(preview)
+        let fresh = makeModule(services: services, keyByte: 0xCF, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        let restored = try await fresh.page(.init()).entries
+        XCTAssertEqual(restored.map(\.id), [capture.entryID])
+        XCTAssertEqual(restored.first?.tagIDs, [preview.canonicalTagID])
+    }
+
+    func testWithdrawalCancelsAnOfflineUploadWithoutLosingItsLaterDeletionSalvage() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xCC, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xCD, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("shared root")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        _ = try await second.apply(.editText(capture.entryID, "keep this unpublished edit"))
+        await cloud.holdNextEntryCommit()
+        let upload = Task { await second.retrySync() }
+        await cloud.waitForHeldEntryCommit()
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        await cloud.releaseEntryCommit()
+        await upload.value
+        let published = await cloud.publishedUploads()
+        XCTAssertEqual(published.filter { $0.record.kind == .entry }.count, 1)
+        _ = try await first.apply(.delete(capture.entryID))
+        await first.retrySync()
+        await second.retrySync()
+        let retained = try await second.page(.init()).entries
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertEqual(retained.first?.previewText, "keep this unpublished edit")
+        XCTAssertNotEqual(retained.first?.id, capture.entryID)
+        let notice = try await second.preservedSyncEdits()
+        XCTAssertEqual(notice.count, 1)
+    }
+
+    func testFinalTagRemovalDuringAnInFlightUploadFinishesWithOnlyRetainedLocalContent() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xCA, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("in flight initial copy")))
+        let tag = try await first.createTagDefinition(named: "Remove", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        await cloud.holdNextEntryCommit()
+        let upload = Task { try await first.setSyncEnabled(true) }
+        await cloud.waitForHeldEntryCommit()
+        _ = try await first.deleteTagDefinition(id: tag.id)
+        await cloud.releaseEntryCommit()
+        try await upload.value
+        let remaining = await cloud.currentUploads()
+        XCTAssertTrue(remaining.filter { $0.record.kind == .entry }.isEmpty)
+        let local = try await first.page(.init()).entries
+        XCTAssertEqual(local.map(\.id), [capture.entryID])
+        XCTAssertEqual(local.first?.tagIDs, [])
+        let fresh = makeModule(services: services, keyByte: 0xCB, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        let imported = try await fresh.page(.init()).entries
+        XCTAssertTrue(imported.isEmpty)
+    }
+
+    func testExplicitRetaggingRestoresTheWithdrawnIdentityAndMembership() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xC7, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xC8, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("retag to resume")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        _ = try await first.apply(.setTags(capture.entryID, []))
+        await first.retrySync()
+        await second.retrySync()
+        _ = try await first.apply(.setTags(capture.entryID, [tag.id]))
+        await first.retrySync()
+        let rejoinStatus = await first.syncStatus()
+        XCTAssertEqual(rejoinStatus.phase, .upToDate)
+        let localRetag = try await first.page(.init()).entries
+        XCTAssertEqual(localRetag.first?.tagIDs, [tag.id])
+        await cloud.reverseDelivery()
+        await second.retrySync()
+        let fresh = makeModule(services: services, keyByte: 0xC9, time: 3_000)
+        try await fresh.setSyncEnabled(true)
+        let restored = try await fresh.page(.init()).entries
+        let retained = try await second.page(.init()).entries
+        XCTAssertEqual(restored.map(\.id), [capture.entryID])
+        XCTAssertEqual(retained.first?.tagIDs, [tag.id])
+    }
+
+    func testRejoinCheckpointPreservesMetadataRevisionAgainstLateOldContent() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xC5, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("current favorite wins")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        _ = try await first.apply(.setFavorite(capture.entryID, true))
+        await first.retrySync()
+        let afterFavorite = await cloud.currentUploads()
+        let oldFavorite = try XCTUnwrap(afterFavorite.last { $0.record.kind == .entry })
+        _ = try await first.apply(.setFavorite(capture.entryID, false))
+        await first.retrySync()
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        let fresh = makeModule(services: services, keyByte: 0xC6, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        await cloud.redeliverPurgedRecord(oldFavorite.record.recordID)
+        await fresh.retrySync()
+        let restored = try await fresh.page(.init()).entries
+        XCTAssertEqual(restored.map(\.id), [capture.entryID])
+        XCTAssertFalse(try XCTUnwrap(restored.first).isFavorite)
+    }
+
+    func testOfflineWithdrawnEditsRejoinAsConflictsAcrossRestartAndPreserveMetadata() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let firstRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let secondRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = makeModule(services: services, keyByte: 0xC2, time: 1_000, root: firstRoot)
+        let second = makeModule(services: services, keyByte: 0xC3, time: 2_000, root: secondRoot)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("original shared text")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        await second.retrySync()
+        _ = try await first.apply(.editText(capture.entryID, "first retained edit"))
+        _ = try await second.apply(.editText(capture.entryID, "second retained edit"))
+        _ = try await second.apply(.setFavorite(capture.entryID, true))
+        try await first.closeStoreForTesting()
+        try await second.closeStoreForTesting()
+        let a = makeModule(services: services, keyByte: 0xC2, time: 3_000, root: firstRoot)
+        let b = makeModule(services: services, keyByte: 0xC3, time: 4_000, root: secondRoot)
+        await a.resumeSync()
+        await b.resumeSync()
+        let before = await cloud.currentUploads()
+        XCTAssertTrue(before.filter { $0.record.kind == .entry }.isEmpty)
+        try await a.setSyncTagSelected(tag.id, selected: true)
+        await b.retrySync()
+        await a.retrySync()
+        let aPlan = try await a.textEditPlan(for: capture.entryID)
+        let bPlan = try await b.textEditPlan(for: capture.entryID)
+        XCTAssertEqual(aPlan.text, "first retained edit")
+        XCTAssertEqual(bPlan.text, "second retained edit")
+        XCTAssertEqual(Set(aPlan.versions.map(\.text)), ["first retained edit", "second retained edit"])
+        XCTAssertEqual(Set(bPlan.versions.map(\.id)), Set(aPlan.versions.map(\.id)))
+        let fresh = makeModule(services: services, keyByte: 0xC4, time: 5_000)
+        try await fresh.setSyncEnabled(true)
+        let freshEntries = try await fresh.page(.init()).entries
+        XCTAssertEqual(freshEntries.map(\.id), [capture.entryID])
+        let freshPlan = try await fresh.textEditPlan(for: capture.entryID)
+        XCTAssertEqual(Set(freshPlan.versions.map(\.text)), ["first retained edit", "second retained edit"])
+        let chosen = try XCTUnwrap(aPlan.versions.first { $0.text == "second retained edit" })
+        _ = try await a.resolveTextConflict(.init(plan: aPlan, versionID: chosen.id))
+        await a.retrySync()
+        await b.retrySync()
+        let resolved = try await b.textEditPlan(for: capture.entryID)
+        XCTAssertEqual(resolved.versions.count, 1)
+        XCTAssertEqual(resolved.text, "second retained edit")
+        let final = try await a.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(final.first).isFavorite)
+        XCTAssertEqual(final.first?.capturedAt, Date(timeIntervalSince1970: 1_000))
+    }
+
+    func testExplicitSharedSelectionRejoinsRetainedCopiesOnAnotherMac() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xBF, time: 1_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("retained on the other Mac")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        let selector = makeModule(services: services, keyByte: 0xC1, time: 2_000)
+        try await selector.setSyncEnabled(true)
+        let before = try await selector.page(.init()).entries
+        XCTAssertTrue(before.isEmpty)
+        try await selector.setSyncTagSelected(tag.id, selected: true)
+        await first.retrySync()
+        await selector.retrySync()
+        let restored = try await selector.page(.init()).entries
+        XCTAssertEqual(restored.map(\.id), [capture.entryID])
+        XCTAssertEqual(restored.first?.previewText, "retained on the other Mac")
+    }
+
+    func testExplicitReselectionRestoresOneSharedIdentityWithoutInventingATextRoot() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xBC, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xBD, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("same shared collection")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let original = try await first.textEditPlan(for: capture.entryID)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        await second.retrySync()
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        await second.retrySync()
+        let fresh = makeModule(services: services, keyByte: 0xBE, time: 3_000)
+        try await fresh.setSyncEnabled(true)
+        let imported = try await fresh.page(.init()).entries
+        XCTAssertEqual(imported.map(\.id), [capture.entryID])
+        XCTAssertEqual(imported.first?.tagIDs, [tag.id])
+        let firstPlan = try await first.textEditPlan(for: capture.entryID)
+        let secondPlan = try await second.textEditPlan(for: capture.entryID)
+        XCTAssertEqual(firstPlan.versions.map(\.id), original.versions.map(\.id))
+        XCTAssertEqual(secondPlan.versions.map(\.id), original.versions.map(\.id))
+        if let received = imported.first {
+            let freshPlan = try await fresh.textEditPlan(for: received.id)
+            XCTAssertEqual(freshPlan.versions.map(\.id), original.versions.map(\.id))
+        }
+    }
+
+    func testFinalSharedMembershipRemovalPreservesOnlyUnrelatedPeerTags() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xBA, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xBB, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("keep the private organization")))
+        let shared = try await first.createTagDefinition(named: "Shared", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(shared.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let privateTag = try await second.createTagDefinition(named: "Private", assigningTo: capture.entryID).definition
+        _ = try await first.apply(.setTags(capture.entryID, []))
+        await first.retrySync()
+        await cloud.reverseDelivery()
+        await second.retrySync()
+        let local = try await second.page(.init()).entries
+        XCTAssertEqual(local.map(\.id), [capture.entryID])
+        XCTAssertEqual(local.first?.tagIDs, [privateTag.id])
+        let state = await second.syncStatus()
+        XCTAssertEqual(state.phase, .upToDate)
+    }
+
+    func testRetainedPeerMetadataCannotRepublishAfterWithdrawal() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xB8, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xB9, time: 2_000)
+        let capture = try await first.capture(.init(source: .unknown, content: .text("local metadata only")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: capture.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        _ = try await first.apply(.setTags(capture.entryID, []))
+        await first.retrySync()
+        await second.retrySync()
+        _ = try await second.apply(.setFavorite(capture.entryID, true))
+        await second.retrySync()
+        let operations = await cloud.publishedUploads()
+        XCTAssertEqual(operations.filter { $0.record.kind == .entry }.count, 1)
+        let local = try await second.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(local.first).isFavorite)
+        let remote = try await first.page(.init()).entries
+        XCTAssertFalse(try XCTUnwrap(remote.first).isFavorite)
+    }
+
     func testUntaggedRetainedEditsStayLocalWhileAnotherCollectionContinuesSyncing() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -3002,6 +3362,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
     func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }
+    func redeliverPurgedRecord(_ id: String) { purgedRecords.remove(id); reversesAllChanges = true }
     func redeliverPurgedContent() { purgedRecords.removeAll(); reversesAllChanges = true }
     func failNextControlCreation() { failsControlCreation = true }
     func loseNextControlResponse() { losesControlResponse = true }

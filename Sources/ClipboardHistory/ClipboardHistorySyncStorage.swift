@@ -197,8 +197,14 @@ extension ClipboardHistoryModule {
     func importSyncContent(_ content: ClipboardSyncContent, record: ClipboardSyncRemoteRecord,
                            account: ClipboardSyncAccount) throws {
         let pool = try requiredDatabase()
+        let initialEntry: ClipboardSyncEntryContent?
+        switch content {
+        case .entry(let entry): initialEntry = entry
+        case .rejoin(let value): initialEntry = value.entry
+        default: initialEntry = nil
+        }
         let preparedEntry: ClipboardSyncPreparedEntry?
-        if case .entry(let entry) = content,
+        if let entry = initialEntry,
            try pool.read({ try String.fetchOne($0, sql: """
                SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
                """, arguments: [account.identifier, record.epoch.uuidString, entry.id.uuidString.lowercased()]) }) == nil {
@@ -216,14 +222,21 @@ extension ClipboardHistoryModule {
             if let subject = content.entrySubjectID {
                 try Self.rememberSyncContentRecord(record, subjectID: subject, accountID: account.identifier, in: database)
             }
+            let resumesSubject: Bool
+            if case .rejoin = content { resumesSubject = true } else { resumesSubject = false }
+            let removesMembership: Bool
+            if case .tagMembership(let membership) = content { removesMembership = !membership.present }
+            else { removesMembership = false }
             if let subject = content.entrySubjectID,
                try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
-                || Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+                || (!removesMembership && !resumesSubject && Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)) {
                 try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                     arguments: [account.identifier, record.epoch.uuidString, record.recordID])
                 return false
             }
             switch content {
+            case .rejoin(let value):
+                try importSyncRejoin(value, account: account, record: record, prepared: preparedEntry, in: database)
             case .withdrawal(let value):
                 try saveSyncWithdrawal(value, accountID: account.identifier, epoch: record.epoch.uuidString,
                     recordID: record.recordID, pending: false, in: database)

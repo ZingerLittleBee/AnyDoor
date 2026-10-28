@@ -154,3 +154,24 @@ remains **SKIPPED (user request)**. A separately authorized signed lane must use
 synthetic isolated cloud content, delay an old writer across retirement, interrupt
 cleanup, reconnect an offline peer, and verify the permanent stopped fence and
 preserved local history/key before manually starting another collection.
+
+## Tag withdrawal and rejoin evidence
+
+The public-module withdrawal cases in
+[ClipboardHistorySyncTests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
+use real temporary encrypted stores and the external CAS transport/key adapters.
+They cover final-tag deselection, entry untagging, tag-definition removal during
+an upload, overlapping selections, retained private tags and protection, explicit
+reselection/reassignment/merge, restart, interrupted cleanup, and old ciphertext
+replay. Rejoin keeps the original shared identity, text ancestry, metadata
+registers and association revisions; offline text edits retain competing versions
+until the existing conflict-resolution action is used. Offline rename does not
+substitute for explicit selection. A canceled upload remains an unuploaded local
+edit for later permanent-deletion preservation.
+
+[Settings tests](../../Tests/AnyDoorTests/ClipboardSyncSettingsModelTests.swift)
+exercise withdrawal/rejoin through the production model and real module, including
+scope counts. The native Settings UI, live CloudKit cleanup/CAS behavior, and signed
+two-Mac withdrawal/rejoin are not demonstrated by these tests. The signed two-Mac
+lane remains **SKIPPED (user request)**. Tracked-file observers and complete file
+version lifecycle integration are verified in their dedicated implementation lane.
