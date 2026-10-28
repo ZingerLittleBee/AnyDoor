@@ -199,6 +199,9 @@ extension ClipboardHistoryModule {
                 INSERT INTO clipboard_sync_recovery(id) VALUES (1);
                 """)
         }
+        migrator.registerMigration("v17_clipboard_sync_content") { database in
+            try Self.createSyncContentSchema(in: database)
+        }
         migrator.registerMigration("v18_clipboard_sync_versions") { database in
             try Self.createSyncVersionSchema(in: database)
         }
