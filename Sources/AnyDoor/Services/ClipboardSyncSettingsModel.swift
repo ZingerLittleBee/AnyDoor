@@ -9,6 +9,8 @@ final class ClipboardSyncSettingsModel {
     @ObservationIgnored private var refreshGeneration = 0
     @ObservationIgnored private var actionGeneration = 0
 
+    private(set) var resetConfirmation: ClipboardHistoryCloudResetConfirmation?
+
     private(set) var status = ClipboardHistorySyncStatus()
     private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
     private(set) var tags: [ClipboardHistorySyncTag] = []
@@ -60,6 +62,23 @@ final class ClipboardSyncSettingsModel {
         await performAction {
             await module.retrySync()
         }
+    }
+
+    var isResetPending: Bool {
+        status.cloudReset?.isPending ?? false
+    }
+
+    func prepareReset() async {
+        guard !isPerformingAction else { return }
+        await performAction { resetConfirmation = try await module.prepareCloudReset() }
+    }
+
+    func cancelResetConfirmation() { resetConfirmation = nil }
+
+    func confirmReset(_ confirmation: ClipboardHistoryCloudResetConfirmation) async {
+        guard !isPerformingAction else { return }
+        resetConfirmation = nil
+        await performAction { try await module.clearCloudDataAndStopSync(confirmation) }
     }
 
     func refresh() async {

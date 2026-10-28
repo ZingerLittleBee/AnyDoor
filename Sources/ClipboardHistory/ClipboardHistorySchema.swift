@@ -205,6 +205,16 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v19_clipboard_sync_files") { database in
             try Self.createSyncFileSchema(in: database)
         }
+        migrator.registerMigration("v20_clipboard_sync_reset") { database in
+            try database.execute(sql: """
+                CREATE TABLE clipboard_sync_reset (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    journal BLOB,
+                    activation_authorized INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO clipboard_sync_reset(id) VALUES (1);
+                """)
+        }
         migrator.registerMigration("v22_clipboard_sync_deletion") { database in
             try Self.createSyncDeletionSchema(in: database)
         }

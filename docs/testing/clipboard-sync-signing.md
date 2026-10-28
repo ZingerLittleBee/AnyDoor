@@ -128,3 +128,27 @@ as **NOT RUN**, and signed two-Mac acceptance as **SKIPPED (user request)**.
 Developer-profile and backend-schema validation remains configuration evidence
 only. Unlock and system recovery must not be reported as natively demonstrated
 merely because the injected fault adapter becomes available.
+
+## Cloud reset evidence
+
+The public-module reset cases in
+[ClipboardHistorySyncTests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
+use real encrypted temporary stores with account-aware CAS adapters. They cover
+local-history/key preservation, permanent stopped control, offline peer consent,
+old operation replay after retirement, response loss at retirement/deletion/stop,
+restart, missing authority, account switches, late cleanup during local store
+replacement, and a newer explicit activation superseding unfinished local work.
+[Settings tests](../../Tests/AnyDoorTests/ClipboardSyncSettingsModelTests.swift)
+cover confirmation cancellation/dismissal and retry while ordinary sync is off,
+including denied Keychain access. Confirmed deletion counts are acknowledged
+progress, not a claimed total; ambiguous successful responses may undercount.
+
+The production adapter performs real same-zone atomic control saves and record
+ID deletion, using metadata-only zone changes. These deterministic tests and
+source checks do not establish native CloudKit CAS, deletion latency, or signed
+account transition behavior. The implementation lane did not access real cloud
+content. Signed native reset transitions are **NOT RUN**; signed two-Mac acceptance
+remains **SKIPPED (user request)**. A separately authorized signed lane must use
+synthetic isolated cloud content, delay an old writer across retirement, interrupt
+cleanup, reconnect an offline peer, and verify the permanent stopped fence and
+preserved local history/key before manually starting another collection.

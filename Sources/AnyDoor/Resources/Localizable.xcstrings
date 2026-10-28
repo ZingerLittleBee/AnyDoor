@@ -15188,6 +15188,124 @@
         }
       }
     },
+    "settings.clipboard.sync.reset.action" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Cloud Data and Stop Sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空云端数据并停止同步"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.explanation" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove all shared clipboard content and Sync Tags from this iCloud account. Other Macs will stop sharing this collection. Local history, tags, downloaded files, and the shared encryption key stay on your devices. Interrupted clearing resumes automatically. To share again, turn sync on and select tags again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除此 iCloud 账户中的所有共享剪贴板内容和同步标签，其他 Mac 将停止共享此集合。本地历史、标签、已下载的文件和共享加密密钥会保留。清空中断后会自动继续。如需再次共享，请重新开启同步并选择标签。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.preparing" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing to stop the shared collection…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备停止共享集合…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.clearing" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clearing cloud records…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在清空云端记录…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.completed" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud clearing completed. Sync is off on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端清空已完成，此 Mac 的同步已关闭。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.progress" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirmed deletions: %lld records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已确认删除 %lld 条记录"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.interrupted" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud clearing is incomplete. Retry when the original iCloud account and network are available. Local history is preserved."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端清空尚未完成。请在原 iCloud 账户和网络可用时重试。本地历史已保留。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.reset.superseded" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A new shared collection is active. The previous clear will not change it. Sync remains off on this Mac; turn it on to join the new collection." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新的共享集合已启用，之前的清空操作不会更改它。此 Mac 的同步仍关闭，请手动开启以加入新集合。" } }
+      }
+    },
     "settings.clipboard.sync.retry": {
       "extractionState": "manual",
       "localizations": {

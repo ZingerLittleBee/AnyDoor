@@ -898,6 +898,238 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(replayed.count, 2)
     }
 
+    func testCloudResetPreservesLocalHistoryAndKeyButRetiresSharedAuthority() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let before = try await source.cloud.control(for: account)
+        let page = try await source.sender.page(.init())
+        let confirmation = try await source.sender.prepareCloudReset()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        XCTAssertEqual(status.cloudReset?.stage, .completed)
+        let after = try await source.cloud.control(for: account)
+        XCTAssertEqual(after?.phase, "stopped")
+        XCTAssertNotEqual(after?.epoch, before?.epoch)
+        XCTAssertEqual(after?.keyID, before?.keyID)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let retained = try await source.sender.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), page.entries.map(\.id))
+        await source.sender.resumeSync()
+        let stillStopped = try await source.cloud.control(for: account)
+        XCTAssertEqual(stillStopped, after)
+    }
+
+    func testCloudResetRequiresManualNewEpochAndTagSelectionOnBothDevices() async throws {
+        let source = try await recoverySource()
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x21, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        await peer.suspendSync()
+        let account = try await source.cloud.account()
+        let old = try await source.cloud.control(for: account)
+        let replay = await source.cloud.currentUploads().last!
+        let confirmation = try await source.sender.prepareCloudReset()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        do {
+            _ = try await source.cloud.commit(replay, for: account, control: old!)
+            XCTFail("A delayed writer must lose retired authority")
+        } catch ClipboardSyncServiceError.missingRemoteState { }
+        await peer.resumeSync()
+        let peerStatus = await peer.syncStatus()
+        XCTAssertFalse(peerStatus.isEnabled)
+        let retained = try await peer.page(.init())
+        XCTAssertEqual(retained.entries.count, 1)
+        try await source.sender.setSyncEnabled(true)
+        let active = try await source.cloud.control(for: account)
+        XCTAssertEqual(active?.phase, "active")
+        XCTAssertEqual(active?.keyID, old?.keyID)
+        XCTAssertNotEqual(active?.epoch, old?.epoch)
+        let empty = await source.cloud.currentUploads()
+        XCTAssertTrue(empty.isEmpty)
+        let tags = try await source.sender.syncTags()
+        XCTAssertTrue(tags.allSatisfy { !$0.isSelected })
+        try await source.sender.setSyncTagSelected(source.tag, selected: true)
+        let newUploads = await source.cloud.currentUploads()
+        XCTAssertEqual(newUploads.filter { $0.record.kind == .entry }.count, 1)
+        XCTAssertTrue(newUploads.allSatisfy { $0.record.epoch == active?.epoch })
+        await peer.resumeSync()
+        let unchanged = await peer.syncStatus()
+        XCTAssertFalse(unchanged.isEnabled)
+    }
+
+    func testCloudResetLostResponsesResumeAcrossReopenWithoutReplacingKey() async throws {
+        for lostPhase in ["resetting", "cleanup", "stopped"] {
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-reset-\(UUID())")
+            let first = makeModule(services: services, keyByte: 0x23, time: 1_000, root: root)
+            let entry = try await first.capture(.init(source: .unknown, content: .text("retained after interrupted cloud reset")))
+            let tag = try await first.createTagDefinition(named: "Reset", assigningTo: entry.entryID)
+            try await first.setSyncTagSelected(tag.definition.id, selected: true)
+            try await first.setSyncEnabled(true)
+            let confirmation = try await first.prepareCloudReset()
+            await cloud.loseNextResetResponse(at: lostPhase)
+            try await first.clearCloudDataAndStopSync(confirmation)
+            let failed = await first.syncStatus()
+            XCTAssertFalse(failed.isEnabled)
+            XCTAssertNotEqual(failed.cloudReset?.stage, .completed)
+            XCTAssertEqual(failed.cloudReset?.failure, .failed(.network))
+            try await first.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0x23, time: 2_000, root: root)
+            await reopened.resumeSync()
+            let completed = await reopened.syncStatus()
+            XCTAssertEqual(completed.cloudReset?.stage, .completed)
+            let uploads = await cloud.currentUploads()
+            XCTAssertTrue(uploads.isEmpty)
+            let keyCount = await keys.count()
+            XCTAssertEqual(keyCount, 1)
+            let local = try await reopened.page(.init())
+            XCTAssertEqual(local.entries.map(\.id), [entry.entryID])
+        }
+    }
+
+    func testCloudResetConfirmationCannotRetargetAnotherAccount() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let before = try await source.cloud.control(for: account)
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.switchAccount(to: "other-account")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
+        let other = try await source.cloud.account()
+        let untouched = try await source.cloud.control(for: other)
+        XCTAssertNil(untouched)
+        await source.cloud.switchAccount(to: account.owner)
+        let unchanged = try await source.cloud.control(for: account)
+        XCTAssertEqual(unchanged, before)
+        await source.sender.retrySync()
+        let completed = await source.sender.syncStatus()
+        XCTAssertEqual(completed.cloudReset?.stage, .completed)
+    }
+
+    func testCloudResetRetryAfterDisablingRetainsThePendingClear() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.loseNextResetResponse(at: "resetting")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        try await source.sender.setSyncEnabled(false)
+        await source.sender.retrySync()
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.stage, .completed)
+        XCTAssertFalse(status.isEnabled)
+    }
+
+    func testCloudResetAccountSwitchDuringCleanupDoesNotTouchTheNewAccount() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let reset = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        await source.cloud.switchAccount(to: "changed-during-clear")
+        await source.cloud.releaseClear()
+        try await reset.value
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.accountChanged))
+        let other = try await source.cloud.account()
+        let otherControl = try await source.cloud.control(for: other)
+        XCTAssertNil(otherControl)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
+    }
+
+    func testCloudResetLateCleanupCannotPersistIntoAReplacementLocalStore() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        let cancellation = await source.cloud.cancellationCount()
+        let localReset = Task { try await source.sender.reset(confirmation: .confirmed) }
+        await source.cloud.waitForCancellation(after: cancellation)
+        await source.cloud.releaseClear()
+        try await clearing.value
+        try await localReset.value
+        let status = await source.sender.syncStatus()
+        XCTAssertNil(status.cloudReset)
+        XCTAssertFalse(status.isEnabled)
+        let page = try await source.sender.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+        let keyCount = await source.keys.count()
+        XCTAssertEqual(keyCount, 1)
+        let account = try await source.cloud.account()
+        let control = try await source.cloud.control(for: account)
+        XCTAssertEqual(control?.phase, "resetting")
+    }
+
+    func testCloudResetFailureBeforeRetirementNeverBootstrapsMissingControl() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        let initialAttempts = await source.cloud.controlCreationAttempts()
+        await source.cloud.removeControl()
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let status = await source.sender.syncStatus()
+        XCTAssertEqual(status.cloudReset?.failure, .failed(.recoveryRequired))
+        XCTAssertNotEqual(status.cloudReset?.stage, .completed)
+        let attempts = await source.cloud.controlCreationAttempts()
+        XCTAssertEqual(attempts, initialAttempts)
+        let local = try await source.sender.page(.init())
+        XCTAssertEqual(local.entries.count, 1)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertFalse(uploads.isEmpty)
+    }
+
+    func testCloudResetRetirementPreventsNewWritesBeforeCleanupCompletes() async throws {
+        let source = try await recoverySource()
+        let account = try await source.cloud.account()
+        let observed = try await source.cloud.control(for: account)
+        let old = try XCTUnwrap(observed)
+        let observedUploads = await source.cloud.currentUploads()
+        let upload = try XCTUnwrap(observedUploads.last)
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.holdNextClear()
+        let clearing = Task { try await source.sender.clearCloudDataAndStopSync(confirmation) }
+        await source.cloud.waitForHeldClear()
+        do {
+            _ = try await source.cloud.commit(upload, for: account, control: old)
+            XCTFail("An old writer cannot publish while cleanup is pending")
+        } catch ClipboardSyncServiceError.missingRemoteState { }
+        let inProgress = await source.sender.syncStatus()
+        XCTAssertEqual(inProgress.cloudReset?.stage, .clearing)
+        XCTAssertNil(inProgress.cloudReset?.failure)
+        await source.cloud.releaseClear()
+        try await clearing.value
+        let complete = await source.sender.syncStatus()
+        XCTAssertEqual(complete.cloudReset?.stage, .completed)
+    }
+
+    func testCloudResetLateRetryCannotClearANewManuallyActivatedCollection() async throws {
+        let source = try await recoverySource()
+        let confirmation = try await source.sender.prepareCloudReset()
+        await source.cloud.loseNextResetResponse(at: "stopped")
+        try await source.sender.clearCloudDataAndStopSync(confirmation)
+        let peer = makeModule(services: .init(transport: source.cloud, keys: source.keys, pollingInterval: nil), keyByte: 0x26, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let account = try await source.cloud.account()
+        let active = try await source.cloud.control(for: account)
+        await source.sender.retrySync()
+        let after = try await source.cloud.control(for: account)
+        XCTAssertEqual(after, active)
+        let stopped = await source.sender.syncStatus()
+        XCTAssertFalse(stopped.isEnabled)
+        XCTAssertNotEqual(stopped.cloudReset?.stage, .completed)
+        try await source.sender.setSyncEnabled(true)
+        let enabled = await source.sender.syncStatus()
+        XCTAssertTrue(enabled.isEnabled)
+        XCTAssertEqual(enabled.phase, .upToDate)
+        let uploads = await source.cloud.currentUploads()
+        XCTAssertTrue(uploads.isEmpty)
+    }
+
     func testLostSuccessfulBootstrapReopensTheSameWinnerAfterPeerProgress() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -1672,6 +1904,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var reversesDelivery = false
     func reverseDelivery() { reversesDelivery = true }
     private var accountFault: ClipboardSyncServiceError?
+    private var holdsClear = false
+    private var heldClear: CheckedContinuation<Void, Never>?
+    private var clearObserver: CheckedContinuation<Void, Never>?
+    private var lostResetPhase: String?
     private var cancellations = 0
     private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -1752,7 +1988,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             }
         }
         try checkAccount(account)
-        guard let descriptor = descriptors[account.identifier], descriptor.epoch == control.epoch else {
+        guard let descriptor = descriptors[account.identifier], descriptor.epoch == control.epoch, descriptor.phase == "active", descriptor.keyID == control.keyID else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
         if let existing = records[account.identifier]?.first(where: { $0.record.recordID == upload.record.recordID }) {
@@ -1775,6 +2011,43 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         await withCheckedContinuation { entryCommitObserver = $0 }
     }
     func releaseEntryCommit() { heldEntryCommit?.resume(); heldEntryCommit = nil }
+    func holdNextClear() { holdsClear = true }
+    func waitForHeldClear() async {
+        guard heldClear == nil else { return }
+        await withCheckedContinuation { clearObserver = $0 }
+    }
+    func releaseClear() { heldClear?.resume(); heldClear = nil }
+    func loseNextResetResponse(at phase: String) { lostResetPhase = phase }
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
+                    for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
+        try checkAccount(account)
+        guard let current = descriptors[account.identifier], current == control else { throw ClipboardSyncServiceError.conflict }
+        let result = advanced(ClipboardSyncControl(accountID: current.accountID, keyID: current.keyID,
+            keyCheck: current.keyCheck, epoch: epoch, phase: phase, serverToken: current.serverToken))
+        descriptors[account.identifier] = result
+        if lostResetPhase == phase { lostResetPhase = nil; throw ClipboardSyncServiceError.network(retryAfter: nil) }
+        return result
+    }
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl,
+                   cursor: Data?) async throws -> ClipboardSyncCleanupPage {
+        if holdsClear {
+            holdsClear = false
+            await withCheckedContinuation {
+                heldClear = $0
+                clearObserver?.resume()
+                clearObserver = nil
+            }
+        }
+        try checkAccount(account)
+        guard let current = descriptors[account.identifier], current.phase == "resetting",
+              current.epoch == control.epoch, current.keyID == control.keyID else { throw ClipboardSyncServiceError.missingRemoteState }
+        let count = records[account.identifier]?.count ?? 0
+        records[account.identifier] = []
+        let result = count > 0 ? advanced(current) : current
+        descriptors[account.identifier] = result
+        if lostResetPhase == "cleanup" { lostResetPhase = nil; throw ClipboardSyncServiceError.network(retryAfter: nil) }
+        return .init(control: result, cursor: nil, deletedRecordCount: count, hasMore: false)
+    }
     func cancel() async {
         cancellations += 1
         let waiters = cancellationWaiters

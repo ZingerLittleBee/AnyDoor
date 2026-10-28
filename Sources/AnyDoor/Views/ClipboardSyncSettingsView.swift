@@ -22,7 +22,7 @@ struct ClipboardSyncSettingsView: View {
                 LocalizedText(.settingsClipboardSyncEnable)
             }
             .disabled(
-                !isStoreReady || (model.isPerformingAction && !model.status.isEnabled)
+                !isStoreReady || model.isResetPending || (model.isPerformingAction && !model.status.isEnabled)
             )
 
             LocalizedText(.settingsClipboardSyncDescription)
@@ -122,12 +122,53 @@ struct ClipboardSyncSettingsView: View {
                 }
             }
 
+            if let reset = model.status.cloudReset {
+                HStack {
+                    if reset.isPending, reset.failure == nil {
+                        ProgressView().controlSize(.small)
+                    }
+                    VStack(alignment: .leading) {
+                        LocalizedText(reset.stage == .superseded ? .settingsClipboardSyncResetSuperseded :
+                            reset.stage == .completed ? .settingsClipboardSyncResetCompleted :
+                            (reset.stage == .preparing ? .settingsClipboardSyncResetPreparing : .settingsClipboardSyncResetClearing))
+                        if reset.deletedRecordCount > 0 {
+                            Text(L(.settingsClipboardSyncResetProgress, reset.deletedRecordCount))
+                        }
+                        if reset.failure != nil {
+                            LocalizedText(.settingsClipboardSyncResetInterrupted)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            Button(role: .destructive) {
+                Task { await model.prepareReset() }
+            } label: {
+                LocalizedText(.settingsClipboardSyncResetAction)
+            }
+            .disabled(!isStoreReady || !model.status.canClearCloudData || model.isPerformingAction || model.isResetPending)
+
             if isStoreReady, model.operationFailed {
                 LocalizedText(.settingsClipboardSyncOperationFailed)
                     .foregroundStyle(.red)
             }
         } header: {
             LocalizedText(.settingsClipboardSyncSection)
+        }
+        .confirmationDialog(L(.settingsClipboardSyncResetAction), isPresented: Binding(
+            get: { model.resetConfirmation != nil },
+            set: { if !$0 { model.cancelResetConfirmation() } }
+        ), titleVisibility: .visible) {
+            Button(role: .destructive) {
+                guard let confirmation = model.resetConfirmation else { return }
+                Task { await model.confirmReset(confirmation) }
+            } label: {
+                LocalizedText(.settingsClipboardSyncResetAction)
+            }
+        } message: {
+            LocalizedText(.settingsClipboardSyncResetExplanation)
         }
         .task(id: isStoreReady) {
             await model.refresh()
@@ -154,7 +195,7 @@ struct ClipboardSyncSettingsView: View {
     }
 
     private var offersRetry: Bool {
-        if model.operationFailed { return true }
+        if model.operationFailed || model.status.cloudReset?.failure != nil { return true }
         guard model.status.isEnabled else { return false }
         switch model.status.phase {
         case .disabled, .connecting, .transferring, .upToDate:
