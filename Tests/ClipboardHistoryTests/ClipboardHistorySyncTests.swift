@@ -8,12 +8,129 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testCorruptOwnedAssetAndDuplicateFileMembersRejectTheEntireEnvelope() async throws {
+        let validPNG = try makeSyncBitmap()
+        let file = ClipboardSyncFileDescriptor(objectID: UUID(), versionID: UUID(), displayName: "pending.txt",
+            originalByteCount: nil, contentDigest: nil, body: nil, state: .sourceUnavailable)
+        let cases: [[ClipboardSyncRepresentationContent]] = [
+            [.bitmap(png: Data(validPNG.prefix(24)), thumbnail: validPNG)],
+            [.bitmap(png: validPNG, thumbnail: Data([0x89, 0x50, 0x4E, 0x47]))],
+            [.file(file), .file(file)],
+        ]
+        for (index, representations) in cases.enumerated() {
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil),
+                keyByte: UInt8(0xA0 + index), time: 1_000)
+            try await module.setSyncEnabled(true)
+            try await Self.publishFixture(.entry(.init(id: UUID(), capturedAt: Date(timeIntervalSince1970: 500),
+                sourceBundleID: nil, sourceDisplayName: nil, sourceProvenance: "unknown", favorite: false,
+                tags: [.init(id: "shared", name: "Shared")],
+                items: [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "do not import alone")]),
+                        .init(representations: representations)], facets: ["text", "image"], recognition: .init())), cloud: cloud, keys: keys)
+            await module.retrySync()
+            let page = try await module.page(.init())
+            let status = await module.syncStatus()
+            XCTAssertEqual(page.entries, [], "Malformed member \(index) must reject the complete entry")
+            XCTAssertEqual(status.phase, .failed(.corruptData))
+        }
+    }
+
+    @MainActor
+    func testOwnedAssetPublicationFailureDoesNotPublishAPartialMixedEntry() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let failure = OSAllocatedUnfairLock(initialState: true)
+        let first = makeModule(services: services, keyByte: 0x98, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x99, time: 2_000,
+            faultInjector: .init { point in point == .payloadPublication && failure.withLock { $0 } })
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-partial-image.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let image = NSPasteboardItem()
+        image.setData(try makeSyncBitmap(), forType: .png)
+        let text = NSPasteboardItem()
+        text.setString("second complete item", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([image, text]))
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a complete mixed capture")
+        }
+        let tag = try await first.createTagDefinition(named: "Mixed", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        pasteboard.clearContents()
+        pasteboard.setString("keep current clipboard", forType: .string)
+        let generation = pasteboard.changeCount
+        try await second.setSyncEnabled(true)
+        let failedPage = try await second.page(.init())
+        XCTAssertEqual(failedPage.entries, [])
+        let failedStatus = await second.syncStatus()
+        XCTAssertEqual(failedStatus.phase, .failed(.localStorage))
+        failure.withLock { $0 = false }
+        await second.retrySync()
+        let page = try await second.page(.init())
+        XCTAssertEqual(page.entries.count, 1)
+        let original = try await first.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        let received = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(received, original)
+        do {
+            _ = try await second.materialize(.init(entryID: captured.entryID, purpose: .plainTextPaste))
+            XCTFail("An image-only item must not disappear from a plain-text paste")
+        } catch { XCTAssertEqual(error as? ClipboardHistoryModuleError, .operationUnavailable) }
+        XCTAssertEqual(pasteboard.changeCount, generation)
+        XCTAssertEqual(pasteboard.string(forType: .string), "keep current clipboard")
+        await second.retrySync()
+        let repeated = try await second.page(.init())
+        XCTAssertEqual(repeated.entries.count, 1)
+    }
+
+    @MainActor
+    func testLateRecognitionCannotRestoreResultsAfterTextEditRemovesBitmap() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let recognizer = SyncTestRecognizer(results: [.ocr: ["obsolete image words"], .qr: ["anydoor://obsolete/image"]], held: true)
+        let first = makeModule(services: services, keyByte: 0x9A, time: 1_000, recognizer: recognizer)
+        let second = makeModule(services: services, keyByte: 0x9B, time: 2_000)
+        try await first.setAutomaticImageTextIndexingEnabled(true)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-edited-image.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString("editable original", forType: .string)
+        item.setData(try makeSyncBitmap(), forType: .png)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected an editable bitmap entry")
+        }
+        let tag = try await first.createTagDefinition(named: "Edited", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        _ = try await second.apply(.editText(captured.entryID, "current exact text"))
+        await second.retrySync()
+        await recognizer.release()
+        await first.awaitDerivedJobsForTesting()
+        await first.retrySync()
+        await second.retrySync()
+        let obsolete = try await second.page(.init(text: "obsolete"))
+        let qr = try await second.page(.init(facet: .qrCode))
+        XCTAssertEqual(obsolete.entries, [])
+        XCTAssertEqual(qr.entries, [])
+        let materialized = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(materialized.items, [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "current exact text")])])
+        await cloud.reverseDelivery()
+        let third = makeModule(services: services, keyByte: 0x9C, time: 3_000)
+        try await third.setSyncEnabled(true)
+        let replayed = try await third.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(replayed, materialized)
+        let stale = try await third.page(.init(text: "obsolete"))
+        XCTAssertEqual(stale.entries, [])
+    }
+
     func testAuthenticatedEntryWithDuplicateStandardTypesFailsAsAWhole() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
         let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x97, time: 1_000)
         try await module.setSyncEnabled(true)
-        try await publishFixture(.entry(.init(id: UUID(), capturedAt: Date(timeIntervalSince1970: 500),
+        try await Self.publishFixture(.entry(.init(id: UUID(), capturedAt: Date(timeIntervalSince1970: 500),
             sourceBundleID: nil, sourceDisplayName: nil, sourceProvenance: "unknown", favorite: false,
             tags: [.init(id: "shared", name: "Shared")],
             items: [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: "first"),
@@ -34,10 +151,10 @@ final class ClipboardHistorySyncTests: XCTestCase {
         try await module.setSyncEnabled(true)
         let id = UUID()
         let operationID = UUID()
-        try await publishFixture(.metadata(.init(id: id,
+        try await Self.publishFixture(.metadata(.init(id: id,
             revision: .init(counter: 1, operationID: operationID.uuidString.lowercased()), value: .favorite(true))),
             operationID: operationID, cloud: cloud, keys: keys)
-        try await publishFixture(.text(.init(id: id, text: "legacy text", capturedAt: Date(timeIntervalSince1970: 500),
+        try await Self.publishFixture(.text(.init(id: id, text: "legacy text", capturedAt: Date(timeIntervalSince1970: 500),
             sourceBundleID: nil, sourceDisplayName: nil, sourceProvenance: "unknown", favorite: false,
             tags: [.init(id: "legacy-shared", name: "Legacy")])), cloud: cloud, keys: keys)
         await module.retrySync()
@@ -166,6 +283,15 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(reversed.entries.count, 1)
         XCTAssertTrue(try XCTUnwrap(reversed.entries.first).isFavorite)
         XCTAssertEqual(reversed.entries.first?.capturedAt, Date(timeIntervalSince1970: 1_000))
+        _ = try await reopened.apply(.setFavorite(capture.entryID, false))
+        await reopened.retrySync()
+        await second.retrySync()
+        await third.retrySync()
+        let secondAfterToggle = try await second.page(.init())
+        let thirdAfterToggle = try await third.page(.init())
+        XCTAssertFalse(try XCTUnwrap(secondAfterToggle.entries.first { $0.id == capture.entryID }).isFavorite)
+        XCTAssertFalse(try XCTUnwrap(thirdAfterToggle.entries.first).isFavorite)
+        XCTAssertEqual(secondAfterToggle.entries.first?.id, recentLocal.entryID)
     }
 
     @MainActor
@@ -1316,7 +1442,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(secondStatus.phase, .upToDate)
     }
 
-    private func publishFixture(_ content: ClipboardSyncContent, operationID: UUID = UUID(),
+    private static func publishFixture(_ content: ClipboardSyncContent, operationID: UUID = UUID(),
                                 cloud: SyncTestCloud, keys: SyncTestKeys) async throws {
         let account = try await cloud.account()
         let descriptor = try await cloud.control(for: account)
@@ -1330,7 +1456,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
     private func makeModule(
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
-        recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
+        recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer(),
+        faultInjector: ClipboardHistoryFaultInjector = .init()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-sync-\(UUID())")
@@ -1338,6 +1465,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         return trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: SyncTestLocalKeyStore(byte: keyByte),
+            faultInjector: faultInjector,
             now: clock ?? { Date(timeIntervalSince1970: time) },
             visionRecognizer: recognizer,
             syncServices: services
