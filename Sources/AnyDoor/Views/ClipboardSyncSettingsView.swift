@@ -22,7 +22,7 @@ struct ClipboardSyncSettingsView: View {
                 LocalizedText(.settingsClipboardSyncEnable)
             }
             .disabled(
-                !isStoreReady || model.isResetPending || (model.isPerformingAction && !model.status.isEnabled)
+                !isStoreReady || !model.canChangeEnabled
             )
 
             LocalizedText(.settingsClipboardSyncDescription)

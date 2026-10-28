@@ -36,6 +36,11 @@ final class ClipboardSyncSettingsModel {
         status.isEnabled && !isPerformingAction
     }
 
+    var canChangeEnabled: Bool {
+        let dormantReset = status.cloudReset?.failure == .failed(.accountChanged)
+        return (!isResetPending || dormantReset) && (!isPerformingAction || status.isEnabled)
+    }
+
     func setEnabled(_ enabled: Bool) async {
         // Stopping must remain available while an account request or transfer
         // is suspended. The module cancels that work before persisting Off.
