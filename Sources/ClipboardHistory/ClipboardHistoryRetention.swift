@@ -943,11 +943,14 @@ extension ClipboardHistoryModule {
         do {
             result = try await database.write { database in
                 let current = try Self.syncTextEditBasis(for: entryID, in: database)
-                if let plan, let basis = plan.basis {
-                    guard current?.accountID == basis.accountID, current?.epoch == basis.epoch,
-                          current?.subjectID == basis.subjectID else { throw ClipboardHistoryModuleError.operationUnavailable }
+                let basis: ClipboardSyncTextEditBasis?
+                if let plan {
+                    guard current?.accountID == plan.basis?.accountID, current?.epoch == plan.basis?.epoch,
+                          current?.subjectID == plan.basis?.subjectID else { throw ClipboardHistoryModuleError.operationUnavailable }
+                    basis = plan.basis
+                } else {
+                    basis = current
                 }
-                let basis = plan?.basis ?? current
                 let result = try replaceText(text, for: entryID, at: date, in: database)
                 if result.outcome.didMutate, let basis {
                     try Self.recordSyncTextEdit(text, basis: basis, at: date, in: database)

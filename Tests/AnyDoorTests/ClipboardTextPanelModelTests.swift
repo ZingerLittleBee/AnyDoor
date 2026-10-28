@@ -1,9 +1,49 @@
 import XCTest
-import ClipboardHistory
+@testable import ClipboardHistory
+import ClipboardHistoryTestSupport
 @testable import AnyDoor
 
 @MainActor
 final class ClipboardTextPanelModelTests: XCTestCase {
+    func testDraftOpenedBeforeSharingRejectsAChangedBasisWithoutLosingTheDraft() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("text-draft-sharing-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let services = ClipboardSyncServices(transport: FileConflictUICloud(), keys: FileConflictUIKeys(), pollingInterval: nil)
+        let first = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root.appendingPathComponent("First"),
+            keyStore: FileConflictUILocalKey(byte: 0x61), syncServices: services))
+        let second = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root.appendingPathComponent("Second"),
+            keyStore: FileConflictUILocalKey(byte: 0x62), syncServices: services))
+        let captured = try await first.capture(.init(source: .unknown, content: .text("unshared original")))
+        let plan = try await first.textEditPlan(for: captured.entryID)
+        let entry = try await first.page(.init()).entries.first
+        let editor = ClipboardTextPanelModel(entry: try XCTUnwrap(entry), text: plan.text, isEditable: true)
+        var dismissed = false
+        editor.onDismiss = { dismissed = true }
+        editor.onSave = { text in _ = try await first.saveTextEdit(text, using: plan) }
+        editor.text = "draft from the original"
+
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let remotePlan = try await second.textEditPlan(for: captured.entryID)
+        _ = try await second.saveTextEdit("remote change after sharing", using: remotePlan)
+        await second.retrySync()
+        await first.retrySync()
+        let beforeSave = try await first.textEditPlan(for: captured.entryID)
+        XCTAssertEqual(beforeSave.text, "remote change after sharing")
+
+        await editor.save()
+
+        XCTAssertFalse(dismissed)
+        XCTAssertTrue(editor.saveFailed)
+        XCTAssertTrue(editor.isDirty)
+        XCTAssertEqual(editor.text, "draft from the original")
+        let afterSave = try await first.textEditPlan(for: captured.entryID)
+        XCTAssertEqual(afterSave.text, "remote change after sharing")
+        XCTAssertEqual(afterSave.versions, beforeSave.versions)
+    }
+
     func testConflictRequiresAnExplicitChoiceAndRefreshesAStaleChoice() async {
         let model = makeModel(text: "offline A", isEditable: true)
         let first = ClipboardHistoryTextVersion(id: UUID(), text: "offline A", editedAt: Date())
