@@ -72,6 +72,7 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case linkedFileAfterReplacement
     case linkedFileBeforeReplacement
     case linkedFileAfterNameExchange
+    case linkedFileBeforeRecoveryCommit
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {

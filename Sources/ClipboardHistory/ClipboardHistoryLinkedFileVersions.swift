@@ -244,14 +244,21 @@ extension ClipboardHistoryModule {
             let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) }
             let proof = await inspection.value
             try await admitSync(generation, account: account, services: services)
-            guard !activeApplicationUpdates.contains(source.id),
-                  try linkedSourceIsCurrent(source, account: account, control: control) else { continue }
+            guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
+                replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
             if let proof {
                 // Only the old, unchanged inode is ours to remove after adoption.
                 let backup = URL(fileURLWithPath: path)
-                let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(backup, expectedIdentity: source.identity) }
-                let old = await inspection.value
+                let faults = faultInjector
+                let inspection = Task.detached(priority: .utility) {
+                    let old = try? ClipboardLinkedFileIO.inspect(backup, expectedIdentity: source.identity)
+                    try faults.check(.linkedFileBeforeRecoveryCommit)
+                    return old
+                }
+                let old = try await inspection.value
                 try await admitSync(generation, account: account, services: services)
+                guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
+                    replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
                 if old?.digest == source.baseDigest { try? FileManager.default.removeItem(at: backup) }
                 try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
             } else {
@@ -259,6 +266,26 @@ extension ClipboardHistoryModule {
                 if ClipboardSyncFileIO.isAvailable(path: path, identity: identity) { try? FileManager.default.removeItem(atPath: path) }
                 try clearLinkedApplication(source.id)
             }
+        }
+    }
+
+    /// An I/O continuation owns only the exact location revision and replacement
+    /// journal it inspected. A pause, newer journal, or explicit update wins.
+    private func linkedApplicationJournalIsCurrent(_ source: ClipboardLinkedLocationSource,
+        version: UUID, digest: Data, replacementIdentity: Data, replacementPath: String,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> Bool {
+        guard !activeApplicationUpdates.contains(source.id) else { return false }
+        return try linkedRead { database in
+            guard let current = try Self.linkedLocationSources(accountID: account.identifier,
+                epoch: control.epoch, id: source.id, in: database).first,
+                  current.revision == source.revision, current.identity == source.identity,
+                  current.baseVersionID == source.baseVersionID, current.baseDigest == source.baseDigest,
+                  current.url == source.url else { return false }
+            return try Bool.fetchOne(database, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations
+                  WHERE id = ? AND applying_version_id = ? AND applying_digest = ?
+                    AND replacement_identity = ? AND replacement_path = ?)
+                """, arguments: [source.id.uuidString, version.uuidString, digest, replacementIdentity, replacementPath]) == true
         }
     }
 }

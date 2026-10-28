@@ -125,6 +125,9 @@ extension ClipboardHistoryModule {
             applicationRunningGuards[source.id] = runningGuard
         }
         try await runningGuard.assertStopped()
+        // The main-actor hop can outlive Off, account changes, or shutdown.
+        // Never reactivate a gate for a session that has already been revoked.
+        try admitSync(generation)
         linkedFileMutationGate.activate(generation)
         try await applyLinkedFileVersion(version, to: source, account: context.account, control: context.control,
             generation: generation, applicationPlan: snapshot, applicationGuard: runningGuard)

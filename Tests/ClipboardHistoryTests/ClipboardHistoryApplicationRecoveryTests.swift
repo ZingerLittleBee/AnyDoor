@@ -5,6 +5,56 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testPausingApplicationDuringRecoveryKeepsNewPauseAndCompletePackages() async throws {
+        let barrier = LinkedReplacementBarrier()
+        defer { barrier.release() }
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            if point == .linkedFileBeforeRecoveryCommit { barrier.pause() }
+            return point == .linkedFileAfterNameExchange
+        }, prepareSource: { url in
+            try FileManager.default.removeItem(at: url)
+            _ = try ClipboardApplicationTestFixture.create(at: url,
+                bundleIdentifier: "dev.bybee.AnyDoor.tests.recovery-pause.\(UUID())", resource: "old complete package", signed: false)
+        }, sourceName: "Paused Recovery.app")
+        let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(initial.first)
+        let baseline = try ClipboardApplicationTestFixture(url: working.url).contentsSnapshot()
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("complete explicitly applied update".utf8).write(to: fixture.original.appendingPathComponent("Contents/Resources/Resource.txt"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(displayed.first)
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: current.id, expectedRevision: current.revision))
+        do { try await fixture.receiver.applyApplicationUpdate(plan); XCTFail("Expected the injected post-exchange interruption") }
+        catch {}
+        let oldRoots = try FileManager.default.contentsOfDirectory(at: working.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix(working.url.lastPathComponent + " (AnyDoor update ") }
+        let old = try XCTUnwrap(oldRoots.first)
+        let recovery = Task { await fixture.receiver.retrySync() }
+        try await eventually { barrier.isWaiting }
+        let recovering = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let beforePause = try XCTUnwrap(recovering.first)
+        try await fixture.receiver.setFileLocationPaused(.init(entryID: fixture.entryID,
+            locationID: beforePause.id, expectedRevision: beforePause.revision), paused: true)
+        let paused = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let acceptedPause = try XCTUnwrap(paused.first)
+        barrier.release()
+        await recovery.value
+        let after = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(after.first?.state, .paused, "A stale recovery must not overwrite the newly accepted pause")
+        let retained = try XCTUnwrap(after.first)
+        XCTAssertGreaterThanOrEqual(retained.revision, acceptedPause.revision)
+        // A later, fresh local-recovery pass may adopt the already exchanged
+        // version while preserving pause. It must not restore the stale state.
+        XCTAssertTrue([acceptedPause.baseVersionID, plan.versionID].contains(retained.baseVersionID))
+        XCTAssertEqual(try ClipboardApplicationTestFixture(url: old).contentsSnapshot(), baseline,
+            "A stale recovery cannot delete its displaced package after location authority changes")
+    }
+
+    @MainActor
     func testDisablingSyncDuringApplicationPreparationKeepsTheOldPackageAcrossRestart() async throws {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
