@@ -8,6 +8,9 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
     public let state: ClipboardHistorySyncFileState
     public let availableVersionID: UUID?
     public let transferredByteCount: Int64
+    /// Encoded plaintext progress, excluding each segment's AEAD overhead.
+    /// Original content size remains the independent automatic-download policy.
+    public let transferTotalByteCount: Int64?
     public let transferFailure: ClipboardHistorySyncFileFailure?
     public let downloadRequested: Bool
     public let uploadPending: Bool
@@ -15,7 +18,8 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
 
     public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState,
         availableVersionID: UUID? = nil, transferredByteCount: Int64 = 0,
-        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false, hasConflict: Bool = false) {
+        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false,
+        hasConflict: Bool = false, transferTotalByteCount: Int64? = nil) {
         self.id = id
         self.versionID = versionID
         self.displayName = displayName
@@ -23,6 +27,7 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
         self.state = state
         self.availableVersionID = availableVersionID
         self.transferredByteCount = transferredByteCount
+        self.transferTotalByteCount = transferTotalByteCount
         self.transferFailure = transferFailure
         self.downloadRequested = downloadRequested
         self.uploadPending = uploadPending

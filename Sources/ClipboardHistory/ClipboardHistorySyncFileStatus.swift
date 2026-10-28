@@ -33,8 +33,8 @@ extension ClipboardHistoryModule {
             """, arguments: [body.recordID, accountID, epoch]), !(upload["acknowledged"] as Bool) {
             let encrypted: Int64 = upload["completed_bytes"]
             // Progress callbacks count ciphertext; discard each completed unit's authentication overhead.
-            let units = min(Int64(body.chunkCount), (encrypted + Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes) - 1)
-                / Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes))
+            let unit = Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes)
+            let units = min(Int64(body.chunkCount), encrypted / unit + (encrypted % unit == 0 ? 0 : 1))
             return (max(0, encrypted - units * 28), (upload["failure"] as String?).flatMap(ClipboardHistorySyncFileFailure.init), false, true)
         }
         let download = try Row.fetchOne(database, sql: """
