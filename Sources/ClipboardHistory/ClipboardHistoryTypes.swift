@@ -24,6 +24,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let source: ClipboardHistoryCaptureSource
     public let hasTextConflict: Bool
     public let syncFiles: [ClipboardHistorySyncFileSummary]
+    public let linkedFileLocations: [ClipboardHistoryLinkedFileLocation]
 
     public init(
         id: ClipboardHistoryEntryID,
@@ -34,7 +35,8 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         tagIDs: Set<String> = [],
         source: ClipboardHistoryCaptureSource,
         hasTextConflict: Bool = false,
-        syncFiles: [ClipboardHistorySyncFileSummary] = []
+        syncFiles: [ClipboardHistorySyncFileSummary] = [],
+        linkedFileLocations: [ClipboardHistoryLinkedFileLocation] = []
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -45,6 +47,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         self.source = source
         self.hasTextConflict = hasTextConflict
         self.syncFiles = syncFiles
+        self.linkedFileLocations = linkedFileLocations
     }
 }
 
@@ -568,6 +571,8 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
     case syncFilesPending(ClipboardHistoryEntryID, count: Int)
     case invalidFileExport
+    case invalidFileAssociation
+    case fileLocationAlreadyAssociated
     case fileExportCollision(URL)
     case fileCollectionRequiresRestore(
         ClipboardHistoryEntryID,

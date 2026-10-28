@@ -6,9 +6,14 @@ extension ClipboardHistoryEntry {
     @MainActor
     var syncFileStatusText: String? {
         guard !syncFiles.isEmpty else { return nil }
+        if linkedFileLocations.contains(where: { $0.state == .conflict }) { return L(.clipboardLinkedFileConflict) }
+        if linkedFileLocations.contains(where: { $0.state == .localChanges }) { return L(.clipboardLinkedFileLocalChanges) }
+        if linkedFileLocations.contains(where: { $0.state == .pendingUpload }) { return L(.clipboardSyncFileWaitingForUpload) }
+        if linkedFileLocations.contains(where: { $0.state == .unavailable }) { return L(.clipboardSyncFileLocalUnavailable) }
         if syncFiles.contains(where: { $0.state == .localUnavailable }) { return L(.clipboardSyncFileLocalUnavailable) }
         if syncFiles.contains(where: { $0.state == .sourceUnavailable }) { return L(.clipboardSyncFileSourceUnavailable) }
         if syncFiles.contains(where: { $0.state == .unsupportedKind }) { return L(.clipboardSyncFileUnsupportedKind) }
+        if syncFiles.contains(where: { $0.state == .updateAvailable }) { return L(.clipboardSyncFileUpdateAvailable) }
         if syncFiles.contains(where: { $0.state == .waitingForUpload }) { return L(.clipboardSyncFileWaitingForUpload) }
         if syncFiles.contains(where: { $0.state == .waitingForDownload }) { return L(.clipboardSyncFileWaitingForDownload) }
         return L(.clipboardSyncFileAvailable)
@@ -16,6 +21,7 @@ extension ClipboardHistoryEntry {
 
     var filePresentationIdentity: String {
         id.value.uuidString + syncFiles.map { $0.versionID.uuidString + $0.state.rawValue }.joined()
+            + linkedFileLocations.map { $0.id.uuidString + $0.baseVersionID.uuidString + $0.state.rawValue }.joined()
     }
 
     var presentationFacet: ClipboardHistoryFacet {

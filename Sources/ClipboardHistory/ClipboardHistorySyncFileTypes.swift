@@ -6,14 +6,36 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
     public let displayName: String
     public let originalByteCount: Int64?
     public let state: ClipboardHistorySyncFileState
+    public let availableVersionID: UUID?
+    public let transferredByteCount: Int64
+    public let transferFailure: ClipboardHistorySyncFileFailure?
+    public let downloadRequested: Bool
+    public let uploadPending: Bool
 
-    public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState) {
+    public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState,
+        availableVersionID: UUID? = nil, transferredByteCount: Int64 = 0,
+        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false) {
         self.id = id
         self.versionID = versionID
         self.displayName = displayName
         self.originalByteCount = originalByteCount
         self.state = state
+        self.availableVersionID = availableVersionID
+        self.transferredByteCount = transferredByteCount
+        self.transferFailure = transferFailure
+        self.downloadRequested = downloadRequested
+        self.uploadPending = uploadPending
     }
+}
+
+public enum ClipboardHistorySyncFileFailure: String, Codable, Sendable {
+    case network, quota, localStorage, corruptData, accessDenied, accountChanged, keyUnavailable, unavailable
+}
+
+struct ClipboardSyncOwnedFileTransfer: Sendable {
+    let objectID: UUID
+    let versionID: UUID
+    let record: ClipboardSyncRemoteRecord
 }
 
 public enum ClipboardHistorySyncFileState: String, Sendable {
@@ -23,6 +45,7 @@ public enum ClipboardHistorySyncFileState: String, Sendable {
     case sourceUnavailable
     case localUnavailable
     case unsupportedKind
+    case updateAvailable
 }
 
 /// This descriptor travels inside the authenticated, encrypted entry envelope.
@@ -35,6 +58,48 @@ struct ClipboardSyncFileDescriptor: Codable, Equatable, Sendable {
     let contentDigest: Data?
     let body: ClipboardSyncRemoteRecord?
     let state: ClipboardSyncFileSourceState
+    /// Absence denotes the bounded JSON body used by the initial file protocol.
+    let bodyFormat: ClipboardSyncFileBodyFormat?
+
+    init(objectID: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?,
+         contentDigest: Data?, body: ClipboardSyncRemoteRecord?, state: ClipboardSyncFileSourceState,
+         bodyFormat: ClipboardSyncFileBodyFormat? = nil) {
+        self.objectID = objectID
+        self.versionID = versionID
+        self.displayName = displayName
+        self.originalByteCount = originalByteCount
+        self.contentDigest = contentDigest
+        self.body = body
+        self.state = state
+        self.bodyFormat = bodyFormat
+    }
+}
+
+enum ClipboardSyncFileBodyFormat: String, Codable, Sendable {
+    case segmentsV1
+}
+
+struct ClipboardSyncFileVersionContent: Codable, Equatable, Sendable {
+    let descriptor: ClipboardSyncFileDescriptor
+    let parents: [UUID]
+}
+
+/// A completed local version is separate from the latest advertised version.
+/// Linked-location ownership and its edited base are maintained independently.
+struct ClipboardSyncVerifiedFileVersion: Sendable {
+    let descriptor: ClipboardSyncFileDescriptor
+    let parents: [UUID]
+    let url: URL
+    let identity: Data
+    let bookmark: Data
+}
+
+struct ClipboardSyncFileSelection: Sendable {
+    let latest: ClipboardSyncFileDescriptor
+    let complete: ClipboardSyncVerifiedFileVersion?
+    let heads: [ClipboardSyncFileDescriptor]
+
+    var hasConflict: Bool { heads.count > 1 }
 }
 
 enum ClipboardSyncFileSourceState: String, Codable, Sendable {

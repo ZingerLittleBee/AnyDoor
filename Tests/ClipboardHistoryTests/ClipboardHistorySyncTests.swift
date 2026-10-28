@@ -1329,13 +1329,290 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let page = try await fixture.receiver.page(.init())
         let entry = try XCTUnwrap(page.entries.first)
         XCTAssertEqual(entry.syncFiles.map(\.originalByteCount), [5_000_001])
-        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForUpload])
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.waitingForDownload])
+        let uploads = await fixture.cloud.currentUploads()
+        XCTAssertTrue(uploads.contains { $0.record.kind == .fileBody }, "Large eligible files must upload automatically")
         do {
             _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .hostAction))
             XCTFail("Preview or copy must not implicitly download a pending file")
         } catch ClipboardHistoryModuleError.syncFilesPending {}
         let downloads = await fixture.cloud.fileBodyDownloadCount()
         XCTAssertEqual(downloads, 0)
+    }
+
+    @MainActor
+    func testExplicitLargeFileDownloadPublishesTheCompleteVersion() async throws {
+        let bytes = Data(repeating: 0x5D, count: 5_000_001)
+        let fixture = try await fileFixture(names: ["Manual.bin"], contents: [bytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let pending = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(pending.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+
+        let page = try await fixture.receiver.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.map(\.state), [.complete])
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let reference) = content.items[0].representations[0] else { return XCTFail("Missing complete file") }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), bytes)
+    }
+
+    @MainActor
+    func testEachLargeVersionRequiresItsOwnDownloadAndKeepsTheOldFileUntilReplacementReady() async throws {
+        let firstBytes = Data(repeating: 0x35, count: 5_000_001)
+        let fixture = try await fileFixture(names: ["Versioned.bin"], contents: [firstBytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let originalPage = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(originalPage.entries.first)
+        let first = try XCTUnwrap(entry.syncFiles.first)
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: first.id, versionID: first.versionID)
+        let newer = Data(repeating: 0x62, count: 5_000_002)
+        try newer.write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: first.id)
+        await fixture.receiver.retrySync()
+
+        let updated = try await fixture.receiver.page(.init())
+        let second = try XCTUnwrap(updated.entries.first?.syncFiles.first)
+        XCTAssertNotEqual(second.versionID, first.versionID)
+        XCTAssertEqual(second.availableVersionID, first.versionID)
+        let linkedBeforeDownload = try await fixture.receiver.linkedFileLocations(for: entry.id)
+        XCTAssertEqual(linkedBeforeDownload.first?.state, .current, "Old linked version must remain available")
+        let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let oldFile) = old.items[0].representations[0] else { return XCTFail("Old file was lost") }
+        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), firstBytes)
+        let independent = fixture.receiverRoot.appendingPathComponent("Independent previous version.bin")
+        _ = try await fixture.receiver.exportFiles(entry.id, to: [independent])
+
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: first.id, versionID: second.versionID)
+        let linkedAfterDownload = try await fixture.receiver.linkedFileLocations(for: entry.id)
+        XCTAssertEqual(linkedAfterDownload.first?.state, .current, "New verified version must apply to the linked location")
+        let latest = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let latestFile) = latest.items[0].representations[0] else { return XCTFail("Missing update") }
+        XCTAssertEqual(try Data(contentsOf: latestFile.currentURL), newer)
+        XCTAssertEqual(latestFile.currentURL, oldFile.currentURL, "The linked working location stays stable")
+        XCTAssertEqual(try Data(contentsOf: independent), firstBytes)
+    }
+
+    @MainActor
+    func testThresholdIsPerOriginalFileAndPendingMemberPreventsSubsetPaste() async throws {
+        let fixture = try await fileFixture(names: ["Below.bin", "At.bin", "Above.bin"], contents: [
+            Data(repeating: 0x41, count: 4_999_999), Data(repeating: 0x42, count: 5_000_000), Data(repeating: 0x43, count: 5_000_001)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.complete, .complete, .waitingForDownload])
+        XCTAssertEqual(entry.syncFiles.map(\.originalByteCount), [4_999_999, 5_000_000, 5_000_001])
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+            XCTFail("The pending third member must prevent a partial paste")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+        let file = entry.syncFiles[2]
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let ready = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        XCTAssertEqual(ready.items.count, 3)
+    }
+
+    @MainActor
+    func testGrowthPastThresholdKeepsSmallVersionAndRejectsStaleDownloadAction() async throws {
+        let fixture = try await fileFixture(names: ["Growing.bin"], contents: [Data("small".utf8)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let initial = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(initial.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        try Data(repeating: 0x51, count: 5_000_001).write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: file.id)
+        await fixture.receiver.retrySync()
+        let updated = try await fixture.receiver.page(.init())
+        let newer = try XCTUnwrap(updated.entries.first?.syncFiles.first)
+        XCTAssertEqual(newer.state, .updateAvailable)
+        XCTAssertEqual(newer.availableVersionID, file.versionID)
+        do {
+            try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+            XCTFail("A stale button must not authorize the new version")
+        } catch ClipboardHistoryModuleError.operationUnavailable {}
+        let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let reference) = old.items[0].representations[0] else { return XCTFail("Missing old version") }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), Data("small".utf8))
+        let segments = await fixture.cloud.requestedFileSegments()
+        XCTAssertTrue(segments.isEmpty)
+    }
+
+    @MainActor
+    func testCorruptLargeSegmentFailsWithoutPublishingAndRetrySucceeds() async throws {
+        let fixture = try await fileFixture(names: ["Authenticated.bin"], contents: [Data(repeating: 0x38, count: 5_000_001)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.damageNextFileBodyDownload()
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let damaged = try await fixture.receiver.page(.init())
+        XCTAssertEqual(damaged.entries.first?.syncFiles.first?.transferFailure, .corruptData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.receiverRoot.appendingPathComponent("Linked Working Copies").path))
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let repaired = try await fixture.receiver.page(.init())
+        XCTAssertEqual(repaired.entries.first?.syncFiles.first?.state, .complete)
+    }
+
+    @MainActor
+    func testOversizedLegacyFileEnvelopeIsRejectedBeforeDownload() async throws {
+        for size in [Int64(5_000_001), Int64.max] {
+            let fixture = try await fileFixture(names: ["Legacy.bin"], contents: [Data("small".utf8)])
+            let page = try await fixture.sender.page(.init())
+            let file = try XCTUnwrap(page.entries.first?.syncFiles.first)
+            let account = try await fixture.cloud.account()
+            let observed = try await fixture.cloud.control(for: account)
+            let control = try XCTUnwrap(observed)
+            let loaded = try await fixture.services.keys.load(account: account, keyID: control.keyID)
+            let key = try XCTUnwrap(loaded)
+            let version = UUID()
+            let descriptor = ClipboardSyncFileDescriptor(objectID: file.id, versionID: version,
+                displayName: "Legacy.bin", originalByteCount: size, contentDigest: Data(repeating: 0, count: 32),
+                body: .init(recordID: "v1-\(version.uuidString.lowercased())", operationID: version,
+                    epoch: control.epoch, keyID: control.keyID, kind: .fileBody, chunkCount: 1,
+                    encryptedByteCount: 100, digest: Data(repeating: 0, count: 32)), state: .available)
+            let upload = try ClipboardSyncCodec.seal(.fileVersion(.init(descriptor: descriptor, parents: [file.versionID])),
+                account: account, control: control, key: key)
+            _ = try await fixture.cloud.commit(upload, for: account, control: control)
+            try await fixture.receiver.setSyncEnabled(true)
+            let status = await fixture.receiver.syncStatus()
+            XCTAssertEqual(status.phase, .failed(.corruptData))
+            let received = try await fixture.receiver.page(.init())
+            XCTAssertEqual(received.entries.first?.syncFiles.first?.versionID, file.versionID)
+        }
+    }
+
+    @MainActor
+    func testDamagedRetainedCiphertextIsFetchedAgainAfterReopen() async throws {
+        let fixture = try await fileFixture(names: ["Cache.bin"], contents: [Data(repeating: 0x61, count: 5_000_001)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.failFileSegmentOnce(at: 1)
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        try await fixture.receiver.closeStoreForTesting()
+        let files = FileManager.default.enumerator(at: fixture.receiverRoot.appendingPathComponent("SyncTransfers/Downloads"),
+            includingPropertiesForKeys: nil)
+        let encrypted = try XCTUnwrap(files?.allObjects.compactMap { $0 as? URL }.first { $0.lastPathComponent == "0.ciphertext" })
+        try Data([0x01]).write(to: encrypted)
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
+        await reopened.resumeSync()
+        let complete = try await reopened.page(.init())
+        XCTAssertEqual(complete.entries.first?.syncFiles.first?.state, .complete)
+        let requests = await fixture.cloud.requestedFileSegments()
+        XCTAssertEqual(requests, [0, 1, 0, 1])
+    }
+
+    @MainActor
+    func testInterruptedLargeUploadResumesTheSameVersionAfterReopen() async throws {
+        let fixture = try await fileFixture(names: ["Upload.bin"], contents: [Data("first".utf8)])
+        let initial = try await fixture.sender.page(.init())
+        let entry = try XCTUnwrap(initial.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.failFileUploadOnce(after: 0)
+        try Data(repeating: 0x32, count: 9_000_001).write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: file.id)
+        let failed = try await fixture.sender.page(.init())
+        let version = try XCTUnwrap(failed.entries.first?.syncFiles.first)
+        XCTAssertTrue(version.uploadPending)
+        XCTAssertEqual(version.transferFailure, .network)
+        XCTAssertEqual(version.transferredByteCount, 4_194_304)
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x71, time: 3_000, root: fixture.senderRoot)
+        let retained = try await reopened.page(.init())
+        XCTAssertEqual(retained.entries.first?.syncFiles.first?.versionID, version.versionID)
+        XCTAssertEqual(retained.entries.first?.syncFiles.first?.transferFailure, .network)
+        await reopened.resumeSync()
+        let resumed = try await reopened.page(.init())
+        XCTAssertFalse(try XCTUnwrap(resumed.entries.first?.syncFiles.first).uploadPending)
+        let committed = try await reopened.syncFileVersionIsCommitted(objectID: file.id, versionID: version.versionID)
+        XCTAssertTrue(committed)
+        let attempts = await fixture.cloud.fileUploadAttempts()
+        XCTAssertEqual(attempts, [version.versionID, version.versionID])
+    }
+
+    @MainActor
+    func testLargeDownloadStorageAndQuotaFailuresKeepPreviousVersionUsable() async throws {
+        for fault in [ClipboardSyncServiceError.quota, .localStorage] {
+            let fixture = try await fileFixture(names: ["Retained.bin"], contents: [Data("old complete".utf8)])
+            try await fixture.receiver.setSyncEnabled(true)
+            let initial = try await fixture.receiver.page(.init())
+            let entry = try XCTUnwrap(initial.entries.first)
+            let file = try XCTUnwrap(entry.syncFiles.first)
+            try Data(repeating: 0x71, count: 5_000_001).write(to: fixture.sourceURLs[0])
+            try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: file.id)
+            await fixture.receiver.retrySync()
+            let updated = try await fixture.receiver.page(.init())
+            let newVersion = try XCTUnwrap(updated.entries.first?.syncFiles.first)
+            await fixture.cloud.failFileSegmentOnce(at: 1, with: fault)
+            try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: newVersion.versionID)
+            let failed = try await fixture.receiver.page(.init())
+            XCTAssertEqual(failed.entries.first?.syncFiles.first?.transferFailure, fault == .quota ? .quota : .localStorage)
+            let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+            guard case .file(let old) = content.items[0].representations[0] else { return XCTFail("Missing previous version") }
+            XCTAssertEqual(try Data(contentsOf: old.currentURL), Data("old complete".utf8))
+            try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: newVersion.versionID)
+            let complete = try await fixture.receiver.page(.init())
+            XCTAssertEqual(complete.entries.first?.syncFiles.first?.state, .complete)
+        }
+    }
+
+    @MainActor
+    func testDisablingDuringLargeDownloadRejectsLateSegmentCompletion() async throws {
+        let fixture = try await fileFixture(names: ["Late.bin"], contents: [Data(repeating: 0x44, count: 5_000_001)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let page = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.holdNextFileSegment()
+        let request = Task { try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID) }
+        await fixture.cloud.waitForHeldFileSegment()
+        try await fixture.receiver.setSyncEnabled(false)
+        try await request.value
+        let disabled = try await fixture.receiver.page(.init())
+        XCTAssertEqual(disabled.entries.first?.syncFiles.first?.state, .waitingForDownload)
+        XCTAssertEqual(disabled.entries.first?.syncFiles.first?.transferredByteCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.receiverRoot.appendingPathComponent("Linked Working Copies").path))
+        try await fixture.receiver.setSyncEnabled(true)
+        let resumed = try await fixture.receiver.page(.init())
+        XCTAssertEqual(resumed.entries.first?.syncFiles.first?.state, .complete)
+    }
+
+    @MainActor
+    func testInterruptedLargeDownloadRetainsProgressAndRetriesOnlyMissingSegmentsAfterReopen() async throws {
+        let bytes = Data(repeating: 0x68, count: 9_000_001)
+        let fixture = try await fileFixture(names: ["Resume.bin"], contents: [bytes])
+        try await fixture.receiver.setSyncEnabled(true)
+        let initialPage = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(initialPage.entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        await fixture.cloud.failFileSegmentOnce(at: 1)
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let interruptedPage = try await fixture.receiver.page(.init())
+        let interrupted = try XCTUnwrap(interruptedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(interrupted.transferredByteCount, 4_194_304)
+        XCTAssertEqual(interrupted.transferFailure, .network)
+        XCTAssertEqual(interrupted.state, .waitingForDownload)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 3_000, root: fixture.receiverRoot)
+        let persistedPage = try await reopened.page(.init())
+        let persisted = try XCTUnwrap(persistedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(persisted.transferredByteCount, 4_194_304)
+        XCTAssertEqual(persisted.transferFailure, .network)
+        await reopened.resumeSync()
+        let completedPage = try await reopened.page(.init())
+        let completed = try XCTUnwrap(completedPage.entries.first?.syncFiles.first)
+        XCTAssertEqual(completed.state, .complete)
+        XCTAssertNil(completed.transferFailure)
+        let indices = await fixture.cloud.requestedFileSegments()
+        XCTAssertEqual(indices, [0, 1, 1, 2])
+        let maximum = await fixture.cloud.largestFileSegment()
+        XCTAssertEqual(maximum, 4_194_332)
+        let content = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let reference) = content.items[0].representations[0] else { return XCTFail("Missing complete file") }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), bytes)
     }
 
     @MainActor
@@ -1395,14 +1672,15 @@ final class ClipboardHistorySyncTests: XCTestCase {
         beforeEnable: ([URL]) throws -> Void = { _ in }
     ) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule, cloud: SyncTestCloud,
-        services: ClipboardSyncServices, root: URL, receiverRoot: URL, sourceURLs: [URL]
+        services: ClipboardSyncServices, root: URL, receiverRoot: URL, sourceURLs: [URL], senderRoot: URL
     ) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-files-\(UUID())")
         removeClipboardHistoryDirectoryAfterTest(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
-        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000)
+        let senderRoot = root.appendingPathComponent("Sender")
+        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot)
         let receiverRoot = root.appendingPathComponent("Receiver")
         let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot, faults: receiverFaults)
         let urls = try zip(names, contents).map { name, data in
@@ -1426,7 +1704,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         try await sender.setSyncTagSelected(tag.definition.id, selected: true)
         try beforeEnable(urls)
         try await sender.setSyncEnabled(true)
-        return (sender, receiver, cloud, services, root, receiverRoot, urls)
+        return (sender, receiver, cloud, services, root, receiverRoot, urls, senderRoot)
     }
 
     @MainActor
@@ -3143,6 +3421,29 @@ private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {
 }
 
 private actor SyncTestCloud: ClipboardSyncTransport {
+    private var uploadFailureIndex: Int?
+    private var uploadAttempts: [UUID] = []
+    func failFileUploadOnce(after index: Int) { uploadFailureIndex = index }
+    func fileUploadAttempts() -> [UUID] { uploadAttempts }
+    private var failedFileSegment: Int?
+    private var fileSegmentFailure: ClipboardSyncServiceError = .network(retryAfter: nil)
+    private var shouldHoldFileSegment = false
+    private var heldFileSegment: CheckedContinuation<Void, Never>?
+    private var fileSegmentObserver: CheckedContinuation<Void, Never>?
+    func holdNextFileSegment() { shouldHoldFileSegment = true }
+    func waitForHeldFileSegment() async {
+        if heldFileSegment == nil { await withCheckedContinuation { fileSegmentObserver = $0 } }
+    }
+    private var fileSegmentRequests: [Int] = []
+    private let fileStorage = FileManager.default.temporaryDirectory.appendingPathComponent("sync-cloud-segments-\(UUID())")
+    private var maximumFileSegment = 0
+    deinit { try? FileManager.default.removeItem(at: fileStorage) }
+    func largestFileSegment() -> Int { maximumFileSegment }
+    func failFileSegmentOnce(at index: Int, with failure: ClipboardSyncServiceError = .network(retryAfter: nil)) {
+        failedFileSegment = index
+        fileSegmentFailure = failure
+    }
+    func requestedFileSegments() -> [Int] { fileSegmentRequests }
     private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
@@ -3273,6 +3574,50 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         return result
     }
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void) async throws -> ClipboardSyncControl {
+        uploadAttempts.append(upload.record.operationID)
+        try await progress(0)
+        var bytes: Int64 = 0
+        let destination = fileStorage.appendingPathComponent(upload.record.recordID)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        for index in 0..<upload.record.chunkCount {
+            let chunk = try ClipboardSyncFileTransfer.readSegment(in: upload.directory, index: index)
+            maximumFileSegment = max(maximumFileSegment, chunk.count)
+            try chunk.write(to: destination.appendingPathComponent("\(index).ciphertext"), options: .atomic)
+            bytes += Int64(chunk.count)
+            try await progress(bytes)
+            if uploadFailureIndex == index {
+                uploadFailureIndex = nil
+                throw ClipboardSyncServiceError.network(retryAfter: nil)
+            }
+        }
+        return try await commit(.init(record: upload.record, chunks: []), for: account, control: control)
+    }
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        if shouldHoldFileSegment {
+            shouldHoldFileSegment = false
+            await withCheckedContinuation {
+                heldFileSegment = $0
+                fileSegmentObserver?.resume()
+                fileSegmentObserver = nil
+            }
+        }
+        fileSegmentRequests.append(index)
+        if failedFileSegment == index {
+            failedFileSegment = nil
+            throw fileSegmentFailure
+        }
+        try checkAccount(account)
+        fileBodyDownloads += 1
+        guard records[account.identifier]?.contains(where: { $0.record == record }) == true else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        var bytes = try ClipboardSyncFileTransfer.readSegment(in: fileStorage.appendingPathComponent(record.recordID), index: index)
+        maximumFileSegment = max(maximumFileSegment, bytes.count)
+        if damagesFileBody { damagesFileBody = false; bytes[0] ^= 1 }
+        return bytes
+    }
     func loseNextPurgeResponse() { losesPurgeResponse = true }
     func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
                control: ClipboardSyncControl) throws -> ClipboardSyncControl {
@@ -3331,6 +3676,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return .init(control: result, cursor: nil, deletedRecordCount: count, hasMore: false)
     }
     func cancel() async {
+        heldFileSegment?.resume()
+        heldFileSegment = nil
         cancellations += 1
         let waiters = cancellationWaiters
         cancellationWaiters.removeAll()

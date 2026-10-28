@@ -22,6 +22,8 @@ struct ClipboardHistoryRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            ClipboardSyncFileControls(entry: entry, presentation: presentation)
+                .frame(maxWidth: 220)
             Spacer(minLength: 8)
             Text(relativeTimestamp)
                 .font(.caption)

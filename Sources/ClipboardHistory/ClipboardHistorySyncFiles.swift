@@ -5,7 +5,7 @@ import GRDB
 extension ClipboardHistoryModule {
     static let automaticSyncFileDownloadBytes: Int64 = 5_000_000
 
-    private static let liveSyncFileMember = """
+    static let liveSyncFileMember = """
         EXISTS (SELECT 1 FROM clipboard_representations AS current
             WHERE current.entry_id = member.entry_id AND current.item_index = member.item_index
               AND current.representation_index = member.representation_index AND current.kind = 'fileReference')
@@ -13,17 +13,26 @@ extension ClipboardHistoryModule {
 
     static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
         try Row.fetchAll(database, sql: """
-            SELECT version.descriptor, version.transfer_state, version.local_path, version.local_identity
+            SELECT member.account_id, member.epoch, version.descriptor, completed.version_id AS complete_version_id,
+                   completed.transfer_state, completed.local_path, completed.local_identity
             FROM clipboard_sync_file_members AS member
-            JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
+            JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+            JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
+              AND version.epoch = member.epoch AND version.object_id = member.object_id AND version.version_id = choice.current_version_id
+            LEFT JOIN clipboard_sync_file_versions AS completed ON completed.account_id = member.account_id
+              AND completed.epoch = member.epoch AND completed.object_id = member.object_id AND completed.version_id = choice.complete_version_id
             WHERE member.entry_id = ? AND \(liveSyncFileMember)
             ORDER BY member.item_index, member.representation_index
             """, arguments: [entryID]).map { row in
                 let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
                 let state: ClipboardHistorySyncFileState
-                if (row["transfer_state"] as String) == "complete" {
-                    state = ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"])
-                        ? .complete : .localUnavailable
+                let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
+                let available = (row["transfer_state"] as String?) == "complete"
+                    && ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"])
+                if available {
+                    state = completeVersion == descriptor.versionID ? .complete : .updateAvailable
+                } else if completeVersion != nil {
+                    state = .localUnavailable
                 } else {
                     state = switch descriptor.state {
                     case .available: .waitingForDownload
@@ -32,8 +41,11 @@ extension ClipboardHistoryModule {
                     case .unsupportedKind: .unsupportedKind
                     }
                 }
+                let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
-                    displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state)
+                    displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
+                    availableVersionID: available ? completeVersion : nil, transferredByteCount: transfer.bytes,
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending)
             }
     }
 
@@ -43,10 +55,19 @@ extension ClipboardHistoryModule {
         let rows = try database.read { database in
             try Row.fetchAll(database, sql: """
                 SELECT member.item_index, version.descriptor, version.transfer_state,
-                       version.local_path, version.local_bookmark, version.local_identity
+                       COALESCE(location.path, version.local_path) AS local_path,
+                       COALESCE(location.bookmark, version.local_bookmark) AS local_bookmark,
+                       COALESCE(location.identity, version.local_identity) AS local_identity
                 FROM clipboard_sync_file_members AS member
-                JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
-                WHERE member.entry_id = ? AND member.origin = 'remote' AND \(Self.liveSyncFileMember)
+                JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
+                  AND version.epoch = member.epoch AND version.object_id = member.object_id
+                  AND version.version_id = COALESCE(choice.complete_version_id, choice.current_version_id)
+                LEFT JOIN clipboard_sync_linked_locations AS location ON location.id = (
+                  SELECT linked.id FROM clipboard_sync_linked_locations AS linked
+                  WHERE linked.account_id = member.account_id AND linked.epoch = member.epoch AND linked.object_id = member.object_id
+                  ORDER BY CASE linked.kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, linked.id LIMIT 1)
+                WHERE member.entry_id = ? AND (member.origin = 'remote' OR location.id IS NOT NULL) AND \(Self.liveSyncFileMember)
                 ORDER BY member.item_index, member.representation_index
                 """, arguments: [entryID.value.uuidString.lowercased()])
         }
@@ -121,14 +142,29 @@ extension ClipboardHistoryModule {
                     )
                 }
         }
+        guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
         for source in sources {
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let sampled = await Task.detached(priority: .utility) {
                 ClipboardSyncFileIO.sample(source)
             }.value
-            try await waitForWriteTurn()
             try admitSync(generation)
+            guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let objectID = UUID()
             let versionID = UUID()
+            let frozen: ClipboardSyncFrozenFile?
+            if sampled.state == .pendingUpload, let url = sampled.url,
+               let bookmark = sampled.bookmark, let identity = source.identity {
+                frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
+                    directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
+                    account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+            } else { frozen = nil }
+            var stored = false
+            defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            try await waitForWriteTurn()
+            try admitSync(generation)
             let body = try sampled.bytes.map { bytes in
                 try ClipboardSyncCodec.seal(
                     .fileBody(.init(objectID: objectID, versionID: versionID, bytes: bytes)),
@@ -137,25 +173,51 @@ extension ClipboardHistoryModule {
             }
             let descriptor = ClipboardSyncFileDescriptor(
                 objectID: objectID, versionID: versionID, displayName: source.name,
-                originalByteCount: sampled.byteCount,
-                contentDigest: sampled.bytes.map { Data(SHA256.hash(data: $0)) },
-                body: body?.record, state: sampled.state
+                originalByteCount: frozen?.originalByteCount ?? sampled.byteCount,
+                contentDigest: frozen?.contentDigest ?? sampled.bytes.map { Data(SHA256.hash(data: $0)) },
+                body: frozen?.upload.record ?? body?.record, state: frozen == nil ? sampled.state : .available,
+                bodyFormat: frozen == nil ? nil : .segmentsV1
             )
-            try syncWrite { database in
-                guard try syncFileSourceIsEligible(source, account: account, in: database) else { return }
+            stored = try syncWrite { database in
+                guard try syncFileSourceIsEligible(source, account: account, in: database) else { return false }
                 if let body {
                     try storeSyncUpload(body, subjectID: objectID.uuidString, account: account, in: database)
                 }
+                if let frozen { try storeSyncFileUpload(frozen.upload, objectID: objectID, account: account, in: database) }
                 try storeSyncFileDescriptor(descriptor, account: account, epoch: control.epoch,
                     localPath: sampled.url?.path, bookmark: sampled.bookmark, identity: source.identity,
-                    transferState: body == nil ? descriptor.state.rawValue : "complete", in: database)
+                    transferState: body == nil && frozen == nil ? descriptor.state.rawValue : "complete", in: database)
                 try database.execute(sql: """
                     INSERT INTO clipboard_sync_file_members
                         (account_id, epoch, entry_id, item_index, representation_index, object_id, version_id, origin)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, source.entryID,
                         source.itemIndex, source.representationIndex, objectID.uuidString, versionID.uuidString])
+                return true
             }
+        }
+        // The previous file protocol advertised large files without a body.
+        // Publish a new immutable version instead of rewriting its descriptor.
+        let legacy = try syncFileRead { database in
+            try Row.fetchAll(database, SQLRequest<Row>(literal: """
+                SELECT DISTINCT version.object_id, version.version_id, version.local_bookmark, version.local_identity
+                FROM clipboard_sync_file_versions AS version
+                JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                JOIN clipboard_sync_file_members AS member USING(account_id, epoch, object_id)
+                JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                WHERE version.account_id = \(account.identifier) AND version.epoch = \(control.epoch.uuidString)
+                  AND choice.current_version_id = version.version_id AND version.transfer_state = 'pendingUpload'
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+                """)).compactMap { row -> (UUID, UUID, Data, Data)? in
+                guard let objectID = UUID(uuidString: row["object_id"]), let versionID = UUID(uuidString: row["version_id"]),
+                      let bookmark: Data = row["local_bookmark"], let identity: Data = row["local_identity"] else { return nil }
+                return (objectID, versionID, bookmark, identity)
+            }
+        }
+        for (objectID, parent, bookmark, identity) in legacy {
+            try admitSync(generation)
+            let source = try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity)
+            _ = try await publishFileVersion(sourceURL: source, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
         }
     }
 
@@ -179,7 +241,9 @@ extension ClipboardHistoryModule {
     ) throws -> ClipboardSyncFileDescriptor {
         guard let data = try Data.fetchOne(database, sql: """
             SELECT version.descriptor FROM clipboard_sync_file_members AS member
-            JOIN clipboard_sync_file_versions AS version USING(account_id, epoch, object_id, version_id)
+            JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+            JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
+              AND version.epoch = member.epoch AND version.object_id = member.object_id AND version.version_id = choice.current_version_id
             WHERE member.account_id = ? AND member.epoch = ? AND member.entry_id = ?
                 AND member.item_index = ? AND member.representation_index = ?
             """, arguments: [account.identifier, control.epoch.uuidString, entryID, itemIndex, representationIndex]) else {
@@ -195,7 +259,7 @@ extension ClipboardHistoryModule {
     ) throws {
         try validateSyncFileDescriptor(descriptor, epoch: record.epoch, keyID: record.keyID)
         try storeSyncFileDescriptor(descriptor, account: account, epoch: record.epoch,
-            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", in: database)
+            localPath: nil, bookmark: nil, identity: nil, transferState: "pending", publicationRecordID: record.recordID, in: database)
         try database.execute(sql: """
             INSERT INTO clipboard_sync_file_members
                 (account_id, epoch, entry_id, item_index, representation_index, object_id, version_id, origin)
@@ -204,9 +268,10 @@ extension ClipboardHistoryModule {
                 representationIndex, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
     }
 
-    private func storeSyncFileDescriptor(
+    func storeSyncFileDescriptor(
         _ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID,
-        localPath: String?, bookmark: Data?, identity: Data?, transferState: String, in database: Database
+        localPath: String?, bookmark: Data?, identity: Data?, transferState: String,
+        parents: [UUID] = [], publicationRecordID: String? = nil, in database: Database
     ) throws {
         let data = try JSONEncoder().encode(descriptor)
         if let existing = try Data.fetchOne(database, sql: """
@@ -217,15 +282,23 @@ extension ClipboardHistoryModule {
             guard try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: existing) == descriptor else {
                 throw ClipboardSyncServiceError.corruptData
             }
+            let storedParents = try Data.fetchOne(database, sql: """
+                SELECT parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+            guard let storedParents, try JSONDecoder().decode([UUID].self, from: storedParents) == parents else {
+                throw ClipboardSyncServiceError.corruptData
+            }
             return
         }
         try database.execute(sql: """
             INSERT INTO clipboard_sync_file_versions
                 (account_id, epoch, object_id, version_id, descriptor, transfer_state,
-                 local_path, local_bookmark, local_identity)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 local_path, local_bookmark, local_identity, parents, publication_record_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString,
-                descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity])
+                descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity, try JSONEncoder().encode(parents), publicationRecordID])
+        try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
+            epoch: epoch, complete: transferState == "complete", in: database)
     }
 
     func receivePendingSyncFiles(
@@ -235,18 +308,29 @@ extension ClipboardHistoryModule {
         let descriptors = try syncFileRead { database in
             try Data.fetchAll(database, sql: """
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
-                WHERE account_id = ? AND epoch = ? AND transfer_state != 'complete'
+                JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                WHERE version.account_id = ? AND version.epoch = ? AND transfer_state != 'complete'
+                  AND version.version_id = choice.current_version_id
                   AND EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
-                      AND member.object_id = version.object_id AND member.version_id = version.version_id
-                      AND member.origin = 'remote' AND \(Self.liveSyncFileMember))
+                      AND member.object_id = version.object_id
+                      AND \(Self.liveSyncFileMember))
                 """, arguments: [account.identifier, control.epoch.uuidString]).map {
                     try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: $0)
                 }
         }
         for descriptor in descriptors {
+            try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
-                  size <= Self.automaticSyncFileDownloadBytes, let body = descriptor.body else { continue }
+                  try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
+                  let body = descriptor.body else { continue }
+            do {
+            let output: ClipboardSyncPublishedFile
+            if descriptor.bodyFormat == .segmentsV1 {
+                guard let completed = try await receiveSegmentedSyncFile(descriptor, account: account, control: control,
+                    key: key, services: services, generation: generation) else { continue }
+                output = completed
+            } else {
             // Bound the temporary JSON body for this small-file path. This is
             // protocol-envelope validation, not a file-size rejection policy.
             let maximumEnvelopeBytes = size * 3 + 4_096
@@ -265,13 +349,15 @@ extension ClipboardHistoryModule {
             }
             // Authentication is complete before any ordinary file is created.
             // Publication stays synchronous with final admission and DB commit.
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             try await waitForWriteTurn()
             try admitSync(generation)
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
-            let output = try ClipboardSyncFileIO.publish(
+            output = try ClipboardSyncFileIO.publish(
                 content.bytes, descriptor: descriptor, root: syncWorkingRoot,
                 accountID: account.identifier, faultInjector: faultInjector
             )
+            }
             try faultInjector.check(.syncFileAfterPublication)
             try syncWrite { database in
                 try database.execute(sql: """
@@ -281,28 +367,35 @@ extension ClipboardHistoryModule {
                     """, arguments: [output.url.path, output.bookmark, output.identity,
                         account.identifier, control.epoch.uuidString,
                         descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
+                    epoch: control.epoch, complete: true, in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
             }
             publishMutation()
+            } catch {
+                try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
+                throw error
+            }
         }
     }
 
-    private func syncFileIsReferenced(
+    func syncFileIsReferenced(
         _ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount, epoch: UUID
     ) throws -> Bool {
         try requiredDatabase().read { database in
             try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_file_members AS member
-                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                    JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
+                    WHERE member.account_id = ? AND member.epoch = ? AND member.object_id = ? AND choice.current_version_id = ?
                       AND \(Self.liveSyncFileMember))
                 """, arguments: [account.identifier, epoch.uuidString,
                     descriptor.objectID.uuidString, descriptor.versionID.uuidString]) ?? false
         }
     }
 
-    private func validateSyncFileDescriptor(_ descriptor: ClipboardSyncFileDescriptor, epoch: UUID, keyID: UUID) throws {
+    func validateSyncFileDescriptor(_ descriptor: ClipboardSyncFileDescriptor, epoch: UUID, keyID: UUID) throws {
         guard ClipboardSyncFileIO.validFilename(descriptor.displayName),
               descriptor.originalByteCount.map({ $0 >= 0 }) ?? true else {
             throw ClipboardSyncServiceError.corruptData
@@ -314,13 +407,27 @@ extension ClipboardHistoryModule {
                   body.chunkCount > 0, body.encryptedByteCount > 0, body.digest.count == 32 else {
                 throw ClipboardSyncServiceError.corruptData
             }
+            // The legacy JSON envelope was only defined for bounded small
+            // files. Larger files use segmentsV1, without an overall size cap.
+            if descriptor.bodyFormat == nil, let size = descriptor.originalByteCount,
+               size > Self.automaticSyncFileDownloadBytes {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            if descriptor.bodyFormat == .segmentsV1, let size = descriptor.originalByteCount {
+                let unit = Int64(ClipboardSyncCodec.chunkByteCount)
+                let expected = max(1, size / unit + (size % unit == 0 ? 0 : 1))
+                let overhead = expected.multipliedReportingOverflow(by: 28)
+                let total = size.addingReportingOverflow(overhead.partialValue)
+                guard !overhead.overflow, !total.overflow, Int64(body.chunkCount) == expected,
+                      body.encryptedByteCount == total.partialValue else { throw ClipboardSyncServiceError.corruptData }
+            }
         } else if descriptor.body != nil || descriptor.contentDigest != nil {
             throw ClipboardSyncServiceError.corruptData
         }
     }
 
     /// Select the synchronous GRDB overload while preserving actor admission.
-    private func syncFileRead<Value>(_ body: (Database) throws -> Value) throws -> Value {
+    func syncFileRead<Value>(_ body: (Database) throws -> Value) throws -> Value {
         try requiredDatabase().read(body)
     }
 }

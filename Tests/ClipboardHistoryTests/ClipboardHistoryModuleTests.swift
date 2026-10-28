@@ -1154,6 +1154,8 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v20_clipboard_sync_reset",
                 "v21_clipboard_sync_withdrawal",
                 "v22_clipboard_sync_deletion",
+                "v23_clipboard_sync_downloads",
+                "v24_clipboard_linked_locations",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -1243,6 +1245,8 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v20_clipboard_sync_reset",
                 "v21_clipboard_sync_withdrawal",
                 "v22_clipboard_sync_deletion",
+                "v23_clipboard_sync_downloads",
+                "v24_clipboard_linked_locations",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

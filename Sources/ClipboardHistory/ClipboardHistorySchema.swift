@@ -232,6 +232,12 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v22_clipboard_sync_deletion") { database in
             try Self.createSyncDeletionSchema(in: database)
         }
+        migrator.registerMigration("v23_clipboard_sync_downloads") { database in
+            try Self.createSyncDownloadSchema(in: database)
+        }
+        migrator.registerMigration("v24_clipboard_linked_locations") { database in
+            try Self.createLinkedFileSchema(in: database)
+        }
         return migrator
     }
 

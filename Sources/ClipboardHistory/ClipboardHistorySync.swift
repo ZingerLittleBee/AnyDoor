@@ -109,6 +109,7 @@ extension ClipboardHistoryModule {
 
     func stopSyncTasks() async -> UInt64 {
         syncSuspended = true
+        stopLinkedFileObservers()
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
         let generation = syncGeneration
@@ -327,9 +328,17 @@ extension ClipboardHistoryModule {
             }
             state = try await receiveSyncChanges(account: account, control: control, key: key,
                 state: state, services: services, generation: generation)
+            try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await reconcileLinkedFileObservations(account: account, control: control, generation: generation)
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
+            try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await reconcileLinkedFileVersions(account: account, control: control, generation: generation)
+            // A location processed earlier in this pass also receives a version
+            // just frozen from another local association, independent of ID order.
+            try await reconcileLinkedFileVersions(account: account, control: control, generation: generation, canPublish: false)
+            try refreshLinkedFileObservers(account: account, control: control, generation: generation)
             try await waitForWriteTurn()
             try admitSync(generation)
             var conflicts = 0
@@ -342,7 +351,15 @@ extension ClipboardHistoryModule {
                     try await admitSync(generation, account: account, services: services)
                     guard try syncWrite({ try Bool.fetchOne($0, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_sync_outbox WHERE record_id = ? AND acknowledged = 0)",
                         arguments: [upload.record.recordID]) ?? false }) else { continue }
-                    let committed = try await services.transport.commit(upload, for: account, control: control)
+                    let committed: ClipboardSyncControl
+                    switch upload {
+                    case .inline(let value):
+                        committed = try await services.transport.commit(value, for: account, control: control)
+                    case .file(let value):
+                        committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
+                            try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                        }
+                    }
                     try await admitSync(generation, account: account, services: services)
                     guard committed.epoch == control.epoch, committed.keyID == control.keyID else {
                         throw ClipboardSyncServiceError.missingRemoteState
@@ -356,7 +373,9 @@ extension ClipboardHistoryModule {
                             arguments: [upload.record.recordID])
                         try database.execute(sql: "DELETE FROM clipboard_sync_chunks WHERE record_id = ?", arguments: [upload.record.recordID])
                         try saveSyncAccount(state, in: database)
+                        if upload.record.kind == .fileBody { try Self.bumpHistoryRevision(in: database) }
                     }
+                    if upload.record.kind == .fileBody { publishMutation() }
                     conflicts = 0
                 } catch ClipboardSyncServiceError.conflict {
                     conflicts += 1
@@ -372,6 +391,9 @@ extension ClipboardHistoryModule {
                     // Import that authority before deciding whether the old outbox still exists.
                     state = try await receiveSyncChanges(account: account, control: control, key: key,
                         state: state, services: services, generation: generation)
+                } catch {
+                    try recordSyncFileUploadFailure(error, record: upload.record, generation: generation)
+                    throw error
                 }
             }
             while let retired = try nextDeletedSyncContent(account: account, control: control) {
@@ -407,6 +429,7 @@ extension ClipboardHistoryModule {
                 }
             }
             state.lastCompletedAt = now()
+            try acknowledgeLinkedFileVersions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
             await finishSync(.upToDate, generation: generation)
         } catch is CancellationError {
@@ -437,6 +460,7 @@ extension ClipboardHistoryModule {
             }
             if phase == .failed(.accountChanged) {
                 syncSuspended = true
+                stopLinkedFileObservers()
                 syncAccountBindingGeneration = nil
                 syncPollTask?.cancel()
                 syncPollTask = nil
@@ -447,6 +471,7 @@ extension ClipboardHistoryModule {
         } catch {
             guard generation == syncGeneration, !syncSuspended else { return }
             syncSuspended = true
+            stopLinkedFileObservers()
             setSyncPhase(.failed(.localStorage))
         }
     }

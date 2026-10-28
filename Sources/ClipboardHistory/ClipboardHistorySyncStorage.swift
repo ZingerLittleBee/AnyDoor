@@ -168,18 +168,24 @@ extension ClipboardHistoryModule {
         }
     }
 
-    func nextSyncUpload(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncUpload? {
+    func nextSyncUpload(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {
         try requiredDatabase().read { database in
-            guard let row = try Row.fetchOne(database, sql: """
-                SELECT record_id, metadata FROM clipboard_sync_outbox
-                WHERE account_id = ? AND epoch = ? AND acknowledged = 0
+            guard let row = try Row.fetchOne(database, SQLRequest<Row>(literal: """
+                SELECT record_id, metadata FROM clipboard_sync_outbox AS outbox
+                WHERE account_id = \(account.identifier) AND epoch = \(control.epoch.uuidString) AND acknowledged = 0
+                  AND (\(Self.syncFileOutboxAuthority(accountID: account.identifier)))
                 ORDER BY CASE kind WHEN 'tag' THEN 0 ELSE 1 END, rowid LIMIT 1
-                """, arguments: [account.identifier, control.epoch.uuidString]) else { return nil }
+                """)) else { return nil }
             let id: String = row["record_id"]
             let metadata: Data = row["metadata"]
+            let record = try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: metadata)
+            if let directory = try String.fetchOne(database,
+                sql: "SELECT directory FROM clipboard_sync_file_uploads WHERE record_id = ?", arguments: [id]) {
+                return .file(.init(record: record, directory: URL(fileURLWithPath: directory)))
+            }
             let chunks = try Data.fetchAll(database,
                 sql: "SELECT ciphertext FROM clipboard_sync_chunks WHERE record_id = ? ORDER BY chunk_index", arguments: [id])
-            return ClipboardSyncUpload(record: try JSONDecoder().decode(ClipboardSyncRemoteRecord.self, from: metadata), chunks: chunks)
+            return .inline(ClipboardSyncUpload(record: record, chunks: chunks))
         }
     }
 
@@ -266,6 +272,8 @@ extension ClipboardHistoryModule {
                 try importSyncMetadata(metadata, account: account, record: record, in: database)
             case .fileBody:
                 throw ClipboardSyncServiceError.unsupportedVersion
+            case .fileVersion(let version):
+                try importSyncFileVersion(version, account: account, record: record, in: database)
             case .tagMerge(let merge):
                 try applySyncTagMerge(merge, accountID: account.identifier, locallyConfirmed: false, in: database)
                 try applyAllSyncMemberships(account: account, epoch: record.epoch, in: database)

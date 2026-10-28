@@ -6,6 +6,127 @@
     "settings.clipboard.sync.rejoinScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Selecting this tag restores %lld retained entries with their original shared identities."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "选择此标签将恢复 %lld 条保留历史的同步，并沿用原来的共享身份。"}}}},
     "settings.clipboard.sync.sharingScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tag selection is shared across participating Macs, which may contain additional matching history. Another selected tag keeps an entry shared."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "标签选择会同步到参与的 Mac，其他设备可能还有更多匹配历史。记录仍匹配其他已选标签时会继续同步。"}}}},
     "settings.clipboard.sync.withdrawnStatus": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld entries are withdrawn from sharing. Local copies remain; explicitly select their tag again to rejoin."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 条历史已撤回共享，本地副本仍保留。重新选择相应标签可恢复同步。"}}}},
+    "clipboard.linkedFile.locations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Linked Locations" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关联位置" } }
+      }
+    },
+    "clipboard.linkedFile.original": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Original" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "原始文件" } }
+      }
+    },
+    "clipboard.linkedFile.workingCopy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Working Copy" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "工作副本" } }
+      }
+    },
+    "clipboard.linkedFile.associated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Associated File" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已关联文件" } }
+      }
+    },
+    "clipboard.linkedFile.associate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Associate File…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关联文件…" } }
+      }
+    },
+    "clipboard.linkedFile.associateMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Saved changes at this location will sync with the linked file. The chosen file’s current contents are preserved." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置保存的改动将与关联文件同步。所选文件的当前内容会保留。" } }
+      }
+    },
+    "clipboard.linkedFile.localChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local file changes waiting to sync" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地文件改动等待同步" } }
+      }
+    },
+    "clipboard.linkedFile.conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "File conflict · Local changes preserved" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "文件冲突 · 本地改动已保留" } }
+      }
+    },
+    "clipboard.linkedFile.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose an available ordinary file to associate." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请选择可用的普通文件进行关联。" } }
+      }
+    },
+    "clipboard.linkedFile.alreadyAssociated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This location is already associated with another file." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此位置已与另一个文件关联。" } }
+      }
+    },
+  "clipboard.sync.fileDownload": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Download"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "下载"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileUpdateAvailable": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Update available; the previous version is ready to use"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "有可用更新，仍可使用上一个完整版本"
+        }
+      }
+    }
+  },
+  "clipboard.sync.fileProgress": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ of %@"
+        }
+      },
+      "zh-Hans": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ / %@"
+        }
+      }
+    }
+  },
     "settings.clipboard.sync.authorizeRetained": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Include this Mac’s retained history for %@ in the current account"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "将本机为 %@ 保留的历史纳入当前账户同步"}}}},
     "settings.clipboard.sync.merge.title": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge Tags…"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并标签…"}}}},
     "settings.clipboard.sync.merge.with": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge with %@"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "与 %@ 合并"}}}},

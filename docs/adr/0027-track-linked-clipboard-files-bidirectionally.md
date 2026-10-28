@@ -29,5 +29,8 @@ The original or independently exported file is never removed merely because a
 history entry is deleted. Top-level source removal detaches that location;
 removal inside a tracked directory remains a content change.
 
-Implementation has not started. The complete specification defines the
-signed-app and multi-device acceptance gates that it must satisfy.
+Ordinary-file associations and saved-change reconciliation are implemented with
+persisted per-location bases and dirty-file preservation. Directory/package
+tracking, identity reconciliation, and conflict resolution are separate slices.
+The complete specification defines the signed-app and multi-device acceptance
+gates; isolated real-file tests do not establish live iCloud delivery.

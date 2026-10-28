@@ -483,6 +483,116 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         }
     }
 
+    func commitFile(_ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl, progress: @Sendable (Int64) async throws -> Void
+    ) async throws -> ClipboardSyncControl {
+        let generation = cancellationGeneration
+        let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
+        try validateControl(control, account: account)
+        try validateMetadata(upload.record)
+        guard upload.record.epoch == control.epoch, upload.record.keyID == control.keyID else {
+            throw ClipboardSyncServiceError.missingRemoteState
+        }
+        try await progress(0)
+        do {
+            if let completed = try await completedCommit(upload.record, account: account, database: database) {
+                try checkCancellation(generation)
+                try await progress(upload.record.encryptedByteCount)
+                return completed
+            }
+            var current = control
+            var digest = SHA256()
+            var byteCount: Int64 = 0
+            for start in stride(from: 0, to: upload.record.chunkCount, by: Self.batchSize) {
+                try checkCancellation(generation)
+                let end = start + min(Self.batchSize, upload.record.chunkCount - start)
+                let ids = (start..<end).map { chunkID(upload.record, index: $0, account: account) }
+                let existing = try await fetchRecords(ids, desiredKeys: Self.chunkMetadataKeys, database: database)
+                try checkCancellation(generation)
+                var pending: [CKRecord] = []
+                for (offset, index) in (start..<end).enumerated() {
+                    try checkCancellation(generation)
+                    let bytes = try ClipboardSyncFileTransfer.readSegment(in: upload.directory, index: index)
+                    let chunkDigest = Data(SHA256.hash(data: bytes))
+                    digest.update(data: bytes)
+                    let addition = byteCount.addingReportingOverflow(Int64(bytes.count))
+                    guard !addition.overflow, addition.partialValue <= upload.record.encryptedByteCount else {
+                        throw ClipboardSyncServiceError.corruptData
+                    }
+                    byteCount = addition.partialValue
+                    guard let previous = existing[ids[offset]] else { throw ClipboardSyncServiceError.corruptData }
+                    switch previous {
+                    case .success(let record):
+                        try validateChunk(record, remote: upload.record, index: index)
+                        guard record["chunkDigest"] as? Data == chunkDigest else { throw ClipboardSyncServiceError.corruptData }
+                    case .failure(let error):
+                        guard Self.hasCode(error, .unknownItem) else { throw error }
+                        let record = CKRecord(recordType: Self.chunkType, recordID: ids[offset])
+                        record["operationID"] = upload.record.operationID.uuidString as NSString
+                        record["epoch"] = upload.record.epoch.uuidString as NSString
+                        record["keyID"] = upload.record.keyID.uuidString as NSString
+                        record["chunkIndex"] = index as NSNumber
+                        record["chunkDigest"] = chunkDigest as NSData
+                        record["asset"] = CKAsset(fileURL: ClipboardSyncFileTransfer.segmentURL(in: upload.directory, index: index))
+                        pending.append(record)
+                    }
+                }
+                if !pending.isEmpty {
+                    current = try await commitBatch(pending, control: current, account: account, database: database)
+                }
+                try checkCancellation(generation)
+                try await progress(byteCount)
+                try checkCancellation(generation)
+            }
+            guard byteCount == upload.record.encryptedByteCount, Data(digest.finalize()) == upload.record.digest else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            let manifest = CKRecord(recordType: Self.objectType,
+                recordID: .init(recordName: upload.record.recordID, zoneID: zoneID(account)))
+            manifest["metadata"] = try JSONEncoder().encode(upload.record) as NSData
+            let completed = try await commitBatch([manifest], control: current, account: account, database: database)
+            try checkCancellation(generation)
+            return completed
+        } catch {
+            try checkCancellation(generation)
+            if let completed = try? await completedCommit(upload.record, account: account, database: database) {
+                try checkCancellation(generation)
+                return completed
+            }
+            throw Self.failure(error)
+        }
+    }
+
+    func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int,
+        for account: ClipboardSyncAccount) async throws -> Data {
+        let generation = cancellationGeneration
+        let database = try await checkedDatabase(for: account)
+        try checkCancellation(generation)
+        try validateMetadata(record)
+        guard index >= 0, index < record.chunkCount else { throw ClipboardSyncServiceError.corruptData }
+        let id = chunkID(record, index: index, account: account)
+        do {
+            let results = try await fetchRecords([id], desiredKeys: Self.chunkMetadataKeys + ["asset"], database: database)
+            try checkCancellation(generation)
+            guard let result = results[id] else { throw ClipboardSyncServiceError.corruptData }
+            let chunk = try result.get()
+            try validateChunk(chunk, remote: record, index: index)
+            guard let url = (chunk["asset"] as? CKAsset)?.fileURL else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            let bytes = try ClipboardSyncFileTransfer.readAsset(at: url)
+            guard chunk["chunkDigest"] as? Data == Data(SHA256.hash(data: bytes)) else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            try checkCancellation(generation)
+            return bytes
+        } catch {
+            try checkCancellation(generation)
+            throw Self.failure(error)
+        }
+    }
+
     func cancel() {
         // Safe before activation: cancelling must not construct a container,
         // inspect the system account, or touch synchronizable Keychain items.

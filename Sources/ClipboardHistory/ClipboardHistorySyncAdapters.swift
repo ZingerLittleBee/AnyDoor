@@ -55,6 +55,18 @@ struct ClipboardSyncUpload: Codable, Equatable, Sendable {
     let chunks: [Data]
 }
 
+enum ClipboardSyncPendingUpload: Sendable {
+    case inline(ClipboardSyncUpload)
+    case file(ClipboardSyncFileUpload)
+
+    var record: ClipboardSyncRemoteRecord {
+        switch self {
+        case .inline(let value): value.record
+        case .file(let value): value.record
+        }
+    }
+}
+
 struct ClipboardSyncCleanupPage: Sendable {
     let control: ClipboardSyncControl
     let cursor: Data?
@@ -102,6 +114,14 @@ protocol ClipboardSyncTransport: Sendable {
         for account: ClipboardSyncAccount,
         control: ClipboardSyncControl
     ) async throws -> ClipboardSyncControl
+    func commitFile(
+        _ upload: ClipboardSyncFileUpload, for account: ClipboardSyncAccount,
+        control: ClipboardSyncControl,
+        progress: @Sendable (Int64) async throws -> Void
+    ) async throws -> ClipboardSyncControl
+    func downloadFileSegment(
+        _ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount
+    ) async throws -> Data
     /// Removes a retired content operation and its chunks, with active control
     /// CAS on every bounded batch. Only authenticated domain receipts qualify.
     func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
