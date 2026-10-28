@@ -1383,6 +1383,41 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testUnavailableInitialSourceRecoversAfterReopeningWithoutAdoptingAReplacement() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let bytes = Data("the original identity returns".utf8)
+        let fixture = try await fileFixture(names: ["Recover.txt", "Replaced.txt"], contents: [bytes, Data("old identity".utf8)],
+            beforeEnable: { urls in
+                for url in urls { XCTAssertEqual(chmod(url.path, 0o000), 0) }
+            })
+        defer { for url in fixture.sourceURLs { _ = chmod(url.path, 0o600) } }
+        try await fixture.receiver.setSyncEnabled(true)
+        let initial = try await fixture.receiver.page(.init())
+        let entry = try XCTUnwrap(initial.entries.first)
+        XCTAssertEqual(entry.syncFiles.map(\.state), [.sourceUnavailable, .sourceUnavailable])
+        try await fixture.sender.closeStoreForTesting()
+        XCTAssertEqual(chmod(fixture.sourceURLs[0].path, 0o600), 0)
+        try FileManager.default.removeItem(at: fixture.sourceURLs[1])
+        try Data("unrelated replacement".utf8).write(to: fixture.sourceURLs[1])
+        let reopened = makeModule(services: fixture.services, keyByte: 0x71, time: 3_000, root: fixture.senderRoot)
+
+        await reopened.resumeSync()
+        await fixture.receiver.retrySync()
+
+        let result = try await fixture.receiver.page(.init())
+        let files = try XCTUnwrap(result.entries.first).syncFiles
+        XCTAssertEqual(files.map(\.id), entry.syncFiles.map(\.id))
+        XCTAssertEqual(files.map(\.state), [.complete, .sourceUnavailable])
+        XCTAssertNotEqual(files[0].versionID, entry.syncFiles[0].versionID)
+        XCTAssertEqual(files[1].versionID, entry.syncFiles[1].versionID)
+        XCTAssertFalse(files[0].hasConflict)
+        let locations = try await fixture.receiver.linkedFileLocations(for: entry.id)
+        let recovered = try XCTUnwrap(locations.first { $0.objectID == files[0].id })
+        XCTAssertEqual(try Data(contentsOf: recovered.url), bytes)
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURLs[1]), Data("unrelated replacement".utf8))
+    }
+
+    @MainActor
     func testFileBackfillReadsCurrentBytesAndKeepsUnavailableMembersInOrder() async throws {
         let fixture = try await fileFixture(names: ["Edited.txt", "Gone.txt"],
             contents: [Data("old capture".utf8), Data("gone".utf8)], beforeEnable: { urls in

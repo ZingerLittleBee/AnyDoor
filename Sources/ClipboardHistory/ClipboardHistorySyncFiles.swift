@@ -14,8 +14,12 @@ extension ClipboardHistoryModule {
     static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
         try Row.fetchAll(database, sql: """
             SELECT member.account_id, member.epoch, version.descriptor, completed.version_id AS complete_version_id,
-                   completed.transfer_state, completed.local_path, completed.local_identity
+                   completed.transfer_state, completed.local_path, completed.local_identity,
+                   (member.origin = 'local' AND COALESCE(source.reference_provenance, '') IN ('ordinary', 'legacyUnverified')
+                     AND COALESCE(version.local_bookmark, source.bookmark_data) IS NOT NULL
+                     AND COALESCE(version.local_identity, source.identity_data) IS NOT NULL) AS has_retry_source
             FROM clipboard_sync_file_members AS member
+            LEFT JOIN clipboard_file_members AS source ON source.entry_id = member.entry_id AND source.item_index = member.item_index
             JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
             JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
               AND version.epoch = member.epoch AND version.object_id = member.object_id AND version.version_id = choice.current_version_id
@@ -47,10 +51,11 @@ extension ClipboardHistoryModule {
                 }
                 let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
+                let sourcePending = descriptor.state == .sourceUnavailable && (row["has_retry_source"] as Bool)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
                     availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
-                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending,
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending || sourcePending,
                     hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
             }
     }
@@ -224,28 +229,42 @@ extension ClipboardHistoryModule {
                 return true
             }
         }
-        // The previous file protocol advertised large files without a body.
-        // Publish a new immutable version instead of rewriting its descriptor.
-        let legacy = try syncFileRead { database in
+        // Retry the captured identity once its initial descriptor is staged.
+        // Recovered sources and legacy large files become immutable children.
+        let retryable = try syncFileRead { database in
             try Row.fetchAll(database, SQLRequest<Row>(literal: """
-                SELECT DISTINCT version.object_id, version.version_id, version.local_bookmark, version.local_identity
+                SELECT DISTINCT version.object_id, version.version_id,
+                    member.entry_id, member.item_index, member.representation_index,
+                    source.display_name, source.reference_provenance,
+                    COALESCE(version.local_bookmark, source.bookmark_data) AS bookmark,
+                    COALESCE(version.local_identity, source.identity_data) AS identity
                 FROM clipboard_sync_file_versions AS version
                 JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
                 JOIN clipboard_sync_file_members AS member USING(account_id, epoch, object_id)
                 JOIN clipboard_entries AS entry ON entry.id = member.entry_id
+                JOIN clipboard_file_members AS source ON source.entry_id = member.entry_id AND source.item_index = member.item_index
+                JOIN clipboard_sync_entries AS shared ON shared.account_id = member.account_id
+                    AND shared.epoch = member.epoch AND shared.local_entry_id = member.entry_id
                 WHERE version.account_id = \(account.identifier) AND version.epoch = \(control.epoch.uuidString)
-                  AND choice.current_version_id = version.version_id AND version.transfer_state = 'pendingUpload'
+                  AND choice.current_version_id = version.version_id AND member.origin = 'local'
+                  AND version.transfer_state IN ('pendingUpload', 'sourceUnavailable')
                   AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
-                """)).compactMap { row -> (UUID, UUID, Data, Data)? in
+                """)).compactMap { row -> (UUID, UUID, ClipboardSyncFileSource)? in
                 guard let objectID = UUID(uuidString: row["object_id"]), let versionID = UUID(uuidString: row["version_id"]),
-                      let bookmark: Data = row["local_bookmark"], let identity: Data = row["local_identity"] else { return nil }
-                return (objectID, versionID, bookmark, identity)
+                      let bookmark: Data = row["bookmark"], let identity: Data = row["identity"] else { return nil }
+                return (objectID, versionID, ClipboardSyncFileSource(entryID: row["entry_id"], itemIndex: row["item_index"],
+                    representationIndex: row["representation_index"], name: row["display_name"],
+                    bookmark: bookmark, identity: identity, provenance: row["reference_provenance"]))
             }
         }
-        for (objectID, parent, bookmark, identity) in legacy {
+        for (objectID, parent, source) in retryable {
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
+            let sampled = await Task.detached(priority: .utility) { ClipboardSyncFileIO.sample(source) }.value
             try admitSync(generation)
-            let source = try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity)
-            _ = try await publishFileVersion(sourceURL: source, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
+            guard sampled.state == .available || sampled.state == .pendingUpload,
+                  let url = sampled.url, let identity = source.identity else { continue }
+            _ = try await publishFileVersion(sourceURL: url, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
         }
     }
 

@@ -63,7 +63,7 @@ enum ClipboardSyncFileIO {
 
     static func sample(_ source: ClipboardSyncFileSource) -> ClipboardSyncFileSample {
         let unavailable = ClipboardSyncFileSample(state: .sourceUnavailable, byteCount: nil,
-            bytes: nil, url: nil, bookmark: nil)
+            bytes: nil, url: nil, bookmark: source.bookmark)
         guard source.provenance == "ordinary" || source.provenance == "legacyUnverified",
               let bookmark = source.bookmark, let identity = source.identity else { return unavailable }
         do {

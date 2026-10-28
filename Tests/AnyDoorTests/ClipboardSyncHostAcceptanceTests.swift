@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import ClipboardHistoryTestSupport
 import XCTest
 
@@ -7,6 +8,50 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncHostAcceptanceTests: XCTestCase {
+    func testUnavailableInitialSourceRecoversThroughFileRetryAfterAccessReturns() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let fixture = try makeModules()
+        let source = fixture.root.appendingPathComponent("Initially unavailable.txt")
+        let bytes = Data("same original after access returns".utf8)
+        try bytes.write(to: source)
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString(source.absoluteString, forType: .fileURL)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let captured) = try await fixture.sender.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a file capture")
+        }
+        let tag = try await fixture.sender.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+        try await fixture.sender.setSyncTagSelected(tag.id, selected: true)
+        XCTAssertEqual(chmod(source.path, 0o000), 0)
+        defer { _ = chmod(source.path, 0o600) }
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let presentation = ClipboardHistoryPresentationModel(module: fixture.sender)
+        await presentation.reload()
+        let unavailable = try XCTUnwrap(presentation.entries.first?.syncFiles.first)
+        XCTAssertEqual(unavailable.state, .sourceUnavailable)
+        XCTAssertTrue(unavailable.uploadPending, "An unavailable original must offer the file Retry action")
+        let remoteBefore = try await fixture.receiver.page(.init())
+        XCTAssertEqual(remoteBefore.entries.first?.syncFiles.first?.state, .sourceUnavailable)
+
+        XCTAssertEqual(chmod(source.path, 0o600), 0)
+        await presentation.transferSyncFile(unavailable, entryID: captured.entryID)
+        await fixture.receiver.retrySync()
+
+        XCTAssertNil(presentation.actionFailure)
+        let received = try await fixture.receiver.page(.init())
+        let recovered = try XCTUnwrap(received.entries.first?.syncFiles.first)
+        XCTAssertEqual(recovered.id, unavailable.id)
+        XCTAssertNotEqual(recovered.versionID, unavailable.versionID)
+        XCTAssertEqual(recovered.state, .complete)
+        XCTAssertFalse(recovered.hasConflict)
+        let content = try await fixture.receiver.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Expected the recovered complete file") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), bytes)
+    }
+
     func testReceivedMixedEntryCopiesOnlyCompleteVersionsWithoutCaptureOrEcho() async throws {
         let fixture = try makeModules()
         let directory = fixture.root.appendingPathComponent("Shared complete directory")

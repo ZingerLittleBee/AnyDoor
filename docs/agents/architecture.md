@@ -190,6 +190,9 @@ for isolated real-store coverage; those tests do not establish live iCloud deliv
 
 `ClipboardHistorySyncFiles` prepares currently accessible file and directory content
 before staging an entry envelope. Source paths and bookmarks remain local.
+An initially unavailable original retains its captured identity for Retry and
+relaunch. Restored access publishes a new immutable child version of the same
+object; a different object at the old path does not qualify for recovery.
 Each top-level file at or below 5,000,000 original bytes downloads automatically;
 larger versions require an exact-version download action. Uploads are automatic
 for eligible files of any size. A previously complete local version remains
