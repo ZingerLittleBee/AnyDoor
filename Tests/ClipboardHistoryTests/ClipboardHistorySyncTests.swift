@@ -9,6 +9,65 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testMixedRichAndFileItemsRemainOneCompleteEntryAcrossBodyRetry() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0xA5, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0xA6, time: 2_000)
+        let sourceRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-mixed-file-source-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(sourceRoot)
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let source = sourceRoot.appendingPathComponent("Attachment.txt")
+        let bytes = Data("ordered attachment bytes".utf8)
+        try bytes.write(to: source)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-rich-file.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let rich = NSPasteboardItem()
+        let html = Data("<b>first rich item</b>".utf8)
+        rich.setString("first rich item", forType: .string)
+        rich.setData(html, forType: .html)
+        let file = NSPasteboardItem()
+        file.setString(source.absoluteString, forType: .fileURL)
+        XCTAssertTrue(pasteboard.writeObjects([rich, file]))
+        guard case .captured(let captured) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a complete rich/file entry")
+        }
+        let tag = try await first.createTagDefinition(named: "Mixed", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        pasteboard.clearContents()
+        pasteboard.setString("unchanged during pending paste", forType: .string)
+        let generation = pasteboard.changeCount
+        await cloud.damageNextFileBodyDownload()
+        try await second.setSyncEnabled(true)
+        let pending = try await second.page(.init())
+        XCTAssertEqual(pending.entries.map(\.id), [captured.entryID])
+        XCTAssertEqual(pending.entries.first?.syncFiles.map(\.state), [.waitingForDownload])
+        do {
+            _ = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+            XCTFail("The rich member cannot paste without its file member")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+        XCTAssertEqual(pasteboard.changeCount, generation)
+        XCTAssertEqual(pasteboard.string(forType: .string), "unchanged during pending paste")
+        await second.retrySync()
+        let complete = try await second.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        XCTAssertEqual(complete.items.count, 2)
+        XCTAssertEqual(complete.items[0].representations, [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "first rich item"), .data(typeIdentifier: "public.html", html),
+        ])
+        guard case .file(let receivedFile) = complete.items[1].representations.first else {
+            return XCTFail("The second item must remain a complete file")
+        }
+        XCTAssertEqual(try Data(contentsOf: receivedFile.currentURL), bytes)
+        do {
+            _ = try await second.materialize(.init(entryID: captured.entryID, purpose: .plainTextPaste))
+            XCTFail("The file-only item cannot be dropped from a plain-text paste")
+        } catch ClipboardHistoryModuleError.operationUnavailable {}
+        let final = try await second.page(.init())
+        XCTAssertEqual(final.entries.map(\.id), [captured.entryID])
+    }
+
+    @MainActor
     func testMultipleOwnedImagesKeepOrderAndOnlyPublishTheReferencedEntryPreview() async throws {
         let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
         let first = makeModule(services: services, keyByte: 0xA3, time: 1_000)
