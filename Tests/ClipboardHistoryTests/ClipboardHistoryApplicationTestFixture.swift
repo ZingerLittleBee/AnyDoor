@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import Darwin
 import Foundation
@@ -45,6 +46,56 @@ struct ClipboardApplicationTestFixture: Sendable {
             }
         }
         return fixture
+    }
+
+    @MainActor
+    func launch() async throws -> ClipboardApplicationTestProcess {
+        let control = url.deletingLastPathComponent().appendingPathComponent("fixture-process-\(UUID())")
+        let manager = FileManager.default
+        try manager.createDirectory(at: control, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let home = control.appendingPathComponent("Home")
+        try manager.createDirectory(at: home, withIntermediateDirectories: true)
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = [control.appendingPathComponent("ready").path, control.appendingPathComponent("stop").path]
+        process.currentDirectoryURL = control
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = home.path
+        environment["CFFIXED_USER_HOME"] = home.path
+        environment["TMPDIR"] = control.path + "/"
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch {
+            try? manager.removeItem(at: control)
+            throw error
+        }
+        let owned = ClipboardApplicationTestProcess(process: process, controlDirectory: control)
+        do {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+            while ContinuousClock.now < deadline {
+                try Task.checkCancellation()
+                guard owned.isRunning else { throw ClipboardApplicationTestError.nativeVisibilityUnavailable }
+                let ready = try? String(contentsOf: control.appendingPathComponent("ready"), encoding: .utf8)
+                if ready == String(owned.processIdentifier),
+                   let direct = NSRunningApplication(processIdentifier: owned.processIdentifier),
+                   let workspace = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == owned.processIdentifier }),
+                   [direct, workspace].allSatisfy({ application in
+                       !application.isTerminated
+                           && application.bundleURL?.resolvingSymlinksInPath() == url.resolvingSymlinksInPath()
+                           && application.executableURL?.resolvingSymlinksInPath() == executableURL.resolvingSymlinksInPath()
+                   }) {
+                    owned.runningApplication = direct
+                    return owned
+                }
+                await ClipboardApplicationTestProcess.yieldMainLoop()
+            }
+            throw ClipboardApplicationTestError.nativeVisibilityUnavailable
+        } catch {
+            try? await owned.stop()
+            throw error
+        }
     }
 
     func verifySignature() throws {
@@ -133,4 +184,64 @@ struct ClipboardApplicationTestEntry: Equatable, Sendable {
 
 enum ClipboardApplicationTestError: Error {
     case commandFailed(String, Int32, String)
+    case nativeVisibilityUnavailable
+    case failedToExitNormally(Int32?)
+}
+
+/// Owns only the exact process created for this fixture, never a name or bundle
+/// identifier match. Consumers register stop() in async teardown immediately.
+@MainActor
+final class ClipboardApplicationTestProcess {
+    private let process: Process
+    private let controlDirectory: URL
+    fileprivate(set) var runningApplication: NSRunningApplication?
+    var processIdentifier: pid_t { process.processIdentifier }
+    var isRunning: Bool { process.isRunning }
+    var terminationStatus: Int32? { process.isRunning ? nil : process.terminationStatus }
+
+    fileprivate init(process: Process, controlDirectory: URL) {
+        self.process = process
+        self.controlDirectory = controlDirectory
+    }
+
+    func stop() async throws {
+        var forced = false
+        if process.isRunning {
+            // Cleanup must complete even when the calling test is cancelled.
+            try? Data("stop".utf8).write(to: controlDirectory.appendingPathComponent("stop"), options: .atomic)
+            await waitForExit(seconds: 5)
+        }
+        if process.isRunning {
+            forced = true
+            process.terminate()
+            await waitForExit(seconds: 2)
+        }
+        if process.isRunning {
+            _ = Darwin.kill(process.processIdentifier, SIGKILL)
+            await waitForExit(seconds: 2)
+        }
+        guard !process.isRunning else { throw ClipboardApplicationTestError.failedToExitNormally(nil) }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while runningApplication?.isTerminated == false, ContinuousClock.now < deadline {
+            await Self.yieldMainLoop()
+        }
+        try? FileManager.default.removeItem(at: controlDirectory)
+        guard !forced, process.terminationReason == .exit, process.terminationStatus == 0,
+              runningApplication?.isTerminated != false else {
+            throw ClipboardApplicationTestError.failedToExitNormally(process.terminationStatus)
+        }
+    }
+
+    private func waitForExit(seconds: Int) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+        while process.isRunning, ContinuousClock.now < deadline { await Self.yieldMainLoop() }
+    }
+
+    /// Yield instead of blocking AppKit's main RunLoop. A cancelled test still
+    /// allows its owned process's orderly shutdown and bounded fallback cleanup.
+    fileprivate static func yieldMainLoop() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { continuation.resume() }
+        }
+    }
 }
