@@ -8,6 +8,33 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDeletionWinsWhenAnOfflineUploadLosesItsControlRace() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x98, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x99, time: 2_000)
+        let shared = try await first.capture(.init(source: .unknown, content: .text("race original")))
+        let tag = try await first.createTagDefinition(named: "Race", assigningTo: shared.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.suspendSync()
+        _ = try await second.apply(.editText(shared.entryID, "save this offline draft"))
+        await cloud.holdNextEntryCommit()
+        let upload = Task { await second.resumeSync() }
+        await cloud.waitForHeldEntryCommit()
+        _ = try await first.apply(.delete(shared.entryID))
+        await first.retrySync()
+        await cloud.releaseEntryCommit()
+        await upload.value
+        let after = try await second.page(.init())
+        XCTAssertEqual(after.entries.count, 1)
+        XCTAssertNotEqual(after.entries.first?.id, shared.entryID)
+        XCTAssertEqual(after.entries.first?.previewText, "save this offline draft")
+        let notice = try await second.preservedSyncEdits()
+        XCTAssertEqual(notice.count, 1)
+    }
+
     func testBulkClearPreservesProtectedEntriesUntilExplicitlyIncludedAndDeletesOnPeers() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -1622,6 +1649,9 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
     private var revision = 0
+    private var holdsEntryCommit = false
+    private var heldEntryCommit: CheckedContinuation<Void, Never>?
+    private var entryCommitObserver: CheckedContinuation<Void, Never>?
     private var losesEntryResponse = false
     private var reads = 0
     private var rendezvous = false
@@ -1712,7 +1742,15 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return upload.chunks
     }
     func commit(_ upload: ClipboardSyncUpload, for account: ClipboardSyncAccount,
-                control: ClipboardSyncControl) throws -> ClipboardSyncControl {
+                control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        if holdsEntryCommit, upload.record.kind == .entry {
+            holdsEntryCommit = false
+            await withCheckedContinuation {
+                heldEntryCommit = $0
+                entryCommitObserver?.resume()
+                entryCommitObserver = nil
+            }
+        }
         try checkAccount(account)
         guard let descriptor = descriptors[account.identifier], descriptor.epoch == control.epoch else {
             throw ClipboardSyncServiceError.missingRemoteState
@@ -1731,6 +1769,12 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         return result
     }
+    func holdNextEntryCommit() { holdsEntryCommit = true }
+    func waitForHeldEntryCommit() async {
+        guard heldEntryCommit == nil else { return }
+        await withCheckedContinuation { entryCommitObserver = $0 }
+    }
+    func releaseEntryCommit() { heldEntryCommit?.resume(); heldEntryCommit = nil }
     func cancel() async {
         cancellations += 1
         let waiters = cancellationWaiters

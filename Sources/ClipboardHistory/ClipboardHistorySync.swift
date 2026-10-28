@@ -139,6 +139,33 @@ extension ClipboardHistoryModule {
         await retrySync()
     }
 
+    private func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+                                    state initial: ClipboardSyncAccountState, services: ClipboardSyncServices,
+                                    generation: UInt64) async throws -> ClipboardSyncAccountState {
+        var state = initial
+        var more = true
+        while more {
+            let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
+            try await admitSync(generation, account: account, services: services)
+            for record in page.records where record.epoch == control.epoch {
+                // A body is discovered without downloading it. Its encrypted
+                // entry descriptor authorizes a separate version download.
+                if record.kind == .fileBody { continue }
+                guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
+                let chunks = try await services.transport.download(record, for: account)
+                try await admitSync(generation, account: account, services: services)
+                let content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
+                try await waitForWriteTurn()
+                try admitSync(generation)
+                try importSyncContent(content, record: record, account: account)
+            }
+            state.cursor = page.cursor
+            try syncWrite { try saveSyncAccount(state, in: $0) }
+            more = page.hasMore
+        }
+        return state
+    }
+
     private func performSync(generation: UInt64, allowAccountBinding: Bool) async {
         guard let services = syncServices else {
             await finishSync(.capabilityUnavailable, generation: generation)
@@ -214,26 +241,8 @@ extension ClipboardHistoryModule {
             if try needsSyncTextRootReplay(account: account, control: control) {
                 state.cursor = nil
             }
-            var more = true
-            while more {
-                let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
-                try await admitSync(generation, account: account, services: services)
-                for record in page.records where record.epoch == control.epoch {
-                    // A body is discovered without downloading it. Its encrypted
-                    // entry descriptor authorizes a separate version download.
-                    if record.kind == .fileBody { continue }
-                    guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
-                    let chunks = try await services.transport.download(record, for: account)
-                    try await admitSync(generation, account: account, services: services)
-                    let content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
-                    try await waitForWriteTurn()
-                    try admitSync(generation)
-                    try importSyncContent(content, record: record, account: account)
-                }
-                state.cursor = page.cursor
-                try syncWrite { try saveSyncAccount(state, in: $0) }
-                more = page.hasMore
-            }
+            state = try await receiveSyncChanges(account: account, control: control, key: key,
+                state: state, services: services, generation: generation)
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
             try await prepareSyncFiles(account: account, control: control, key: key, generation: generation)
@@ -271,6 +280,11 @@ extension ClipboardHistoryModule {
                     }
                     try await admitSync(generation, account: account, services: services)
                     control = refreshed
+                    state.control = refreshed
+                    // A new control token may authorize a deletion or withdrawal.
+                    // Import that authority before deciding whether the old outbox still exists.
+                    state = try await receiveSyncChanges(account: account, control: control, key: key,
+                        state: state, services: services, generation: generation)
                 }
             }
             state.lastCompletedAt = now()
