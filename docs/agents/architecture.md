@@ -110,6 +110,24 @@ Removing a selection that would lose the final matching tag remains unavailable
 until the withdrawal slice is implemented. Local copies still follow tag-protection
 and retention rules.
 
+The initial encrypted entry envelope retains every supported item and standard
+representation in order: exact text and links, rich text bytes, standard colors,
+owned PNGs and thumbnails, and file descriptors. It validates the complete
+structure and aggregate capture limits before making it usable. Owned assets are
+published with the local authenticated payload store before SQL references commit;
+failed publication cannot leave a shorter mixed entry. Legacy text envelopes use
+the same writer. Search fields are rebuilt locally, and receiving an entry neither
+starts image recognition nor changes capture preferences or recent-use order.
+
+The additive `v17_clipboard_sync_content` migration owns independent favorite,
+OCR, and QR registers. Local changes persist their intent in the same transaction
+as the history mutation. Lamport counters with immutable operation IDs converge
+across restart and reordering, including metadata received before its entry. An
+initial snapshot never replaces a newer register. Recognition results refer to
+the initial content record and apply only while its bitmap remains; a late result
+cannot restore content removed by a text edit. Preferences, jobs, search-index rows,
+and local recency never travel in these metadata operations.
+
 The additive `v18_clipboard_sync_versions` journal records immutable versions and
 parent relationships in SQLCipher before a local edit can be acknowledged. Edits
 and resolutions share the same account, epoch and shared identity as the original

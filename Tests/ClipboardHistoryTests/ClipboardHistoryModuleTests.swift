@@ -1148,6 +1148,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
                 "v16_clipboard_sync_recovery",
+                "v17_clipboard_sync_content",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]
@@ -1191,6 +1192,12 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let identity = ClipboardHistoryEntryID(try XCTUnwrap(UUID(uuidString: entryID)))
         let content = try await module.materialize(.init(entryID: identity, purpose: .plainTextPaste))
         XCTAssertEqual(content.items.first?.representations, [.text(typeIdentifier: "public.utf8-plain-text", value: "retained text")])
+        _ = try await module.apply(.setFavorite(identity, true))
+        try await module.closeStoreForTesting()
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(testingDatabaseURL: fixture.url, databaseKey: fixture.key))
+        let page = try await reopened.page(.init())
+        XCTAssertTrue(try XCTUnwrap(page.entries.first).isFavorite)
+        XCTAssertEqual(page.entries.first?.tagIDs, ["existing-tag"])
     }
 
     func testExistingFoundationStoreMigratesThroughEveryVersion() async throws {
@@ -1227,6 +1234,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v14_clipboard_sync",
                 "v15_clipboard_sync_tags",
                 "v16_clipboard_sync_recovery",
+                "v17_clipboard_sync_content",
                 "v18_clipboard_sync_versions",
                 "v19_clipboard_sync_files",
             ]

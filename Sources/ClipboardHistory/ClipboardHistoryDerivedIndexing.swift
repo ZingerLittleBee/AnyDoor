@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import Vision
 
-enum ClipboardHistoryDerivedJobKind: String, CaseIterable, Sendable {
+enum ClipboardHistoryDerivedJobKind: String, Codable, CaseIterable, Sendable {
     case ocr
     case qr
 }
@@ -534,6 +534,7 @@ extension ClipboardHistoryModule {
             guard database.changesCount == 1 else {
                 throw ClipboardHistoryModuleError.storageFailure
             }
+            try recordSyncRecognitionChange(values, kind: claim.key.kind, entryID: claim.key.entryID, in: database)
             try Self.bumpSearchIndexGeneration(in: database)
             try Self.bumpHistoryRevision(in: database)
             try faultInjector.check(.databaseTransaction)
