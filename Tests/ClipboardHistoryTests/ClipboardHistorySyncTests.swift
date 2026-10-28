@@ -7,6 +7,35 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testProviderBackoffAndFailureSurviveRestartWithoutEarlyCloudAccess() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-sync-recovery-\(UUID())")
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x41, time: 1_000, root: root,
+            clock: { clock.withLock { $0 } })
+        try await first.setSyncEnabled(true)
+        await cloud.failNextAccountRead(retryAfter: 120)
+        await first.retrySync()
+        try await first.closeStoreForTesting()
+
+        let reopened = makeModule(services: services, keyByte: 0x41, time: 1_000, root: root,
+            clock: { clock.withLock { $0 } })
+        let restored = await reopened.syncStatus()
+        XCTAssertEqual(restored.phase, .failed(.network))
+        let readsBefore = await cloud.accountReadCount()
+        await reopened.resumeSync()
+        let readsDuringBackoff = await cloud.accountReadCount()
+        XCTAssertEqual(readsDuringBackoff, readsBefore)
+        clock.withLock { $0 = $0.addingTimeInterval(120) }
+        await reopened.retrySync()
+        let recovered = await reopened.syncStatus()
+        XCTAssertEqual(recovered.phase, .upToDate)
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+    }
+
     func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

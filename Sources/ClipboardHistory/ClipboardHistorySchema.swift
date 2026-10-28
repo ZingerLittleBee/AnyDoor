@@ -186,6 +186,16 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v14_clipboard_sync") { database in
             try Self.createSyncSchema(in: database)
         }
+        migrator.registerMigration("v16_clipboard_sync_recovery") { database in
+            try database.execute(sql: """
+                CREATE TABLE clipboard_sync_recovery (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    phase BLOB,
+                    retry_not_before REAL
+                );
+                INSERT INTO clipboard_sync_recovery(id) VALUES (1);
+                """)
+        }
         return migrator
     }
 

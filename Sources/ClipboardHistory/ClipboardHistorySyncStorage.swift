@@ -10,6 +10,20 @@ struct ClipboardSyncAccountState: Codable, Sendable {
 }
 
 extension ClipboardHistoryModule {
+    func currentSyncRecovery() throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        try requiredDatabase().read { try syncRecovery(in: $0) }
+    }
+
+    func syncRecovery(in database: Database) throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        guard let row = try Row.fetchOne(database, sql: "SELECT phase, retry_not_before FROM clipboard_sync_recovery WHERE id = 1") else {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        let data: Data? = row["phase"]
+        let deadline: Double? = row["retry_not_before"]
+        return (try data.map { try JSONDecoder().decode(ClipboardHistorySyncPhase.self, from: $0) },
+                deadline.map { Date(timeIntervalSince1970: $0) })
+    }
+
     /// Callers join the write turn before entering this synchronous transaction.
     /// Keeping it synchronous prevents an account/store transition between the
     /// final admission check and the local commit.
