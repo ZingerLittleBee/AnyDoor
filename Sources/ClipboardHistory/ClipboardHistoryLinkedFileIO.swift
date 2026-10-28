@@ -10,6 +10,7 @@ struct ClipboardLinkedFileProof: Sendable {
     let byteCount: Int64
     let stamp: ClipboardLinkedFileStamp
     let nativeIdentity: ClipboardLinkedNativeIdentity?
+    var treeWitness: ClipboardFileTree? = nil
 }
 
 struct ClipboardLinkedFileStamp: Sendable {
@@ -30,6 +31,11 @@ struct ClipboardLinkedFileStamp: Sendable {
               current.st_dev == device, current.st_ino == inode, current.st_size == size,
               current.st_mtimespec.tv_sec == modified.tv_sec, current.st_mtimespec.tv_nsec == modified.tv_nsec else { return false }
         return !includeMetadata || (current.st_ctimespec.tv_sec == changed.tv_sec && current.st_ctimespec.tv_nsec == changed.tv_nsec)
+    }
+
+    func identifies(_ url: URL) -> Bool {
+        var current = stat()
+        return lstat(url.path, &current) == 0 && current.st_dev == device && current.st_ino == inode
     }
 }
 
@@ -71,7 +77,7 @@ enum ClipboardLinkedFileIO {
             while written < count {
                 let amount = buffer.withUnsafeBytes { write(output, $0.baseAddress?.advanced(by: written), count - written) }
                 if amount < 0, errno == EINTR { continue }
-                guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(amount == 0 ? EIO : errno) }
                 written += amount
             }
             copied += Int64(count)
@@ -106,30 +112,44 @@ enum ClipboardLinkedFileIO {
                 guard prepared.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
                 try Task.checkCancellation()
                 try faultInjector.check(.linkedFileBeforeReplacement)
+                // The durable journal owns both roots before this call. Long
+                // tree/attribute reads never hold the mutation gate or main DB.
+                do { try before.treeWitness?.verify(); try prepared.treeWitness?.verify() }
+                catch { return nil }
                 let exchanged = try authorize {
                     guard before.stamp.matches(destination), prepared.stamp.matches(replacement.url) else { return false }
-                    if try ClipboardFileTree.needsEncoding(destination) {
-                        guard try inspectCoordinated(destination, expectedIdentity: source.identity).digest == before.digest,
-                              try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity).digest == prepared.digest else { return false }
-                    }
                     guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-                    }
-                    // The exchange can change ctime. Saved content changes alter
-                    // the inode/size/mtime stamp and require immediate rollback.
-                    let oldIsTree = try ClipboardFileTree.needsEncoding(replacement.url)
-                    let oldTreeDigest = oldIsTree ? try? inspectCoordinated(replacement.url, expectedIdentity: source.identity).digest : nil
-                    let oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
-                        && (!oldIsTree || oldTreeDigest == before.digest)
-                    guard oldUnchanged else {
-                        guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
-                            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-                        }
-                        return false
                     }
                     return true
                 }
                 guard exchanged else { return nil }
+                try faultInjector.check(.linkedFileAfterNameExchange)
+                var oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
+                do { try before.treeWitness?.verify(at: replacement.url, afterExchange: true) }
+                catch { oldUnchanged = false }
+                if !oldUnchanged {
+                    // If either side changed, cancellation/revocation or a failed
+                    // rollback leaves the journal and both visible roots intact.
+                    guard prepared.stamp.matches(destination, includeMetadata: false) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                    let candidateStamp = try prepared.treeWitness?.verify(at: destination, afterExchange: true)
+                    let rolledBack = try authorize {
+                        guard before.stamp.identifies(replacement.url),
+                              prepared.stamp.matches(destination, includeMetadata: false) else { return false }
+                        if let candidateStamp {
+                            var current = stat()
+                            guard lstat(destination.path, &current) == 0,
+                                  ClipboardSyncFileSnapshot(current) == candidateStamp else { return false }
+                        }
+                        guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
+                            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+                        }
+                        return true
+                    }
+                    guard rolledBack else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                    try prepared.treeWitness?.verify(at: replacement.url, afterExchange: true)
+                    return nil
+                }
                 return try inspectCoordinated(destination, expectedIdentity: replacement.identity)
             }
         }
@@ -178,7 +198,8 @@ enum ClipboardLinkedFileIO {
         }
         var hasher = SHA256()
         var offset: Int64 = 0
-        let tree = try ClipboardFileTree.needsEncoding(url) ? ClipboardFileTree(url).stream { _ in } : nil
+        let treeWitness = try ClipboardFileTree.needsEncoding(url) ? ClipboardFileTree(url) : nil
+        let tree = try treeWitness?.stream { _ in }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while tree == nil && offset < before.st_size {
             try Task.checkCancellation()
@@ -204,6 +225,7 @@ enum ClipboardLinkedFileIO {
         return ClipboardLinkedFileProof(url: url,
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
-            digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after), nativeIdentity: nativeIdentity)
+            digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after),
+            nativeIdentity: nativeIdentity, treeWitness: treeWitness)
     }
 }

@@ -993,6 +993,8 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
 
     private nonisolated static func failure(_ error: Error) -> Error {
         if error is CancellationError || error is ClipboardSyncServiceError { return error }
+        if ClipboardSyncFileErrors.isAccessDenied(error) { return ClipboardSyncServiceError.localFileAccessDenied }
+        if case .fileOperationFailed = error as? ClipboardHistoryStorageError { return ClipboardSyncServiceError.localStorage }
         guard let cloud = error as? CKError else { return ClipboardSyncServiceError.network(retryAfter: nil) }
         if hasCode(error, .serverRecordChanged) { return ClipboardSyncServiceError.conflict }
         if let nested = cloud.partialErrorsByItemID?.values.first(where: {

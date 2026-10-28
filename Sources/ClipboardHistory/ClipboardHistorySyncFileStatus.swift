@@ -71,11 +71,14 @@ extension ClipboardHistoryModule {
     }
 
     static func syncFileFailure(_ error: Error) -> ClipboardHistorySyncFileFailure {
-        switch error as? ClipboardSyncServiceError {
+        if ClipboardSyncFileErrors.isAccessDenied(error) { return .localFileAccessDenied }
+        if ClipboardSyncFileErrors.isSourceChanged(error) { return .sourceChanged }
+        return switch error as? ClipboardSyncServiceError {
         case .network, .conflict: .network
         case .quota: .quota
         case .corruptData: .corruptData
         case .accessDenied: .accessDenied
+        case .localFileAccessDenied: .localFileAccessDenied
         case .accountChanged, .accountUnavailable: .accountChanged
         case .keyLocked, .keyUnavailable: .keyUnavailable
         case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion: .unavailable

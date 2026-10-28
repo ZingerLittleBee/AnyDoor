@@ -9,6 +9,7 @@ struct ClipboardSyncFileCandidate: Sendable {
     let parentDevice: Int32
     let parentInode: UInt64
     let snapshot: ClipboardSyncFileSnapshot
+    var treeWitness: ClipboardFileTree? = nil
 }
 
 struct ClipboardSyncFileSnapshot: Codable, Sendable, Equatable {
@@ -38,36 +39,40 @@ enum ClipboardSyncFilePublication {
     /// Plaintext construction is confined to the visible working-copy directory.
     @concurrent
     static func construct(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
-        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data
+        root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        faults: ClipboardHistoryFaultInjector = .init()
     ) async throws -> ClipboardSyncFileCandidate {
         if descriptor.bodyFormat == .treeSegmentsV1 {
             return try constructTree(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
-                root: root, account: account, control: control, key: key)
+                root: root, account: account, control: control, key: key, faults: faults)
         }
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
         defer { close(directory) }
         var parent = stat()
-        guard fstat(directory, &parent) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard fstat(directory, &parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         let existing = openat(directory, descriptor.displayName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         if existing >= 0 {
             defer { close(existing) }
             var before = stat()
-            guard fstat(existing, &before) == 0, before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+            guard fstat(existing, &before) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
                   before.st_size == descriptor.originalByteCount,
                   try digest(existing, byteCount: before.st_size) == descriptor.contentDigest else {
                 throw ClipboardSyncServiceError.localStorage
             }
             var after = stat()
-            guard fstat(existing, &after) == 0, ClipboardSyncFileSnapshot(before) == ClipboardSyncFileSnapshot(after) else {
+            guard fstat(existing, &after) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard ClipboardSyncFileSnapshot(before) == ClipboardSyncFileSnapshot(after) else {
                 throw ClipboardSyncServiceError.localStorage
             }
             return .init(directory: url, name: descriptor.displayName, pendingName: nil,
                 parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(after))
         }
-        guard errno == ENOENT, let body = descriptor.body else { throw ClipboardSyncServiceError.localStorage }
+        guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard let body = descriptor.body else { throw ClipboardSyncServiceError.localStorage }
         let pendingName = "Receiving-\(UUID().uuidString).partial"
         let output = openat(directory, pendingName, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard output >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard output >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var succeeded = false
         defer {
             close(output)
@@ -87,7 +92,7 @@ enum ClipboardSyncFilePublication {
                 while written < buffer.count {
                     let count = Darwin.write(output, buffer.baseAddress?.advanced(by: written), buffer.count - written)
                     if count < 0, errno == EINTR { continue }
-                    guard count > 0 else { throw ClipboardSyncServiceError.localStorage }
+                    guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(count == 0 ? EIO : errno) }
                     written += count
                 }
             }
@@ -95,9 +100,9 @@ enum ClipboardSyncFilePublication {
         guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest else {
             throw ClipboardSyncServiceError.corruptData
         }
-        guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var final = stat()
-        guard fstat(output, &final) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard fstat(output, &final) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         succeeded = true
         return .init(directory: url, name: descriptor.displayName, pendingName: pendingName,
             parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(final))
@@ -110,36 +115,37 @@ enum ClipboardSyncFilePublication {
         let (directory, url) = try openDirectory(root: root, accountID: accountID, descriptor: descriptor)
         defer { close(directory) }
         var parent = stat()
-        guard fstat(directory, &parent) == 0, parent.st_dev == candidate.parentDevice,
+        guard fstat(directory, &parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard parent.st_dev == candidate.parentDevice,
               parent.st_ino == candidate.parentInode, url == candidate.directory else {
             throw ClipboardSyncServiceError.localStorage
         }
         let sourceName = candidate.pendingName ?? candidate.name
         var source = stat()
-        guard fstatat(directory, sourceName, &source, AT_SYMLINK_NOFOLLOW) == 0,
-              ClipboardSyncFileSnapshot(source) == candidate.snapshot else { throw ClipboardSyncServiceError.localStorage }
-        try faults.check(.syncFileBeforePublication)
-        if descriptor.bodyFormat == .treeSegmentsV1 {
-            let measurement = try ClipboardFileTree(url.appendingPathComponent(sourceName)).stream { _ in }
-            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
-                  measurement.encoded == descriptor.encodedByteCount else { throw ClipboardSyncServiceError.corruptData }
+        guard fstatat(directory, sourceName, &source, AT_SYMLINK_NOFOLLOW) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }
+        guard ClipboardSyncFileSnapshot(source) == candidate.snapshot else { throw ClipboardSyncServiceError.localStorage }
+        try faults.check(.syncFileBeforePublication)
         if let pending = candidate.pendingName {
             if descriptor.bodyFormat == .treeSegmentsV1 {
-                guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardSyncServiceError.localStorage }
+                guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             } else {
                 guard linkat(directory, pending, directory, candidate.name, 0) == 0,
-                      unlinkat(directory, pending, 0) == 0 else { throw ClipboardSyncServiceError.localStorage }
+                      unlinkat(directory, pending, 0) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             }
-            guard fsync(directory) == 0 else { throw ClipboardSyncServiceError.localStorage }
+            guard fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         }
         let destination = url.appendingPathComponent(candidate.name)
         var atPath = stat()
-        guard lstat(url.path, &atPath) == 0, parent.st_dev == atPath.st_dev, parent.st_ino == atPath.st_ino else {
+        guard lstat(url.path, &atPath) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard parent.st_dev == atPath.st_dev, parent.st_ino == atPath.st_ino else {
             throw ClipboardSyncServiceError.localStorage
         }
-        guard fstatat(directory, candidate.name, &atPath, AT_SYMLINK_NOFOLLOW) == 0,
-              atPath.st_dev == source.st_dev, atPath.st_ino == source.st_ino,
+        guard fstatat(directory, candidate.name, &atPath, AT_SYMLINK_NOFOLLOW) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        guard atPath.st_dev == source.st_dev, atPath.st_ino == source.st_ino,
               atPath.st_size == source.st_size, atPath.st_mtimespec.tv_sec == source.st_mtimespec.tv_sec,
               atPath.st_mtimespec.tv_nsec == source.st_mtimespec.tv_nsec else { throw ClipboardSyncServiceError.localStorage }
         let values = try destination.resourceValues(forKeys: [.fileResourceIdentifierKey, .isSymbolicLinkKey])
@@ -148,8 +154,10 @@ enum ClipboardSyncFilePublication {
         }
         let bookmark = try destination.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil)
         var verified = stat()
-        guard fstatat(directory, candidate.name, &verified, AT_SYMLINK_NOFOLLOW) == 0,
-              ClipboardSyncFileSnapshot(verified) == ClipboardSyncFileSnapshot(atPath) else { throw ClipboardSyncServiceError.localStorage }
+        guard fstatat(directory, candidate.name, &verified, AT_SYMLINK_NOFOLLOW) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        guard ClipboardSyncFileSnapshot(verified) == ClipboardSyncFileSnapshot(atPath) else { throw ClipboardSyncServiceError.localStorage }
         return .init(url: destination, bookmark: bookmark,
             identity: try NSKeyedArchiver.archivedData(withRootObject: identity, requiringSecureCoding: true))
     }
@@ -175,14 +183,18 @@ enum ClipboardSyncFilePublication {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
         var directory = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard directory >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard directory >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var url = root
         do {
             for component in [accountID, descriptor.objectID.uuidString.lowercased(), descriptor.versionID.uuidString.lowercased()] {
-                if mkdirat(directory, component, 0o700) != 0, errno != EEXIST { throw ClipboardSyncServiceError.localStorage }
+                if mkdirat(directory, component, 0o700) != 0, errno != EEXIST { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
                 let child = openat(directory, component, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-                guard child >= 0 else { throw ClipboardSyncServiceError.localStorage }
-                guard fsync(directory) == 0 else { close(child); throw ClipboardSyncServiceError.localStorage }
+                guard child >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                guard fsync(directory) == 0 else {
+                    let failure = errno
+                    close(child)
+                    throw ClipboardHistoryStorageError.fileOperationFailed(failure)
+                }
                 close(directory)
                 directory = child
                 url.appendPathComponent(component, isDirectory: true)
@@ -201,7 +213,7 @@ enum ClipboardSyncFilePublication {
                 pread(descriptor, $0.baseAddress, Int(min(Int64($0.count), byteCount - offset)), off_t(offset))
             }
             if count < 0, errno == EINTR { continue }
-            guard count > 0 else { throw ClipboardSyncServiceError.localStorage }
+            guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(count == 0 ? EIO : errno) }
             hash.update(data: Data(bytes.prefix(count)))
             offset += Int64(count)
         }

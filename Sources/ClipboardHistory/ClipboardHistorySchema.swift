@@ -244,6 +244,14 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v26_clipboard_sync_file_conflicts") { database in
             try Self.createSyncFileConflictSchema(in: database)
         }
+        migrator.registerMigration("v27_clipboard_sync_directory_versions") { database in
+            // Keep advertised descriptors immutable. Locally owned trees from
+            // the old unsupported format publish a new child version on resume.
+            try database.execute(sql: """
+                UPDATE clipboard_sync_file_versions SET transfer_state = 'pendingUpload'
+                WHERE transfer_state = 'unsupportedKind' AND local_bookmark IS NOT NULL AND local_identity IS NOT NULL
+                """)
+        }
         migrator.registerMigration("v29_clipboard_sync_file_lifecycle") { database in
             try Self.createSyncFileLifecycleSchema(in: database)
         }

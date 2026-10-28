@@ -185,7 +185,7 @@ extension ClipboardHistoryModule {
                let bookmark = sampled.bookmark, let identity = source.identity {
                 frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
                     directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
-                    account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+                    account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
             } else { frozen = nil }
             var stored = false
             defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
@@ -424,6 +424,11 @@ extension ClipboardHistoryModule {
                     UPDATE clipboard_sync_file_auto_candidates SET completed = 1
                     WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
                     """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_downloads SET failure = NULL
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString,
+                        descriptor.objectID.uuidString, descriptor.versionID.uuidString])
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)

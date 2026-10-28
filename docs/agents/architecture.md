@@ -188,7 +188,7 @@ or local-history key. See [release provisioning](../releasing.md) for the signed
 capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
 for isolated real-store coverage; those tests do not establish live iCloud delivery.
 
-`ClipboardHistorySyncFiles` prepares currently accessible ordinary-file bytes
+`ClipboardHistorySyncFiles` prepares currently accessible file and directory content
 before staging an entry envelope. Source paths and bookmarks remain local.
 Each top-level file at or below 5,000,000 original bytes downloads automatically;
 larger versions require an exact-version download action. Uploads are automatic
@@ -196,13 +196,20 @@ for eligible files of any size. A previously complete local version remains
 usable until the requested replacement is ready. Preview, copy, Open, and Reveal
 never authorize a pending download.
 Directory/package/symlink content is not flattened into an ordinary file.
+Directories use the same version graph, transport, exact download consent, and
+Linked Location ownership as files. Their threshold includes every synchronized
+data fork, resource fork, and portable extended-attribute value in the complete
+object. Path names and framing overhead have a separate encoded byte count.
 Metadata discovery skips file-body assets; only an authenticated entry descriptor
 authorizes a version download. Normal paste and host actions require every file
 member to be available and never silently return a subset.
 
 `ClipboardSyncFileTransfer` freezes coordinated source reads into 4 MiB
 authenticated encrypted segments, with no whole-file allocation or application
-size ceiling. `ClipboardSyncFilePublication` verifies the full segment sequence,
+size ceiling. Data and resource forks stream through fixed buffers; Darwin's
+ordinary extended-attribute API requires one complete value at a time. Such
+values use fallible allocation and retain the platform limit, rather than
+claiming a 4 MiB peak for arbitrary metadata. `ClipboardSyncFilePublication` verifies the full segment sequence,
 length, and digest before a second bounded pass builds a visible working file.
 The earlier bounded small-file envelope remains readable through
 `ClipboardSyncFileIO`. These paths publish into the visible
@@ -219,6 +226,43 @@ publication rechecks account, active epoch, local generation, and live membershi
 The version descriptor is durable before publication, so interrupted publication
 retries only adopt identical complete bytes and refuse an unrelated existing file.
 Missing or replaced working files are unavailable, not a complete-looking path.
+
+`ClipboardFileTree` extends that transfer with typed, canonical tree framing.
+The temporary inventory and path-validation tables use SQLCipher, including
+member identities, sorting, and metadata descriptions. A header never contains
+all attribute values: each attribute has its own bounded descriptor and value
+stream. No plaintext archive or whole-tree JSON is staged. The old raw
+`segmentsV1` and bounded inline envelopes retain their original decoding rules.
+Migration v27 retries previously unsupported local directories as new child
+versions without rewriting an advertised descriptor.
+
+Portable tree content includes ordinary rwx/executable permissions, modification
+times, symlink targets, logical resource forks, FinderInfo, quarantine, and
+ordinary extended attributes (including attributes on symlinks). Compression
+backing, file-provider/storage attributes, machine security/identity attributes,
+ACL principals, ownership IDs, and filesystem flags are not copied. In particular,
+UF_TRACKED is never assigned. Hard-linked regular paths become independent
+regular files with identical content; symbolic links remain links and their
+targets are never traversed. Unsupported special nodes and invalid paths fail
+the complete version instead of producing a partial tree.
+
+`ClipboardFileTreeDecoding` validates the authenticated stream before ordinary
+construction. Creation and final metadata use pinned directory/file descriptors;
+inode checks reject substituted parents and files. Per-member witnesses and a
+separate root-metadata digest protect nested saves and same-length root-attribute
+changes across a whole-tree rename. Long proof reads run outside the module actor,
+main database write transaction, and revocable mutation gate. The final gate
+admits only the short name exchange. Its already-persisted replacement journal
+retains both visible roots during post-exchange checking or interrupted rollback.
+FSEvents subtree notifications request full reconciliation, including dropped
+event batches; vnode observation continues to own root identity and moves.
+
+Real temporary-directory coverage is in
+[directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),
+[recursive observation tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryTreeObservationTests.swift),
+and [malformed-stream/conflict tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectoryBoundaryTests.swift).
+These isolated provider-boundary tests do not establish signed two-Mac delivery
+or the separate application-package Apply Update/running-application workflow.
 History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
 remain independent and do not create Linked Locations.
 

@@ -5,11 +5,18 @@ import GRDB
 
 /// A format inside the existing encrypted file transfer, not another sync
 /// lifecycle. The inventory is encrypted and disk backed, including its sort.
-final class ClipboardFileTree {
+/// Immutable inventory; GRDB serializes its connection and all reads use pread
+/// or independently opened directory descriptors. It can travel with an I/O proof.
+final class ClipboardFileTree: @unchecked Sendable {
     static func needsEncoding(_ url: URL) throws -> Bool {
         var status = stat()
         guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        return status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
+        if status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) { return true }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else { return false }
+        let fd = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        defer { close(fd) }
+        return try ClipboardFileMetadata.forkSize(fd: fd) > 0 || !ClipboardFileMetadata.attributes(fd: fd).isEmpty || status.st_mode & 0o111 != 0
     }
     struct Header: Codable {
         let path: String
@@ -19,6 +26,9 @@ final class ClipboardFileTree {
         let modifiedNanoseconds: Int
         let size: Int64
         let link: String?
+        let forkSize: Int64
+        let attributeCount: Int
+        var attributes: [ClipboardFileMetadata.Attribute]?
     }
 
     struct Measurement: Equatable {
@@ -31,6 +41,7 @@ final class ClipboardFileTree {
     private let scratch: URL
     private let database: DatabaseQueue
     private let rootDescriptor: Int32
+    private let rootMetadataDigest: Data
 
     init(_ root: URL) throws {
         self.root = root
@@ -45,6 +56,7 @@ final class ClipboardFileTree {
         database = try DatabaseQueue(path: scratch.appendingPathComponent("inventory.sqlite").path, configuration: configuration)
         rootDescriptor = open(root.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard rootDescriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        rootMetadataDigest = try ClipboardFileMetadata.fingerprint(fd: rootDescriptor)
         try database.write { db in
             try db.execute(sql: "CREATE TABLE entries(path TEXT PRIMARY KEY COLLATE BINARY, header BLOB NOT NULL, snapshot BLOB NOT NULL, scanned INTEGER NOT NULL) WITHOUT ROWID")
         }
@@ -55,9 +67,9 @@ final class ClipboardFileTree {
             defer { closedir(stream) }
             while let entry = readdir(stream) {
                 let name = withUnsafeBytes(of: entry.pointee.d_name) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) }
-                guard let name else { throw ClipboardSyncServiceError.accessDenied }
+                guard let name else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
                 if name == "." || name == ".." { continue }
-                guard ClipboardSyncFileIO.validFilename(name) else { throw ClipboardSyncServiceError.accessDenied }
+                guard ClipboardSyncFileIO.validFilename(name) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
                 try insert(path: path.isEmpty ? name : path + "/" + name, parent: fd, name: name)
             }
             try database.write { try $0.execute(sql: "UPDATE entries SET scanned = 1 WHERE path = ?", arguments: [path]) }
@@ -79,20 +91,25 @@ final class ClipboardFileTree {
         case mode_t(S_IFREG): kind = "file"
         case mode_t(S_IFDIR): kind = "directory"
         case mode_t(S_IFLNK): kind = "link"
-        default: throw ClipboardSyncServiceError.accessDenied
+        default: throw ClipboardHistoryStorageError.fileOperationFailed(ENOTSUP)
         }
         var link: String?
         if kind == "link", let parent, let name {
             var bytes = [UInt8](repeating: 0, count: Int(MAXPATHLEN))
             let count = readlinkat(parent, name, &bytes, bytes.count)
             guard count >= 0, count < bytes.count, let target = String(bytes: bytes.prefix(count), encoding: .utf8) else {
-                throw ClipboardSyncServiceError.accessDenied
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
             link = target
         }
+        let fd = try openEntry(path, symlink: kind == "link")
+        defer { if fd >= 0 { close(fd) } }
+        let attributes = try ClipboardFileMetadata.attributes(fd: fd)
         let header = Header(path: path, kind: kind, mode: status.st_mode & 0o777,
             modifiedSeconds: status.st_mtimespec.tv_sec, modifiedNanoseconds: status.st_mtimespec.tv_nsec,
-            size: kind == "file" ? status.st_size : 0, link: link)
+            size: kind == "file" ? status.st_size : 0, link: link,
+            forkSize: kind == "file" ? try ClipboardFileMetadata.forkSize(fd: fd) : 0,
+            attributeCount: attributes.count, attributes: attributes)
         try database.write { try $0.execute(sql: "INSERT INTO entries VALUES (?, ?, ?, ?)", arguments: [path,
             try Self.encode(header), try JSONEncoder().encode(ClipboardSyncFileSnapshot(status)), kind == "directory" ? 0 : 1]) }
     }
@@ -117,18 +134,47 @@ final class ClipboardFileTree {
             let cursor = try Row.fetchCursor(db, sql: "SELECT path, header, snapshot FROM entries ORDER BY path")
             while let row = try cursor.next() {
                 try Task.checkCancellation()
-                let headerBytes: Data = row["header"]
-                let header = try JSONDecoder().decode(Header.self, from: headerBytes)
+                let header = try JSONDecoder().decode(Header.self, from: row["header"])
+                var wireHeader = header
+                wireHeader.attributes = nil
+                let headerBytes = try Self.encode(wireHeader)
+                guard headerBytes.count <= 16 * 1_024 else { throw ClipboardSyncServiceError.corruptData }
                 let snapshot = try JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"])
                 try check(header.path, snapshot: snapshot)
                 var length = UInt32(headerBytes.count).bigEndian
                 try emit(withUnsafeBytes(of: &length) { Data($0) })
                 try emit(headerBytes)
                 if header.kind == "file" {
-                    let fd = try openEntry(header.path)
+                    let fd = try openEntry(header.path, symlink: header.kind == "link")
                     defer { close(fd) }
                     try Self.read(fd, size: header.size, consume: emit)
                     original = try Self.add(original, header.size)
+                    if header.forkSize > 0 {
+                        guard let fork = try ClipboardFileMetadata.fork(fd: fd) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                        defer { close(fork) }
+                        try Self.read(fork, size: header.forkSize, consume: emit)
+                        original = try Self.add(original, header.forkSize)
+                    }
+                }
+                if let attributes = header.attributes, !attributes.isEmpty {
+                    let fd = try openEntry(header.path, symlink: header.kind == "link")
+                    defer { close(fd) }
+                    for attribute in attributes {
+                        let encoder = JSONEncoder()
+                        encoder.outputFormatting = [.sortedKeys]
+                        let metadata = try encoder.encode(attribute)
+                        var attributeLength = UInt32(metadata.count).bigEndian
+                        try emit(withUnsafeBytes(of: &attributeLength) { Data($0) })
+                        try emit(metadata)
+                        let bytes = try ClipboardFileMetadata.read(attribute, fd: fd)
+                        original = try Self.add(original, Int64(bytes.count))
+                        var offset = 0
+                        while offset < bytes.count {
+                            let end = min(offset + 64 * 1_024, bytes.count)
+                            try emit(Data(bytes[offset..<end]))
+                            offset = end
+                        }
+                    }
                 }
                 try check(header.path, snapshot: snapshot)
             }
@@ -138,37 +184,56 @@ final class ClipboardFileTree {
         return .init(original: original, encoded: encoded, digest: Data(hash.finalize()))
     }
 
-    func verify() throws {
+    @discardableResult
+    func verify(at path: URL? = nil, afterExchange: Bool = false) throws -> ClipboardSyncFileSnapshot {
         try database.read { db in
             let cursor = try Row.fetchCursor(db, sql: "SELECT path, snapshot FROM entries ORDER BY path")
             while let row = try cursor.next() {
-                try check(row["path"], snapshot: JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"]))
+                try Task.checkCancellation()
+                try check(row["path"], snapshot: JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"]),
+                    rootPath: path, afterExchange: afterExchange)
             }
+            guard let rootData = try Data.fetchOne(db, sql: "SELECT snapshot FROM entries WHERE path = ''") else { throw ClipboardSyncServiceError.corruptData }
+            return try check("", snapshot: JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: rootData), rootPath: path, afterExchange: afterExchange)
         }
     }
 
-    private func check(_ path: String, snapshot: ClipboardSyncFileSnapshot) throws {
+    @discardableResult
+    private func check(_ path: String, snapshot: ClipboardSyncFileSnapshot, rootPath: URL? = nil, afterExchange: Bool = false) throws -> ClipboardSyncFileSnapshot {
         var status = stat()
         if path.isEmpty {
-            guard fstat(rootDescriptor, &status) == 0 else { throw ClipboardSyncServiceError.accessDenied }
+            guard fstat(rootDescriptor, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             var current = stat()
-            guard lstat(root.path, &current) == 0, current.st_dev == status.st_dev, current.st_ino == status.st_ino else { throw ClipboardSyncServiceError.accessDenied }
+            guard lstat((rootPath ?? root).path, &current) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard current.st_dev == status.st_dev, current.st_ino == status.st_ino else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
         } else {
             let components = path.split(separator: "/").map(String.init)
             let parent = try openEntry(components.dropLast().joined(separator: "/"), directory: true)
             defer { close(parent) }
-            guard let name = components.last, fstatat(parent, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else { throw ClipboardSyncServiceError.accessDenied }
+            guard let name = components.last else { throw ClipboardSyncServiceError.corruptData }
+            guard fstatat(parent, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         }
-        guard ClipboardSyncFileSnapshot(status) == snapshot else { throw ClipboardSyncServiceError.accessDenied }
+        let current = ClipboardSyncFileSnapshot(status)
+        if path.isEmpty, afterExchange {
+            guard current.device == snapshot.device, current.inode == snapshot.inode, current.size == snapshot.size,
+                  current.mode == snapshot.mode, current.modifiedSeconds == snapshot.modifiedSeconds,
+                  current.modifiedNanoseconds == snapshot.modifiedNanoseconds else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+            guard try ClipboardFileMetadata.fingerprint(fd: rootDescriptor) == rootMetadataDigest else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+            var after = stat()
+            guard fstat(rootDescriptor, &after) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard ClipboardSyncFileSnapshot(after) == current else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+        } else if current != snapshot { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+        return current
     }
 
-    private func openEntry(_ path: String, directory: Bool = false) throws -> Int32 {
+    private func openEntry(_ path: String, directory: Bool = false, symlink: Bool = false) throws -> Int32 {
         var fd = dup(rootDescriptor)
         guard fd >= 0 else { throw ClipboardSyncServiceError.localStorage }
         do {
             let components = path.split(separator: "/").map(String.init)
             for (index, name) in components.enumerated() {
-                let next = openat(fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK
+                let next = openat(fd, name, O_RDONLY | O_CLOEXEC | O_NONBLOCK
+                    | (symlink && index == components.count - 1 ? O_SYMLINK : O_NOFOLLOW)
                     | (directory || index < components.count - 1 ? O_DIRECTORY : 0))
                 guard next >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
                 close(fd)

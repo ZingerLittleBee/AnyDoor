@@ -68,6 +68,8 @@ public enum ClipboardHistorySyncFailure: String, Codable, Error, Sendable {
     case network
     case quota
     case localStorage
+    case localFileAccessDenied
+    case sourceChanged
     case corruptData
     case recoveryRequired
     case accountChanged

@@ -5,9 +5,9 @@ import Foundation
 extension ClipboardSyncFileTransfer {
     static func freezeTree(url: URL, bookmark: Data, identity: Data, directory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        objectID: UUID, versionID: UUID) throws -> ClipboardSyncFrozenFile {
+        objectID: UUID, versionID: UUID, faults: ClipboardHistoryFaultInjector) throws -> ClipboardSyncFrozenFile {
         guard try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
-            throw ClipboardSyncServiceError.accessDenied
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         let tree = try ClipboardFileTree(url)
         let measurement = try tree.stream { _ in }
@@ -41,16 +41,21 @@ extension ClipboardSyncFileTransfer {
             }
         }
         if !buffer.isEmpty { try flush() }
+        try faults.check(.syncFileTreeBeforeFreezeVerification)
+        try tree.verify()
         guard frozen == measurement, index == chunks,
               try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
-            throw ClipboardSyncServiceError.accessDenied
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         try syncDirectory(directory)
         succeeded = true
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
         return .init(upload: .init(record: .init(recordID: "v1-\(versionID.uuidString.lowercased())", operationID: versionID,
             epoch: control.epoch, keyID: control.keyID, kind: .fileBody, chunkCount: chunks,
             encryptedByteCount: encryptedCount, digest: Data(hash.finalize())), directory: directory),
             originalByteCount: measurement.original, contentDigest: measurement.digest,
-            bodyFormat: .treeSegmentsV1, kind: .directory, encodedByteCount: measurement.encoded)
+            bodyFormat: .treeSegmentsV1, kind: status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) ? .directory : .file,
+            encodedByteCount: measurement.encoded)
     }
 }

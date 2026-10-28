@@ -1158,6 +1158,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v24_clipboard_linked_locations",
                 "v25_clipboard_sync_file_identity",
                 "v26_clipboard_sync_file_conflicts",
+                "v27_clipboard_sync_directory_versions",
                 "v29_clipboard_sync_file_lifecycle",
             ]
         )
@@ -1252,6 +1253,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v24_clipboard_linked_locations",
                 "v25_clipboard_sync_file_identity",
                 "v26_clipboard_sync_file_conflicts",
+                "v27_clipboard_sync_directory_versions",
                 "v29_clipboard_sync_file_lifecycle",
             ]
         )

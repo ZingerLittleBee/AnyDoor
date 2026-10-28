@@ -200,7 +200,7 @@ enum ClipboardSyncFileIO {
                 while offset < buffer.count {
                     let count = write(pending, buffer.baseAddress?.advanced(by: offset), buffer.count - offset)
                     if count < 0, errno == EINTR { continue }
-                    guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                    guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(count == 0 ? EIO : errno) }
                     offset += count
                 }
             }
