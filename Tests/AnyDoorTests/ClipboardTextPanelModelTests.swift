@@ -4,6 +4,54 @@ import ClipboardHistory
 
 @MainActor
 final class ClipboardTextPanelModelTests: XCTestCase {
+    func testConflictRequiresAnExplicitChoiceAndRefreshesAStaleChoice() async {
+        let model = makeModel(text: "offline A", isEditable: true)
+        let first = ClipboardHistoryTextVersion(id: UUID(), text: "offline A", editedAt: Date())
+        let second = ClipboardHistoryTextVersion(id: UUID(), text: "offline B", editedAt: Date())
+        let third = ClipboardHistoryTextVersion(id: UUID(), text: "offline C", editedAt: Date())
+        model.conflictVersions = [first, second]
+        var selected: UUID?
+        var dismissed = false
+        model.onDismiss = { dismissed = true }
+        model.onResolve = { id in
+            selected = id
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        model.reloadConflicts = { [first, second, third] }
+        XCTAssertFalse(model.canSave)
+        model.selectedVersionID = second.id
+        await model.save()
+        XCTAssertEqual(selected, second.id)
+        XCTAssertFalse(dismissed)
+        XCTAssertTrue(model.saveFailed)
+        XCTAssertEqual(model.conflictVersions, [first, second, third])
+        XCTAssertNil(model.selectedVersionID)
+        model.onResolve = { id in selected = id }
+        model.selectedVersionID = third.id
+        await model.save()
+        XCTAssertEqual(selected, third.id)
+        XCTAssertTrue(dismissed)
+    }
+
+    func testFailedSaveKeepsTheDraftAndWaitsForSuccessfulRetry() async {
+        let model = makeModel(text: "original", isEditable: true)
+        var dismissed = false
+        model.onDismiss = { dismissed = true }
+        model.text = "unuploaded work"
+        model.onSave = { _ in throw ClipboardHistoryModuleError.storageFailure }
+
+        await model.save()
+
+        XCTAssertFalse(dismissed)
+        XCTAssertTrue(model.isDirty)
+        XCTAssertEqual(model.text, "unuploaded work")
+        XCTAssertTrue(model.saveFailed)
+        model.onSave = { text in XCTAssertEqual(text, "unuploaded work") }
+        await model.save()
+        XCTAssertTrue(dismissed)
+        XCTAssertFalse(model.saveFailed)
+    }
+
     private func makeEntry(text: String) -> ClipboardHistoryEntry {
         ClipboardHistoryEntry(
             id: ClipboardHistoryEntryID(UUID()),

@@ -82,6 +82,13 @@ struct ClipboardSyncSettingsView: View {
                 }
             }
 
+            if let recoveryURL = model.recoveryHelpURL {
+                Link(destination: recoveryURL) {
+                    LocalizedText(.settingsClipboardSyncRecoveryHelp)
+                }
+                .font(.caption)
+            }
+
             if model.status.uploadedEntryCount > 0
                 || model.status.receivedEntryCount > 0
             {

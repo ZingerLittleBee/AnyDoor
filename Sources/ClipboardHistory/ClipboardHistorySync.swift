@@ -8,8 +8,10 @@ extension ClipboardHistoryModule {
         do {
             return try database.read { database in
                 let settings = try syncSettings(in: database)
+                let recovery = try syncRecovery(in: database)
+                let phase = syncPhase == .disabled ? recovery.phase ?? .connecting : syncPhase
                 guard settings.enabled else {
-                    return ClipboardHistorySyncStatus(phase: syncPhase == .failed(.accountChanged) ? syncPhase : .disabled)
+                    return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled)
                 }
                 let accountID = settings.accountID ?? ""
                 let uploaded = try Int.fetchOne(database, sql: """
@@ -20,7 +22,7 @@ extension ClipboardHistoryModule {
                 let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
                 let state = try data.map { try JSONDecoder().decode(ClipboardSyncAccountState.self, from: $0) }
                 return ClipboardHistorySyncStatus(isEnabled: true,
-                    phase: syncPhase == .disabled ? .connecting : syncPhase,
+                    phase: phase,
                     uploadedEntryCount: uploaded, receivedEntryCount: received, lastCompletedAt: state?.lastCompletedAt)
             }
         } catch {
@@ -35,6 +37,7 @@ extension ClipboardHistoryModule {
         guard generation == syncGeneration else { return }
         try syncWrite { database in
             try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = ? WHERE id = 1", arguments: [enabled])
+            try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL WHERE id = 1")
         }
         setSyncPhase(enabled ? .connecting : .disabled)
         guard enabled else { return }
@@ -95,12 +98,17 @@ extension ClipboardHistoryModule {
         guard !syncSuspended else { return }
         if let syncTask { await syncTask.value; return }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
-        if let deadline = syncRetryNotBefore, deadline > now() {
-            setSyncPhase(.failed(.network))
-            scheduleSync()
+        do {
+            let recovery = try currentSyncRecovery()
+            if let deadline = recovery.retryNotBefore, deadline > now() {
+                setSyncPhase(.failed(.network))
+                scheduleSync()
+                return
+            }
+        } catch {
+            setSyncPhase(.failed(.localStorage))
             return
         }
-        syncRetryNotBefore = nil
         let generation = syncGeneration
         let bindingAuthorized = syncAccountBindingGeneration == generation
         let task = Task { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
@@ -114,7 +122,10 @@ extension ClipboardHistoryModule {
     func scheduleSync() {
         guard !syncSuspended, syncTask == nil, syncPollTask == nil,
               let pollingInterval = syncServices?.pollingInterval else { return }
-        let remainingDelay = syncRetryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
+        let retryNotBefore: Date?
+        do { retryNotBefore = try requiredDatabase().read { try syncRecovery(in: $0).retryNotBefore } }
+        catch { setSyncPhase(.failed(.localStorage)); return }
+        let remainingDelay = retryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
         let interval = max(pollingInterval, .seconds(remainingDelay))
         syncPollTask = Task { [weak self] in
             do { try await Task.sleep(for: interval) } catch { return }
@@ -129,7 +140,10 @@ extension ClipboardHistoryModule {
     }
 
     private func performSync(generation: UInt64, allowAccountBinding: Bool) async {
-        guard let services = syncServices else { setSyncPhase(.capabilityUnavailable); return }
+        guard let services = syncServices else {
+            await finishSync(.capabilityUnavailable, generation: generation)
+            return
+        }
         do {
             try admitSync(generation)
             setSyncPhase(.connecting)
@@ -168,7 +182,7 @@ extension ClipboardHistoryModule {
                 let candidateKey = try await services.keys.load(account: account, keyID: candidate.keyID)
                 try await admitSync(generation, account: account, services: services)
                 guard let candidateKey else {
-                    setSyncPhase(.waitingForKey)
+                    await finishSync(.waitingForKey, generation: generation)
                     return
                 }
                 guard candidateKey.count == 32,
@@ -190,13 +204,16 @@ extension ClipboardHistoryModule {
             let loadedKey = try await services.keys.load(account: account, keyID: control.keyID)
             try await admitSync(generation, account: account, services: services)
             guard let key = loadedKey else {
-                setSyncPhase(.waitingForKey)
+                await finishSync(.waitingForKey, generation: generation)
                 return
             }
             guard key.count == 32, ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
                 throw ClipboardSyncServiceError.corruptData
             }
             setSyncPhase(.transferring)
+            if try needsSyncTextRootReplay(account: account, control: control) {
+                state.cursor = nil
+            }
             var more = true
             while more {
                 let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
@@ -256,30 +273,46 @@ extension ClipboardHistoryModule {
             }
             state.lastCompletedAt = now()
             try syncWrite { try saveSyncAccount(state, in: $0) }
-            setSyncPhase(.upToDate)
+            await finishSync(.upToDate, generation: generation)
         } catch is CancellationError {
             return
         } catch {
             guard generation == syncGeneration, !syncSuspended else { return }
-            if case .network(let retryAfter) = error as? ClipboardSyncServiceError,
-               let retryAfter, retryAfter.isFinite, retryAfter > 0 {
-                syncRetryNotBefore = now().addingTimeInterval(retryAfter)
+            var retryAfter: TimeInterval?
+            if case .network(let delay) = error as? ClipboardSyncServiceError { retryAfter = delay }
+            await finishSync(syncFailurePhase(error), generation: generation, retryAfter: retryAfter)
+        }
+    }
+
+    private func finishSync(_ phase: ClipboardHistorySyncPhase, generation: UInt64,
+                            retryAfter: TimeInterval? = nil) async {
+        do {
+            try await waitForWriteTurn()
+            try admitSync(generation)
+            let deadline = retryAfter.flatMap { delay in
+                delay.isFinite && delay > 0 ? now().addingTimeInterval(delay) : nil
             }
-            if error as? ClipboardSyncServiceError == .accountChanged {
-                do {
-                    try await waitForWriteTurn()
-                    try admitSync(generation)
-                    try syncWrite { database in
-                        try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
-                    }
-                    syncSuspended = true
-                } catch {
-                    syncSuspended = true
-                    setSyncPhase(.failed(.localStorage))
-                    return
+            try syncWrite { database in
+                let data = phase == .upToDate ? nil : try JSONEncoder().encode(phase)
+                try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = ?, retry_not_before = ? WHERE id = 1",
+                    arguments: [data, deadline?.timeIntervalSince1970])
+                if phase == .failed(.accountChanged) {
+                    try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
                 }
             }
-            setSyncPhase(syncFailurePhase(error))
+            if phase == .failed(.accountChanged) {
+                syncSuspended = true
+                syncAccountBindingGeneration = nil
+                syncPollTask?.cancel()
+                syncPollTask = nil
+            }
+            setSyncPhase(phase)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == syncGeneration, !syncSuspended else { return }
+            syncSuspended = true
+            setSyncPhase(.failed(.localStorage))
         }
     }
 
@@ -303,6 +336,7 @@ extension ClipboardHistoryModule {
         case .accountChanged: return .failed(.accountChanged)
         case .capabilityUnavailable: return .capabilityUnavailable
         case .keyLocked: return .keyLocked
+        case .keyUnavailable: return .waitingForKey
         case .accessDenied: return .accessDenied
         case .network, .conflict: return .failed(.network)
         case .quota: return .failed(.quota)

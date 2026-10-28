@@ -10,6 +10,20 @@ struct ClipboardSyncAccountState: Codable, Sendable {
 }
 
 extension ClipboardHistoryModule {
+    func currentSyncRecovery() throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        try requiredDatabase().read { try syncRecovery(in: $0) }
+    }
+
+    func syncRecovery(in database: Database) throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        guard let row = try Row.fetchOne(database, sql: "SELECT phase, retry_not_before FROM clipboard_sync_recovery WHERE id = 1") else {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        let data: Data? = row["phase"]
+        let deadline: Double? = row["retry_not_before"]
+        return (try data.map { try JSONDecoder().decode(ClipboardHistorySyncPhase.self, from: $0) },
+                deadline.map { Date(timeIntervalSince1970: $0) })
+    }
+
     /// Callers join the write turn before entering this synchronous transaction.
     /// Keeping it synchronous prevents an account/store transition between the
     /// final admission check and the local commit.
@@ -120,10 +134,12 @@ extension ClipboardHistoryModule {
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
                     """, arguments: [account.identifier, control.epoch.uuidString, id.uuidString.lowercased(), localID, upload.record.recordID])
+                try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
                 try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
                 try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }
+            try stageSyncTextEdits(account: account, control: control, key: key, in: database)
         }
     }
 
@@ -157,7 +173,9 @@ extension ClipboardHistoryModule {
 
     func hasReceivedSyncRecord(_ record: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount) throws -> Bool {
         try requiredDatabase().read { database in
-            try Bool.fetchOne(database, sql: """
+            if try Self.needsSyncTextRootReplay(accountID: account.identifier, epoch: record.epoch.uuidString,
+                recordID: record.recordID, in: database) { return false }
+            return try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                     OR EXISTS (SELECT 1 FROM clipboard_sync_outbox WHERE account_id = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID, account.identifier, record.recordID]) ?? false
@@ -178,7 +196,9 @@ extension ClipboardHistoryModule {
             let exists = try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID]) ?? false
-            guard !exists else { return false }
+            let recoversRoot = try Self.needsSyncTextRootReplay(accountID: account.identifier,
+                epoch: record.epoch.uuidString, recordID: record.recordID, in: database)
+            guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
             try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
             switch content {
@@ -186,8 +206,18 @@ extension ClipboardHistoryModule {
                 try importSyncTag(tag, account: account, recordID: record.recordID, in: database)
             case .text(let text):
                 try importSyncText(text, account: account, record: record, in: database)
+                try Self.registerSyncTextRoot(text, record: record, account: account, in: database)
+                try reconcileSyncTextVersions(subjectID: text.id.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: record.epoch.uuidString, in: database)
+            case .textEdit(let edit):
+                try Self.receiveSyncTextEdit(edit, record: record, account: account, in: database)
+                try reconcileSyncTextVersions(subjectID: edit.id.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: record.epoch.uuidString, in: database)
             case .entry(let entry):
                 try importSyncEntryContent(entry, account: account, record: record, prepared: preparedEntry, in: database)
+                try Self.registerSyncTextRoot(entry, record: record, account: account, in: database)
+                try reconcileSyncTextVersions(subjectID: entry.id.uuidString.lowercased(), accountID: account.identifier,
+                    epoch: record.epoch.uuidString, in: database)
             case .tagMembership(let membership):
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
@@ -197,7 +227,7 @@ extension ClipboardHistoryModule {
             case .fileBody:
                 throw ClipboardSyncServiceError.unsupportedVersion
             }
-            try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
+            try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)

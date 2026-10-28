@@ -88,9 +88,22 @@ otherwise unrelated user data appears "lost".
 remote inbox, and imported history in its existing SQLCipher store. The additive
 `v14_clipboard_sync` migration keeps those records separate from local content and
 leaves the device-only history master key unchanged. The current slice transfers
-existing and newly eligible single-item plain text for one selected tag. Other
-content, updates, withdrawal, conflict handling, and cloud reset follow the
+existing and newly eligible ordered content for selected tags, including
+versioned text edits and explicit conflict resolution. Further file lifecycle,
+withdrawal, and cloud reset behavior follow the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+
+The additive `v18_clipboard_sync_versions` journal records immutable versions and
+parent relationships in SQLCipher before a local edit can be acknowledged. Edits
+and resolutions share the same account, epoch and shared identity as the original
+entry. Receiving an ancestor or duplicate does not restore old text; concurrent
+heads preserve each local working text until an explicit choice creates a result
+with all displayed heads as parents. The wall shows a conflict action and the
+existing text panel presents the full alternatives. The editor carries the basis
+it displayed, keeps a failed save open, and never silently rebases an old draft.
+Text edits retain favorite/tag/provenance state and local recency. The v14 upgrade
+can replay the initial encrypted operation to recover ancestry while preserving
+an edit whose original upload chunks have already been reclaimed.
 
 Every device starts disabled. Constructing the production services does not access
 CloudKit or the synchronizable Keychain. The host resumes stored consent only
@@ -112,6 +125,26 @@ and control fencing make retry and restart safe without sharing the local store
 or local-history key. See [release provisioning](../releasing.md) for the signed
 capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
 for isolated real-store coverage; those tests do not establish live iCloud delivery.
+
+The additive `v16_clipboard_sync_recovery` migration persists the last actionable
+account/key failure and the provider's retry deadline in the encrypted store.
+Relaunch preserves that deadline, and Retry cannot bypass it. Transient connecting
+and transfer phases are not treated as completed work after restart. Account
+changes persist disabled participation and its reason; an old enabled flag or
+retained key cannot bind a new account. Unresolved manual activation is only
+retained within the current runtime generation, so a restart before account
+binding may require explicit activation again rather than authorizing an
+unobserved account.
+
+Missing key material and unavailable Keychain services remain waiting states;
+they do not establish that Passwords & Keychain sync is disabled. Interaction
+restrictions, explicit access denial, and integrity/recovery failures are shown
+separately. Settings links to Apple's recovery guidance and never replaces a key
+or deletes cloud content to repair access. Disabled devices perform no account
+or key work; active runs revalidate the concrete account after awaited service
+responses and use polling/Retry to observe restored access. See the
+[account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
+for the boundary between deterministic fault tests and signed evidence.
 
 ### Launch-time SwiftData seeding/migration
 

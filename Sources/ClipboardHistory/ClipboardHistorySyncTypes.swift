@@ -28,7 +28,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
     }
 }
 
-public enum ClipboardHistorySyncPhase: Equatable, Sendable {
+public enum ClipboardHistorySyncPhase: Codable, Equatable, Sendable {
     case disabled
     case connecting
     case waitingForAccount
@@ -41,7 +41,7 @@ public enum ClipboardHistorySyncPhase: Equatable, Sendable {
     case failed(ClipboardHistorySyncFailure)
 }
 
-public enum ClipboardHistorySyncFailure: String, Error, Sendable {
+public enum ClipboardHistorySyncFailure: String, Codable, Error, Sendable {
     case network
     case quota
     case localStorage

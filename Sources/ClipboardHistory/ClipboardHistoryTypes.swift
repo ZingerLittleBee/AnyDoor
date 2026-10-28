@@ -22,6 +22,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let isFavorite: Bool
     public let tagIDs: Set<String>
     public let source: ClipboardHistoryCaptureSource
+    public let hasTextConflict: Bool
     public let syncFiles: [ClipboardHistorySyncFileSummary]
 
     public init(
@@ -32,6 +33,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         isFavorite: Bool,
         tagIDs: Set<String> = [],
         source: ClipboardHistoryCaptureSource,
+        hasTextConflict: Bool = false,
         syncFiles: [ClipboardHistorySyncFileSummary] = []
     ) {
         self.id = id
@@ -41,6 +43,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         self.isFavorite = isFavorite
         self.tagIDs = tagIDs
         self.source = source
+        self.hasTextConflict = hasTextConflict
         self.syncFiles = syncFiles
     }
 }
