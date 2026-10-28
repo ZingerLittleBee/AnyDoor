@@ -68,7 +68,13 @@ final class ClipboardFileTree: @unchecked Sendable {
             let fd = try openEntry(path, directory: true)
             guard let stream = fdopendir(fd) else { close(fd); throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             defer { closedir(stream) }
-            while let entry = readdir(stream) {
+            while true {
+                // Member inspection can set errno, so reset it for every read.
+                errno = 0
+                guard let entry = readdir(stream) else {
+                    guard errno == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                    break
+                }
                 let name = withUnsafeBytes(of: entry.pointee.d_name) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) }
                 guard let name else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
                 if name == "." || name == ".." { continue }
