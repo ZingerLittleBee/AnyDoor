@@ -123,6 +123,8 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: row["version_id"]) else { continue }
                 graph[id] = try JSONDecoder().decode([UUID].self, from: row["parents"])
             }
+            let nodes = graph.map { ClipboardSyncVersionNode(id: $0.key, parents: Set($0.value)) }
+            guard nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) else { return false }
             var pending = [version]
             var visited = Set<UUID>()
             while let next = pending.popLast() {

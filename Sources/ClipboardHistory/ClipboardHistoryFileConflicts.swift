@@ -83,7 +83,7 @@ extension ClipboardHistoryModule {
         }
         let nodes = basis.nodes
         let complete = !nodes.isEmpty && nodes.allSatisfy { ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }
-        guard candidates.count > 1 || basis.locations.contains(where: { $0.state == .conflict }) else {
+        guard candidates.count > 1 || !complete || basis.locations.contains(where: { $0.state == .conflict }) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         let snapshot = ClipboardSyncFileConflictSnapshot(accountID: basis.account.identifier, epoch: basis.control.epoch,
@@ -137,5 +137,19 @@ extension ClipboardHistoryModule {
                     && source.state.rawValue == location.state && source.revision == location.revision
             }
         }
+    }
+
+    static func syncFileHasConflict(objectID: UUID, accountID: String, epoch: String, in database: Database) throws -> Bool {
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+            """, arguments: [accountID, epoch, objectID.uuidString])
+        let nodes = try rows.map { row -> ClipboardSyncVersionNode in
+            guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+            return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+        }
+        if ClipboardSyncVersionGraph.heads(nodes).count > 1 || !nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) { return true }
+        return try Bool.fetchOne(database, sql: """
+            SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations WHERE account_id = ? AND epoch = ? AND object_id = ? AND state = 'conflict')
+            """, arguments: [accountID, epoch, objectID.uuidString]) ?? false
     }
 }

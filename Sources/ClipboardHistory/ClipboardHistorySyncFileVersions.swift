@@ -155,12 +155,13 @@ extension ClipboardHistoryModule {
         let rows = try Row.fetchAll(database, sql: """
             SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
             """, arguments: scope)
-        let nonHeads = try Set(rows.flatMap { try JSONDecoder().decode([UUID].self, from: $0["parents"]) })
-        let heads = rows.compactMap { row -> UUID? in
-            guard let id = UUID(uuidString: row["version_id"]), !nonHeads.contains(id) else { return nil }
-            return id
+        let nodes = try rows.map { row -> ClipboardSyncVersionNode in
+            guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+            return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
         }
-        if heads.count == 1, let head = heads.first {
+        let heads = ClipboardSyncVersionGraph.heads(nodes)
+        if heads.count == 1, let head = heads.first,
+           nodes.allSatisfy({ ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }) {
             try database.execute(sql: """
                 UPDATE clipboard_sync_file_selections SET current_version_id = ?
                 WHERE account_id = ? AND epoch = ? AND object_id = ?
@@ -172,5 +173,32 @@ extension ClipboardHistoryModule {
                 WHERE account_id = ? AND epoch = ? AND object_id = ?
                 """, arguments: [descriptor.versionID.uuidString, accountID, epoch.uuidString, descriptor.objectID.uuidString])
         }
+    }
+
+    /// Missing parents can arrive later. A cycle can never become valid through
+    /// later delivery, so reject it before it influences any selected version.
+    static func validateSyncFileAncestry(accountID: String, epoch: UUID, objectID: UUID, in database: Database) throws {
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+            """, arguments: [accountID, epoch.uuidString, objectID.uuidString])
+        var graph: [UUID: Set<UUID>] = [:]
+        for row in rows {
+            guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+            graph[id] = Set(try JSONDecoder().decode([UUID].self, from: row["parents"]))
+        }
+        let known = Set(graph.keys)
+        var remaining = graph.mapValues { $0.intersection(known) }
+        var children: [UUID: Set<UUID>] = [:]
+        for (id, parents) in remaining { for parent in parents { children[parent, default: []].insert(id) } }
+        var ready = remaining.filter { $0.value.isEmpty }.map(\.key)
+        var visited = 0
+        while let next = ready.popLast() {
+            visited += 1
+            for child in children[next] ?? [] {
+                remaining[child]?.remove(next)
+                if remaining[child]?.isEmpty == true { ready.append(child) }
+            }
+        }
+        guard visited == graph.count else { throw ClipboardSyncServiceError.corruptData }
     }
 }

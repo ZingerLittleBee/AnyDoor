@@ -42,10 +42,11 @@ extension ClipboardHistoryModule {
                     }
                 }
                 let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
+                let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
                 return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
                     displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
                     availableVersionID: available ? completeVersion : nil, transferredByteCount: transfer.bytes,
-                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending)
+                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending, hasConflict: conflict)
             }
     }
 
@@ -297,6 +298,7 @@ extension ClipboardHistoryModule {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString,
                 descriptor.versionID.uuidString, data, transferState, localPath, bookmark, identity, try JSONEncoder().encode(parents), publicationRecordID])
+        try Self.validateSyncFileAncestry(accountID: account.identifier, epoch: epoch, objectID: descriptor.objectID, in: database)
         try Self.reduceSyncFileVersions(descriptor: descriptor, accountID: account.identifier,
             epoch: epoch, complete: transferState == "complete", in: database)
     }

@@ -75,6 +75,7 @@ extension ClipboardHistoryModule {
                   ClipboardSyncCodec.check(key: key, account: account, keyID: control.keyID) == control.keyCheck else {
                 throw ClipboardSyncServiceError.keyUnavailable
             }
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             let initialProofs = try await inspectConflictLocations(snapshot)
             let selected: ClipboardLinkedFileProof
             switch choice {
@@ -101,6 +102,8 @@ extension ClipboardHistoryModule {
                     versionID: branch.versionID, publicationID: branch.publicationID, parents: [location.baseVersionID],
                     expectedSourceIdentity: proof.identity, displayName: basis.versions[0].descriptor.displayName,
                     account: account, control: control, key: key)
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                guard storeEpoch == store else { throw CancellationError() }
                 guard prepared.descriptor.contentDigest == location.savedDigest,
                       prepared.descriptor.originalByteCount == location.byteCount else { throw ClipboardHistoryFileConflictError.stalePlan }
                 journal.prepared.append(prepared)
@@ -108,12 +111,16 @@ extension ClipboardHistoryModule {
                 try faultInjector.check(.fileConflictAfterBranchFreeze)
             }
             if !journal.prepared.contains(where: { $0.descriptor.versionID == journal.resultID }) {
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                try linkedRead { try Self.validateConflictBasis(fileConflictBasis(entryID: entryID, objectID: snapshot.objectID, in: $0), snapshot: snapshot) }
                 let nodes = basis.nodes + journal.prepared.map { ClipboardSyncVersionNode(id: $0.descriptor.versionID, parents: Set($0.parents)) }
                 let parents = ClipboardSyncVersionGraph.heads(nodes).sorted { $0.uuidString < $1.uuidString }
                 let prepared = try await prepareFileVersion(sourceURL: selected.url, objectID: snapshot.objectID,
                     versionID: journal.resultID, publicationID: journal.publicationID, parents: parents,
                     expectedSourceIdentity: selected.identity, displayName: basis.versions[0].descriptor.displayName,
                     account: account, control: control, key: key)
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                guard storeEpoch == store else { throw CancellationError() }
                 guard prepared.descriptor.contentDigest == selected.digest, prepared.descriptor.originalByteCount == selected.byteCount else {
                     throw ClipboardHistoryFileConflictError.stalePlan
                 }
@@ -123,6 +130,7 @@ extension ClipboardHistoryModule {
             for prepared in journal.prepared {
                 try await Self.verifyPreparedFileVersion(prepared, account: account, control: control, key: key)
             }
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
             guard let result = journal.prepared.first(where: { $0.descriptor.versionID == journal.resultID }) else { throw ClipboardSyncServiceError.corruptData }
             let output = try await ClipboardSyncFilePublication.construct(descriptor: result.descriptor,
                 encryptedDirectory: result.uploadDirectory, root: syncWorkingRoot,

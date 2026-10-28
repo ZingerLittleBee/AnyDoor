@@ -11,10 +11,11 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
     public let transferFailure: ClipboardHistorySyncFileFailure?
     public let downloadRequested: Bool
     public let uploadPending: Bool
+    public let hasConflict: Bool
 
     public init(id: UUID, versionID: UUID, displayName: String, originalByteCount: Int64?, state: ClipboardHistorySyncFileState,
         availableVersionID: UUID? = nil, transferredByteCount: Int64 = 0,
-        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false) {
+        transferFailure: ClipboardHistorySyncFileFailure? = nil, downloadRequested: Bool = false, uploadPending: Bool = false, hasConflict: Bool = false) {
         self.id = id
         self.versionID = versionID
         self.displayName = displayName
@@ -25,6 +26,7 @@ public struct ClipboardHistorySyncFileSummary: Hashable, Sendable, Identifiable 
         self.transferFailure = transferFailure
         self.downloadRequested = downloadRequested
         self.uploadPending = uploadPending
+        self.hasConflict = hasConflict
     }
 }
 
