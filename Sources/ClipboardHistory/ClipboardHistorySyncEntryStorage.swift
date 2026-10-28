@@ -33,7 +33,8 @@ extension ClipboardHistoryModule {
         return .init(identity: identity, bitmaps: bitmaps, thumbnailID: thumbnailID)
     }
 
-    func syncEntryContent(id: UUID, tags: [ClipboardSyncTagContent], in database: Database) throws -> ClipboardSyncEntryContent {
+    func syncEntryContent(id: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
+                          control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntryContent {
         let storedID = id.uuidString.lowercased()
         guard let entry = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_entries WHERE id = ?", arguments: [storedID]) else {
             throw ClipboardSyncServiceError.localStorage
@@ -43,7 +44,7 @@ extension ClipboardHistoryModule {
         var isFirstBitmap = true
         let items = try itemIndices.map { itemIndex in
             let rows = try Row.fetchAll(database, sql: """
-                SELECT kind, type_identifier, text_value, data_value, payload_id FROM clipboard_representations
+                SELECT kind, type_identifier, text_value, data_value, payload_id, representation_index FROM clipboard_representations
                 WHERE entry_id = ? AND item_index = ? ORDER BY representation_index
                 """, arguments: [storedID, itemIndex])
             return ClipboardSyncItemContent(representations: try rows.map { row in
@@ -70,6 +71,9 @@ extension ClipboardHistoryModule {
                         : try Self.canonicalBitmap(from: png).thumbnail
                     isFirstBitmap = false
                     return .bitmap(png: png, thumbnail: thumbnail)
+                case "fileReference":
+                    return .file(try syncFileDescriptor(entryID: storedID, itemIndex: itemIndex,
+                        representationIndex: row["representation_index"], account: account, control: control, key: key, in: database))
                 default: throw ClipboardSyncServiceError.unsupportedVersion
                 }
             })
@@ -100,6 +104,7 @@ extension ClipboardHistoryModule {
         }
         let preview = content.items.flatMap(\.representations).compactMap { representation -> String? in
             if case .text(_, let value) = representation { return value }
+            if case .file(let file) = representation { return file.displayName }
             return nil
         }.first.map(Self.boundedPreviewText)
         try database.execute(sql: """
@@ -149,7 +154,17 @@ extension ClipboardHistoryModule {
                     try Self.insertSearchField(value: normalizedValue, kind: "normalizedColor", index: searchIndex,
                         rankingGroup: Self.searchRankingGroup(for: "normalizedColor"), entryID: localID, into: database, faultInjector: faultInjector)
                     searchIndex += 1
-                case .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .file(let descriptor):
+                    try database.execute(sql: """
+                        INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, data_value)
+                        VALUES (?, ?, ?, 'fileReference', 'public.file-url', ?)
+                        """, arguments: [localID, itemIndex, representationIndex, try JSONEncoder().encode(descriptor)])
+                    try importSyncFileDescriptor(descriptor, entryID: localID, itemIndex: itemIndex,
+                        representationIndex: representationIndex, account: account, record: record, in: database)
+                    try Self.insertSearchField(value: descriptor.displayName, kind: "fileName", index: searchIndex,
+                        rankingGroup: Self.searchRankingGroup(for: "fileName"), entryID: localID,
+                        into: database, faultInjector: faultInjector)
+                    searchIndex += 1
                 }
             }
         }
@@ -181,9 +196,10 @@ extension ClipboardHistoryModule {
         var byteCount = 0
         var pixelCount = 0
         var thumbnailByteCount = 0
+        var containsFile = false
         let items = try content.items.map { item in
             guard !item.representations.isEmpty else { throw ClipboardSyncServiceError.corruptData }
-            return PasteboardSnapshot.Item(representations: try item.representations.map { representation in
+            return PasteboardSnapshot.Item(representations: try item.representations.compactMap { representation -> PasteboardSnapshot.Representation? in
                 let result: PasteboardSnapshot.Representation
                 let bytes: Int
                 switch representation {
@@ -215,13 +231,19 @@ extension ClipboardHistoryModule {
                     guard !sum.overflow else { throw ClipboardSyncServiceError.corruptData }
                     bytes = sum.partialValue
                     result = .color(data: data, normalizedValue: normalizedValue)
-                case .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .file(let descriptor):
+                    guard ClipboardSyncFileIO.validFilename(descriptor.displayName) else { throw ClipboardSyncServiceError.corruptData }
+                    containsFile = true
+                    return nil
                 }
                 guard bytes <= PasteboardSnapshot.maximumByteCount - byteCount else { throw ClipboardSyncServiceError.corruptData }
                 byteCount += bytes
                 return result
             })
         }
+        // File identity belongs to the shared descriptor, never a source path
+        // or a fabricated bookmark. Shared entry receipts handle redelivery.
+        guard !containsFile else { return nil }
         return PasteboardSnapshot(items: items,
             extraFacets: Set(content.facets.compactMap(ClipboardHistoryFacet.init(rawValue:))), allowsTextInference: false)
     }

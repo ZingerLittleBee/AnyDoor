@@ -32,6 +32,6 @@ extension ClipboardHistoryModule {
                 SELECT 1 FROM clipboard_representations AS representation
                 WHERE representation.entry_id = item.entry_id AND representation.item_index = item.item_index))
         AND NOT EXISTS (SELECT 1 FROM clipboard_representations
-            WHERE entry_id = entry.id AND kind NOT IN ('text', 'richText', 'bitmap', 'color'))
+            WHERE entry_id = entry.id AND kind NOT IN ('text', 'richText', 'bitmap', 'color', 'fileReference'))
         """
 }

@@ -111,7 +111,8 @@ extension ClipboardHistoryModule {
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
                 let memberships = Set(try String.fetchAll(database,
                     sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID]))
-                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) }, in: database)
+                let content = try syncEntryContent(id: id, tags: tags.filter { memberships.contains($0.id) },
+                    account: account, control: control, key: key, in: database)
                 let upload = try ClipboardSyncCodec.seal(.entry(content), account: account, control: control, key: key)
                 try storeSyncUpload(upload, subjectID: localID, account: account, in: database)
                 try database.execute(sql: """
@@ -189,6 +190,8 @@ extension ClipboardHistoryModule {
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
                 try importSyncTagState(state, account: account, record: record, in: database)
+            case .fileBody:
+                throw ClipboardSyncServiceError.unsupportedVersion
             }
             try database.execute(sql: "INSERT INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])

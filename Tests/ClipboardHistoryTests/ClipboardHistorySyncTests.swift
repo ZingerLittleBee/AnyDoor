@@ -86,6 +86,59 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectedOrdinaryFileArrivesAsUsableHistoryWithoutChangingPasteboard() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x71, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x72, time: 2_000)
+        let sourceRoot = FileManager.default.temporaryDirectory.appendingPathComponent("sync-file-source-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(sourceRoot)
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let original = sourceRoot.appendingPathComponent("Private notes.txt")
+        let expected = Data("a complete ordinary file\n".utf8)
+        try expected.write(to: original)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-file-tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString(original.absoluteString, forType: .fileURL)
+        let source = ClipboardHistoryCaptureSource(bundleIdentifier: "com.apple.finder", displayName: "Finder")
+        let outcome = try await first.capture(.init(pasteboard: pasteboard), source: source)
+        guard case .captured(let captured) = outcome else {
+            return XCTFail("Expected the original file reference to be captured")
+        }
+        let tag = try await first.createTagDefinition(named: "Shared files", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        let senderStatus = await first.syncStatus()
+        XCTAssertEqual(senderStatus.phase, .upToDate)
+        pasteboard.clearContents()
+        pasteboard.setString("leave the current clipboard alone", forType: .string)
+        let generation = pasteboard.changeCount
+
+        try await second.setSyncEnabled(true)
+
+        let receiverStatus = await second.syncStatus()
+        XCTAssertEqual(receiverStatus.phase, .upToDate)
+
+        let page = try await second.page(.init(tagID: tag.definition.id))
+        let received = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(page.entries.count, 1)
+        XCTAssertEqual(received.capturedAt, Date(timeIntervalSince1970: 1_000))
+        XCTAssertEqual(received.source, source)
+        XCTAssertTrue(received.facets.contains(.file))
+        let materialized = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        guard materialized.items.count == 1,
+              case .file(let file) = materialized.items[0].representations.first else {
+            return XCTFail("Expected one complete working-file representation")
+        }
+        XCTAssertEqual(file.displayName, "Private notes.txt")
+        XCTAssertNotEqual(file.currentURL, original)
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), expected)
+        XCTAssertEqual(pasteboard.changeCount, generation)
+        XCTAssertEqual(pasteboard.string(forType: .string), "leave the current clipboard alone")
+    }
+
+    @MainActor
     func testOrderedRichTextAndLinkRepresentationsTransferAsOneCompleteEntry() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
