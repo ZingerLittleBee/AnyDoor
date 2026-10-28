@@ -54,7 +54,14 @@ the previous complete version. Source proof and reconstruction use disk-backed
 encrypted inventories and bounded content streams; ordinary xattrs require one
 platform-sized value buffer. See the [format and mutation boundary](../agents/architecture.md#clipboard-sync).
 
-Application-package Apply Update and running-application protection remain a
-separate acceptance slice.
+Application-package versions now remain downloaded but unapplied until an
+explicit location/version-bound action. The same rule covers an ordinary folder
+containing an application; external symbolic links do not expand its scope.
+Native running-instance and filesystem-identity checks refuse uncertain or
+running applications, and refresh immediately before the existing short exchange
+gate. Independent copies sharing a bundle identifier do not become associated.
+This uses native application observation, not a system-wide process-launch lock.
+Local self-updates follow the same established-identity rule as other linked
+saves; an unknown replacement still requires reassociation.
 The complete specification defines the signed-app and multi-device acceptance
 gates; isolated real-file tests do not establish live iCloud delivery.

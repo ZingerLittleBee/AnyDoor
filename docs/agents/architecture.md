@@ -261,10 +261,39 @@ Real temporary-directory coverage is in
 [directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),
 [recursive observation tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryTreeObservationTests.swift),
 and [malformed-stream/conflict tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectoryBoundaryTests.swift).
-These isolated provider-boundary tests do not establish signed two-Mac delivery
-or the separate application-package Apply Update/running-application workflow.
+These isolated provider-boundary tests do not establish signed two-Mac delivery.
 History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
 remain independent and do not create Linked Locations.
+
+Application packages use that same authenticated tree and aggregate, per-version
+download policy. Receiving a version does not replace an associated application.
+The additive `v28_clipboard_sync_application_updates` migration persists explicit
+Apply Update plans bound to account, epoch/key, entry, location revision and
+identity, actual base, selected version, and file-graph revision. Downloading
+requires a fresh plan before Apply; it grants no replacement permission. A folder
+containing a real application also needs Apply because exchanging its root would
+replace that application. Classification never follows external symbolic links.
+
+`ClipboardApplicationRunningGuard` uses native [NSWorkspace.runningApplications](https://developer.apple.com/documentation/appkit/nsworkspace/runningapplications)
+on the main run loop, including KVO for background/LSUIElement applications.
+It retains matched `NSRunningApplication` instances and compares actual package
+and executable identities, rather than treating a shared bundle ID or reusable
+PID as identity. Running or unprovable identities refuse Apply. After long tree
+verification, a synchronous main-thread refresh surrounds the existing final
+authority gate and short exchange. This is an observation boundary, not an OS
+lock excluding every possible concurrent process launch. No application is
+terminated. In-flight explicit updates are excluded from background journal
+recovery; interrupted exchanges retain the existing complete-root recovery rules.
+
+[Application tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationUpdateTests.swift),
+[download/migration tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationBoundaryTests.swift),
+and [recovery tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationRecoveryTests.swift)
+use disposable AppKit packages, inside-out ad-hoc signing, real native launches,
+and normal fixture-owned exits. Strict signature checks after receive/Apply never
+re-sign the received package. Unsigned packages remain supported. The production
+[Apply sheet](../../Sources/AnyDoor/Views/ClipboardApplicationUpdateSheet.swift)
+uses these module actions and retains the previous linked version until explicit
+success; GUI interaction and signed two-Mac iCloud delivery are separate evidence.
 
 The additive `v24_clipboard_linked_locations` migration records the original,
 managed working copy, and explicitly associated ordinary files with their actual

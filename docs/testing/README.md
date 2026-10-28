@@ -14,6 +14,7 @@ establish native UI behavior or the permissions of an installed app.
 | Disposable legacy history fixture | [Fixture command](clipboard-history-v2-manual-test-plan.md#03-building-a-large-history) | The selected fixture test executes without skipping and prints `CLIPBOARD_HISTORY_GUI_FIXTURE_ROOT` for the intended profile. A zero exit status alone is insufficient. |
 | Clipboard Keychain identity boundary | [Cross-identity Keychain verification](clipboard-history-keychain-integration.md) | Deterministic pre-prompt result; interactive authorization is a separate result. |
 | Clipboard Sync account/key recovery | [Recovery evidence](clipboard-sync-signing.md#account-and-key-recovery-evidence) | Isolated module fault/restart tests; separately recorded signed account and Keychain transitions. |
+| Clipboard application-package updates | [Application behavior tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationUpdateTests.swift), [fixture lifecycle](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationFixtureTests.swift), [recovery](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationRecoveryTests.swift) | Real disposable native AppKit processes, unchanged strict ad-hoc signatures, exact download/Apply separation, and normal owned exits. This does not establish production GUI or signed two-Mac iCloud acceptance. |
 | Pinned images | [Pinned-image plan](pinned-image-manual-test-plan.md) | Results for the requested window behavior and display setup. |
 
 For a handoff, record the candidate SHA, app path, build command, toolchain,

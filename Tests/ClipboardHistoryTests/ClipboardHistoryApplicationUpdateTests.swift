@@ -5,6 +5,59 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testApplicationSavedChangesRemainBidirectionalAndUnknownSelfReplacementNeedsReassociation() async throws {
+        let identifier = "dev.bybee.AnyDoor.tests.self-update.\(UUID())"
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            _ = try ClipboardApplicationTestFixture.create(at: root, bundleIdentifier: identifier,
+                resource: "initial package", signed: false)
+        }, sourceName: "Self Updating.app")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let resource = "Contents/Resources/Resource.txt"
+        try Data("saved at original location".utf8).write(to: fixture.original.appendingPathComponent(resource))
+        try await eventually {
+            let originals = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+            return originals.first?.baseVersionID != working.baseVersionID
+        }
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+        let firstLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let first = try XCTUnwrap(firstLocations.first)
+        let firstPlan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: first.id, expectedRevision: first.revision))
+        try await fixture.receiver.applyApplicationUpdate(firstPlan)
+
+        try Data("saved after a known application swap".utf8).write(to: working.url.appendingPathComponent(resource))
+        try await eventually {
+            let received = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+            return received.first?.baseVersionID != firstPlan.versionID
+        }
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let originals = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let original = try XCTUnwrap(originals.first)
+        let reverse = try await fixture.sender.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: original.id, expectedRevision: original.revision))
+        try await fixture.sender.applyApplicationUpdate(reverse)
+        XCTAssertEqual(try Data(contentsOf: fixture.original.appendingPathComponent(resource)), Data("saved after a known application swap".utf8))
+
+        try await fixture.receiver.setSyncEnabled(false)
+        let unknown = try ClipboardApplicationTestFixture.create(at: fixture.root.appendingPathComponent("Self Update Candidate.app"),
+            bundleIdentifier: identifier, resource: "external replacement", signed: false)
+        _ = try FileManager.default.replaceItemAt(working.url, withItemAt: unknown.url)
+        try await fixture.receiver.setSyncEnabled(true)
+        let uncertainLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let uncertain = try XCTUnwrap(uncertainLocations.first)
+        XCTAssertEqual(uncertain.state, .identityUncertain)
+        XCTAssertEqual(uncertain.baseVersionID, reverse.versionID)
+        let rebound = try await fixture.receiver.reassociateFileLocation(.init(selection: .init(entryID: fixture.entryID,
+            locationID: uncertain.id, expectedRevision: uncertain.revision), url: working.url))
+        XCTAssertEqual(rebound.id, working.id)
+        XCTAssertEqual(try Data(contentsOf: working.url.appendingPathComponent(resource)), Data("external replacement".utf8))
+    }
+
+    @MainActor
     func testApplicationLaunchedDuringPreparationIsRefusedAtFinalExchange() async throws {
         let barrier = LinkedReplacementBarrier()
         let identifier = "dev.bybee.AnyDoor.tests.late-launch.\(UUID())"
