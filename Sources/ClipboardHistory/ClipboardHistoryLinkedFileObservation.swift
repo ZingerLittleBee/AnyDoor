@@ -3,22 +3,24 @@ import Dispatch
 import Foundation
 import GRDB
 
-/// Dispatch owns the descriptor until its cancellation handler runs. Every
-/// property is immutable and Dispatch cancellation is thread-safe/idempotent;
-/// this narrow wrapper can lose unchecked Sendable when the SDK source existential
-/// carries that guarantee itself. No mutable module state crosses the callback.
+/// Dispatch owns the descriptor until its cancellation handler runs. Both event
+/// sources use the same serial queue, and the subtree stream stops before the
+/// descriptor can close. Immutable ownership and synchronized native cancellation
+/// justify this SDK boundary's Sendable conformance.
 final class ClipboardLinkedFileObservation: @unchecked Sendable {
     private static let queue = DispatchQueue(label: "dev.bybee.AnyDoor.clipboard.linked-files")
     let path: String
     let identity: Data
     private let source: any DispatchSourceFileSystemObject
+    private let tree: ClipboardLinkedTreeObservation?
 
     init?(url: URL, identity: Data, onChange: @escaping @Sendable (ClipboardLinkedFileIdentityEvent) -> Void) {
         let descriptor = open(url.path, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { return nil }
         var status = stat()
         var pathStatus = stat()
-        guard fstat(descriptor, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+        guard fstat(descriptor, &status) == 0,
+              [mode_t(S_IFREG), mode_t(S_IFDIR)].contains(status.st_mode & mode_t(S_IFMT)),
               ClipboardSyncFileIO.isAvailable(path: url.path, identity: identity),
               lstat(url.path, &pathStatus) == 0,
               pathStatus.st_dev == status.st_dev, pathStatus.st_ino == status.st_ino else {
@@ -27,9 +29,7 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
         }
         self.path = url.path
         self.identity = identity
-        source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
-            eventMask: [.write, .extend, .attrib, .rename, .delete, .revoke], queue: Self.queue)
-        source.setEventHandler {
+        let notify: @Sendable () -> Void = {
             var status = stat()
             let unlinked = fstat(descriptor, &status) == 0 && status.st_nlink == 0
             var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
@@ -40,12 +40,25 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
             } else { path = nil }
             onChange(ClipboardLinkedFileIdentityEvent(identity: identity, candidate: path, unlinked: unlinked))
         }
+        if status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) {
+            guard let observation = ClipboardLinkedTreeObservation(url: url, queue: Self.queue, onChange: notify) else {
+                close(descriptor)
+                return nil
+            }
+            tree = observation
+        } else { tree = nil }
+        source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
+            eventMask: [.write, .extend, .attrib, .rename, .delete, .revoke], queue: Self.queue)
+        source.setEventHandler(handler: notify)
         source.setCancelHandler { close(descriptor) }
         source.activate()
     }
 
-    func cancel() { source.cancel() }
-    deinit { source.cancel() }
+    func cancel() {
+        tree?.cancel()
+        source.cancel()
+    }
+    deinit { cancel() }
 }
 
 struct ClipboardLinkedLocationSource: Sendable {
@@ -122,6 +135,10 @@ extension ClipboardHistoryModule {
     /// Reconcile on resume/poll as well as notifications: an event is a hint,
     /// not durable evidence that a file's saved bytes are unchanged.
     func reconcileLinkedFileObservations(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64, onlyUnproven: Bool = false) async throws {
+        // Start hints before inspecting saved content. A change during the scan
+        // then schedules another full reconciliation instead of falling between
+        // the content proof and the initial watcher registration.
+        try refreshLinkedFileObservers(account: account, control: control, generation: generation)
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources where !onlyUnproven || source.nativeIdentity == nil {
             _ = try await observeLinkedLocation(source.id, account: account, epoch: control.epoch, generation: generation)
