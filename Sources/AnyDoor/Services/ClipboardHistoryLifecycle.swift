@@ -71,6 +71,8 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             -> ClipboardHistoryLegacyCleanupReport
     let retryStore: @Sendable () async -> Void
     let resetStore: @Sendable () async throws -> Void
+    let resumeSync: @Sendable () async -> Void
+    let suspendSync: @Sendable () async -> Void
 
     init(module: ClipboardHistoryModule) {
         status = {
@@ -100,6 +102,12 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         resetStore = {
             try await module.reset(confirmation: .confirmed)
         }
+        resumeSync = {
+            await module.resumeSync()
+        }
+        suspendSync = {
+            await module.suspendSync()
+        }
     }
 
     init(
@@ -121,7 +129,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             @escaping @Sendable (URL) async throws
                 -> ClipboardHistoryLegacyCleanupReport,
         retryStore: @escaping @Sendable () async -> Void,
-        resetStore: @escaping @Sendable () async throws -> Void
+        resetStore: @escaping @Sendable () async throws -> Void,
+        resumeSync: @escaping @Sendable () async -> Void = {},
+        suspendSync: @escaping @Sendable () async -> Void = {}
     ) {
         self.status = status
         self.setMonitoring = setMonitoring
@@ -131,6 +141,8 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         self.cleanupLegacyPayloads = cleanupLegacyPayloads
         self.retryStore = retryStore
         self.resetStore = resetStore
+        self.resumeSync = resumeSync
+        self.suspendSync = suspendSync
     }
 }
 
@@ -345,6 +357,7 @@ final class ClipboardHistoryLifecycle {
             unlockNotifications.removeObserver(screenUnlockObserver)
             self.screenUnlockObserver = nil
         }
+        await operations.suspendSync()
         _ = await operations.setMonitoring(
             .stop,
             ClipboardPreferences.monitoringConfiguration(from: defaults)
@@ -535,6 +548,8 @@ final class ClipboardHistoryLifecycle {
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
             }
+            guard !Task.isCancelled, generation == requestGeneration else { return }
+            await operations.resumeSync()
             return
         }
         _ = await operations.setMonitoring(
@@ -625,6 +640,8 @@ final class ClipboardHistoryLifecycle {
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
             }
+            guard !Task.isCancelled, generation == requestGeneration else { return }
+            await operations.resumeSync()
         } catch ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(
             let entryCount
         ) {

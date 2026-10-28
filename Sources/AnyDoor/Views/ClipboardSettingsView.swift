@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 struct ClipboardSettingsView: View {
     @State private var model: ClipboardHistorySettingsModel
+    private let module: ClipboardHistoryModule
     let presentation: SettingsPresentation
     @State private var installedApps: [InstalledApp] = []
     @State private var showsResetConfirmation = false
@@ -16,6 +17,7 @@ struct ClipboardSettingsView: View {
         lifecycle: ClipboardHistoryLifecycle,
         presentation: SettingsPresentation
     ) {
+        self.module = module
         self.presentation = presentation
         _model = State(
             initialValue: ClipboardHistorySettingsModel(
@@ -127,6 +129,8 @@ struct ClipboardSettingsView: View {
                 LocalizedText(.settingsClipboard)
             }
             .disabled(!storeIsReady)
+
+            ClipboardSyncSettingsView(module: module, isStoreReady: storeIsReady)
 
             Section {
                 LabeledContent {
