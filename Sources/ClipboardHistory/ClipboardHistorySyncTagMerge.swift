@@ -24,7 +24,7 @@ extension ClipboardHistoryModule {
             guard selected.contains(sourceID) || selected.contains(targetID) else { throw ClipboardHistoryModuleError.operationUnavailable }
             let count = try Int.fetchOne(database, sql: """
                 SELECT COUNT(*) FROM clipboard_entries AS entry
-                WHERE \(Self.syncPlainTextEligibility)
+                WHERE \(Self.syncEntryEligibility)
                   AND EXISTS (SELECT 1 FROM clipboard_entry_tags WHERE entry_id = entry.id AND tag_id IN (?, ?))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
                       JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
