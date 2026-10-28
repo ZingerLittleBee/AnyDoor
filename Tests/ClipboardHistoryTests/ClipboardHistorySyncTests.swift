@@ -8,6 +8,45 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testStandardColorAndExplicitRecognitionTextKeepTheirRepresentationsAndFacets() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x85, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x86, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-color.\(UUID())"))
+        pasteboard.clearContents()
+        let color = NSColor(displayP3Red: 0.25, green: 0.5, blue: 0.75, alpha: 0.5)
+        let bytes = try XCTUnwrap(color.pasteboardPropertyList(forType: .color) as? Data)
+        let item = NSPasteboardItem()
+        item.setData(bytes, forType: .color)
+        item.setString("original color label", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let colored) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a captured color")
+        }
+        let ocr = try await first.capture(.init(source: .unknown, content: .ocr("https://example.com/recognized")))
+        let qr = try await first.capture(.init(source: .unknown, content: .qrCode("qr result")))
+        let tag = try await first.createTagDefinition(named: "Content", assigningTo: colored.entryID)
+        _ = try await first.apply(.setTags(ocr.entryID, [tag.definition.id]))
+        _ = try await first.apply(.setTags(qr.entryID, [tag.definition.id]))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let page = try await second.page(.init())
+        XCTAssertEqual(page.entries.count, 3)
+        let restoredColor = try XCTUnwrap(page.entries.first { $0.id == colored.entryID })
+        XCTAssertEqual(restoredColor.facets, [.text, .color])
+        let normal = try await second.materialize(.init(entryID: restoredColor.id, purpose: .normalPaste))
+        XCTAssertEqual(normal.items, [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "original color label"),
+            .data(typeIdentifier: NSPasteboard.PasteboardType.color.rawValue, bytes),
+        ])])
+        XCTAssertEqual(page.entries.first { $0.id == ocr.entryID }?.facets, [.text, .ocr])
+        XCTAssertEqual(page.entries.first { $0.id == qr.entryID }?.facets, [.text, .qrCode])
+        let ocrSearch = try await second.page(.init(text: "recognized", facet: .ocr))
+        XCTAssertEqual(ocrSearch.entries.map(\.id), [ocr.entryID])
+    }
+
+    @MainActor
     func testScreenshotTransfersOwnedPixelsAndThumbnailWithoutStartingReceiverRecognition() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()

@@ -50,6 +50,10 @@ extension ClipboardHistoryModule {
                 switch row["kind"] as String {
                 case "text": return .text(typeIdentifier: row["type_identifier"], value: row["text_value"])
                 case "richText": return .richText(typeIdentifier: row["type_identifier"], data: row["data_value"])
+                case "color":
+                    let data: Data = row["data_value"]
+                    guard let value = Self.normalizedColor(from: data) else { throw ClipboardSyncServiceError.corruptData }
+                    return .color(data: data, normalizedValue: value)
                 case "bitmap":
                     guard let path = try String.fetchOne(database,
                         sql: "SELECT relative_path FROM clipboard_payloads WHERE id = ?", arguments: [row["payload_id"] as String]),
@@ -137,7 +141,15 @@ extension ClipboardHistoryModule {
                         INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, payload_id)
                         VALUES (?, ?, ?, 'bitmap', 'public.png', ?)
                         """, arguments: [localID, itemIndex, representationIndex, bitmap.bitmap.id.uuidString.lowercased()])
-                case .color, .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .color(let data, let normalizedValue):
+                    try database.execute(sql: """
+                        INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, data_value)
+                        VALUES (?, ?, ?, 'color', 'com.apple.cocoa.pasteboard.color', ?)
+                        """, arguments: [localID, itemIndex, representationIndex, data])
+                    try Self.insertSearchField(value: normalizedValue, kind: "normalizedColor", index: searchIndex,
+                        rankingGroup: Self.searchRankingGroup(for: "normalizedColor"), entryID: localID, into: database, faultInjector: faultInjector)
+                    searchIndex += 1
+                case .file: throw ClipboardSyncServiceError.unsupportedVersion
                 }
             }
         }
@@ -197,7 +209,13 @@ extension ClipboardHistoryModule {
                     thumbnailByteCount += thumbnail.count
                     bytes = png.count
                     result = .bitmap(png: png, thumbnail: thumbnail, isScreenshot: content.facets.contains("screenshot"))
-                case .color, .file: throw ClipboardSyncServiceError.unsupportedVersion
+                case .color(let data, let normalizedValue):
+                    guard Self.normalizedColor(from: data) == normalizedValue else { throw ClipboardSyncServiceError.corruptData }
+                    let sum = data.count.addingReportingOverflow(normalizedValue.utf8.count)
+                    guard !sum.overflow else { throw ClipboardSyncServiceError.corruptData }
+                    bytes = sum.partialValue
+                    result = .color(data: data, normalizedValue: normalizedValue)
+                case .file: throw ClipboardSyncServiceError.unsupportedVersion
                 }
                 guard bytes <= PasteboardSnapshot.maximumByteCount - byteCount else { throw ClipboardSyncServiceError.corruptData }
                 byteCount += bytes
