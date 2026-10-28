@@ -20,7 +20,7 @@ struct ImportSummary: Equatable {
 @MainActor
 final class BackupService {
     private static var reconcileClipboardHistory:
-        @MainActor () async throws -> Void = {}
+        @MainActor (Bool) async throws -> Void = { _ in }
 
     private let context: ModelContext
     private let defaults: UserDefaults
@@ -49,9 +49,10 @@ final class BackupService {
         module: ClipboardHistoryModule,
         lifecycle: ClipboardHistoryLifecycle
     ) {
-        reconcileClipboardHistory = {
+        reconcileClipboardHistory = { importClipboardTags in
             try await ClipboardHistoryPortableSettings.reconcile(
-                module: module
+                module: module,
+                importClipboardTags: importClipboardTags
             )
             await lifecycle.refreshMonitoringConfiguration()
         }
@@ -231,8 +232,9 @@ final class BackupService {
 
     /// Re-read settings into the modules whose setters carry side effects that
     /// raw UserDefaults writes bypass, then rebuild derived surfaces. Shared
-    /// with `SyncEngine`, whose applies bypass the same setters.
-    static func reconcileLiveRuntime() async throws {
+    /// with `SyncEngine`, whose applies bypass the same setters but explicitly
+    /// skip restoring clipboard tags from the manual-backup mirror.
+    static func reconcileLiveRuntime(importClipboardTags: Bool = true) async throws {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
@@ -253,7 +255,7 @@ final class BackupService {
         }
         let clipboardHistoryError: (any Error)?
         do {
-            try await reconcileClipboardHistory()
+            try await reconcileClipboardHistory(importClipboardTags)
             clipboardHistoryError = nil
         } catch {
             clipboardHistoryError = error

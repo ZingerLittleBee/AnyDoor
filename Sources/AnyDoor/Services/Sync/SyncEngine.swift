@@ -57,6 +57,13 @@ enum SyncEngineStatus: Equatable, Sendable {
 /// reporting from the stores — a nudge that "something changed" is enough.
 @MainActor
 final class SyncEngine {
+    /// Tag definitions remain in manual backups, but their automatic plaintext
+    /// channel is retired. Unlike unknown future settings, this record must not
+    /// be carried forward by Config Sync (ADR-0028).
+    private static let retiredTagKey = SyncKey.setting(
+        key: ClipboardHistoryPortableKeys.customTags
+    )
+
     struct Configuration {
         var deviceID: String
         var deviceName: String?
@@ -71,7 +78,7 @@ final class SyncEngine {
     private let transport: any SyncTransport
     private let stateStore: SyncLocalStateStore
     private let appPathResolver: (String) -> String?
-    private let reconcileRuntime: @MainActor () async throws -> Void
+    private let reconcileRuntime: @MainActor (Bool) async throws -> Void
     private let wallNow: () -> Int64
     private let localContentReader: (@MainActor () throws -> SyncSnapshotMapping.Content)?
 
@@ -102,8 +109,8 @@ final class SyncEngine {
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
         },
-        reconcileRuntime: @escaping @MainActor () async throws -> Void = {
-            try await BackupService.reconcileLiveRuntime()
+        reconcileRuntime: @escaping @MainActor (Bool) async throws -> Void = { importClipboardTags in
+            try await BackupService.reconcileLiveRuntime(importClipboardTags: importClipboardTags)
         },
         wallNow: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) },
         readLocalContent: (@MainActor () throws -> SyncSnapshotMapping.Content)? = nil
@@ -126,6 +133,9 @@ final class SyncEngine {
             document = SyncDocument(deviceID: config.deviceID, deviceName: config.deviceName)
         }
         document.deviceName = config.deviceName
+        if document.entries.removeValue(forKey: Self.retiredTagKey) != nil {
+            persistState()
+        }
     }
 
     // MARK: - Lifecycle
@@ -245,7 +255,8 @@ final class SyncEngine {
         // up to the transport's timeout on an unresponsive folder.
         guard !isStopped else { return }
         var merged = document
-        for peer in peers {
+        for var peer in peers {
+            peer.entries.removeValue(forKey: Self.retiredTagKey)
             merged = merged.merged(with: peer)
         }
         for entry in merged.entries.values {
@@ -257,7 +268,7 @@ final class SyncEngine {
         if entriesChanged {
             do {
                 if try applyDocument() {
-                    try await reconcileRuntime()
+                    try await reconcileRuntime(false)
                 }
             } catch {
                 logger.error("sync apply failed: \(error)")
@@ -285,6 +296,7 @@ final class SyncEngine {
     /// untouched, never deleted.
     private func captureLocalChanges() throws {
         let payloads = SyncSnapshotMapping.payloads(from: try readLocalContent())
+            .filter { $0.key != Self.retiredTagKey }
         var changed = false
         for (key, payload) in payloads where document.entries[key]?.payload != payload {
             document.entries[key] = SyncEntry(
@@ -322,6 +334,7 @@ final class SyncEngine {
     }
 
     private func canOwn(_ key: SyncKey) -> Bool {
+        guard key != Self.retiredTagKey else { return false }
         switch key {
         case .appShortcut, .quicklink:
             return true

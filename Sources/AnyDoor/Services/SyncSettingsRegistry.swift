@@ -51,7 +51,9 @@ enum SyncSettingsRegistry {
         Entry(key: "scheduledShutdown.forced", type: .bool),
         Entry(key: "scheduledShutdown.warningLeadSeconds", type: .int),
         Entry(key: "scheduledShutdown.defaultMinutes", type: .int),
-        Entry(key: "clipboard.customTags", type: .string),
+        // Manual Config Backup only. SyncEngine retires this key from automatic
+        // capture, retained state, and peer documents (ADR-0028).
+        Entry(key: ClipboardHistoryPortableKeys.customTags, type: .string),
         Entry(key: "clipboard.categoryOrder", type: .string),
         Entry(key: "clipboard.excludedBundleIDs", type: .stringArray),
         Entry(

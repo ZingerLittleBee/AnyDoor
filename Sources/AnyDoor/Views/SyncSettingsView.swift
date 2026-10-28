@@ -45,6 +45,10 @@ struct SyncSettingsView: View {
             .font(.callout)
             .foregroundStyle(.secondary)
 
+            LocalizedText(.settingsConfigSyncTagMigrationNotice)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
             Toggle(isOn: syncEnabledBinding) {
                 LocalizedText(.settingsConfigSyncEnable)
             }

@@ -52,7 +52,7 @@ final class SyncEngineTests: XCTestCase {
         let engine = SyncEngine(
             config: .init(deviceID: device.id, deviceName: device.id),
             context: context, defaults: device.defaults, transport: transport,
-            stateStore: SyncLocalStateStore(url: stateURL), reconcileRuntime: {},
+            stateStore: SyncLocalStateStore(url: stateURL), reconcileRuntime: { _ in },
             readLocalContent: {
                 if readState.shouldFail { throw ReadFailure.unavailable }
                 return SyncSnapshotMapping.Content(
@@ -140,7 +140,7 @@ final class SyncEngineTests: XCTestCase {
             transport: transport ?? SyncFolderTransport(folderURL: folder),
             stateStore: SyncLocalStateStore(url: stateURL),
             appPathResolver: { _ in nil },
-            reconcileRuntime: {},
+            reconcileRuntime: { _ in },
             wallNow: { wall.now }
         )
         return Device(
@@ -158,6 +158,86 @@ final class SyncEngineTests: XCTestCase {
     }
 
     // MARK: - Scenarios
+
+    func testAutomaticSyncKeepsTagsLocalWhileExchangingOtherSettings() async throws {
+        let a = try makeDevice("device-a")
+        let b = try makeDevice("device-b")
+        let tagsA = #"[{"id":"tag-a","name":"Private A"}]"#
+        let tagsB = #"[{"id":"tag-b","name":"Private B"}]"#
+        a.defaults.set(tagsA, forKey: ClipboardHistoryPortableKeys.customTags)
+        b.defaults.set(tagsB, forKey: ClipboardHistoryPortableKeys.customTags)
+        a.defaults.set("a-icon", forKey: "menuBar.iconName")
+        b.defaults.set(false, forKey: "menuBar.iconVisible")
+
+        await a.engine.tick()
+        await b.engine.tick()
+        await a.engine.tick()
+
+        XCTAssertEqual(a.defaults.string(forKey: ClipboardHistoryPortableKeys.customTags), tagsA)
+        XCTAssertEqual(b.defaults.string(forKey: ClipboardHistoryPortableKeys.customTags), tagsB)
+        XCTAssertEqual(b.defaults.string(forKey: "menuBar.iconName"), "a-icon")
+        XCTAssertEqual(a.defaults.object(forKey: "menuBar.iconVisible") as? Bool, false)
+        for device in [a, b] {
+            let published = try SyncStateCodec.decode(
+                SyncDocument.self,
+                from: Data(contentsOf: folder.appendingPathComponent(
+                    SyncStateFile.name(forDeviceID: device.id)
+                ))
+            )
+            XCTAssertNil(published.entries[.setting(key: ClipboardHistoryPortableKeys.customTags)])
+        }
+    }
+
+    func testRetiredTagsAreRemovedFromPersistedAndIncomingAutomaticState() async throws {
+        let tagKey = SyncKey.setting(key: ClipboardHistoryPortableKeys.customTags)
+        let futureKey = SyncKey.setting(key: "future.someNewSetting")
+        var oldDocument = SyncDocument(deviceID: "device-a")
+        oldDocument.entries[tagKey] = SyncEntry(
+            payload: .setting(.string(#"[{"id":"old","name":"Old private tag"}]"#)),
+            clock: SyncTimestamp(wallMillis: 2_000, counter: 0, deviceID: "device-a")
+        )
+        oldDocument.entries[futureKey] = SyncEntry(
+            payload: .setting(.bool(true)),
+            clock: SyncTimestamp(wallMillis: 2_000, counter: 1, deviceID: "device-a")
+        )
+        let stateURL = folder.appendingPathComponent("local-state-device-a.json")
+        try SyncLocalStateStore(url: stateURL).save(SyncLocalState(
+            clock: SyncClock(deviceID: "device-a"), document: oldDocument
+        ))
+        let ownURL = folder.appendingPathComponent(SyncStateFile.name(forDeviceID: "device-a"))
+        try SyncStateCodec.encode(oldDocument).write(to: ownURL)
+
+        let a = try makeDevice("device-a")
+        let localTags = #"[{"id":"local","name":"Local private tag"}]"#
+        a.defaults.set(localTags, forKey: ClipboardHistoryPortableKeys.customTags)
+        var peer = SyncDocument(deviceID: "legacy-device")
+        let peerURL = folder.appendingPathComponent(SyncStateFile.name(forDeviceID: peer.deviceID))
+        for payload: SyncPayload? in [
+            .setting(.string(#"[{"id":"remote","name":"Remote private tag"}]"#)),
+            nil,
+        ] {
+            peer.entries[tagKey] = SyncEntry(
+                payload: payload,
+                clock: SyncTimestamp(wallMillis: 9_000, counter: 0, deviceID: peer.deviceID)
+            )
+            peer.entries[.setting(key: "menuBar.iconName")] = SyncEntry(
+                payload: .setting(.string("legacy-icon")),
+                clock: SyncTimestamp(wallMillis: 9_000, counter: 1, deviceID: peer.deviceID)
+            )
+            try SyncStateCodec.encode(peer).write(to: peerURL)
+
+            await a.engine.tick()
+
+            XCTAssertEqual(a.defaults.string(forKey: ClipboardHistoryPortableKeys.customTags), localTags)
+            XCTAssertEqual(a.defaults.string(forKey: "menuBar.iconName"), "legacy-icon")
+            let published = try SyncStateCodec.decode(SyncDocument.self, from: Data(contentsOf: ownURL))
+            let retained = try XCTUnwrap(SyncLocalStateStore(url: stateURL).load())
+            XCTAssertNil(published.entries[tagKey])
+            XCTAssertNil(retained.document.entries[tagKey])
+            XCTAssertEqual(published.entries[futureKey]?.payload, .setting(.bool(true)))
+            XCTAssertEqual(retained.document.entries[futureKey]?.payload, .setting(.bool(true)))
+        }
+    }
 
     func testCreateAndEditPropagateAcrossDevices() async throws {
         let a = try makeDevice("device-a")
@@ -383,7 +463,7 @@ final class SyncEngineTests: XCTestCase {
             transport: SyncFolderTransport(folderURL: folder),
             stateStore: SyncLocalStateStore(url: folder.appendingPathComponent("local-state-device-a.json")),
             appPathResolver: { _ in nil },
-            reconcileRuntime: {},
+            reconcileRuntime: { _ in },
             wallNow: { a.wall.now }
         )
         XCTAssertEqual(relaunched.document.entries, a.engine.document.entries)

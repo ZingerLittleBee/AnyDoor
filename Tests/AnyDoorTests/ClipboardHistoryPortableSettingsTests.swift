@@ -1,5 +1,6 @@
 import ClipboardHistoryTestSupport
 import Foundation
+import SwiftData
 import XCTest
 
 @testable import AnyDoor
@@ -7,6 +8,55 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryPortableSettingsTests: XCTestCase {
+    func testAutomaticSettingsRefreshPreservesMembershipWhenTagMirrorIsStale() async throws {
+        let fixture = try Fixture(testCase: self)
+        let module = fixture.module
+        let captured = try await module.capture(ClipboardHistoryCaptureRequest(
+            source: .unknown, content: .text("local history")
+        ))
+        let localTag = try await module.createTagDefinition(
+            named: "Local", assigningTo: captured.entryID
+        )
+        fixture.defaults.set(
+            #"[{"id":"stale","name":"Stale mirror"}]"#,
+            forKey: ClipboardHistoryPortableKeys.customTags
+        )
+        var peer = SyncDocument(deviceID: "peer")
+        peer.entries[.setting(key: "menuBar.iconName")] = SyncEntry(
+            payload: .setting(.string("peer-icon")),
+            clock: SyncTimestamp(wallMillis: 9_000, counter: 0, deviceID: "peer")
+        )
+        try SyncStateCodec.encode(peer).write(to: fixture.directory.appendingPathComponent(
+            SyncStateFile.name(forDeviceID: "peer")
+        ))
+        let container = try ModelContainer(
+            for: Schema([KeyBinding.self, BuiltinPreference.self, Quicklink.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let engine = SyncEngine(
+            config: .init(deviceID: "local"),
+            context: container.mainContext,
+            defaults: fixture.defaults,
+            transport: SyncFolderTransport(folderURL: fixture.directory),
+            stateStore: SyncLocalStateStore(url: fixture.directory.appendingPathComponent("sync-state.json")),
+            reconcileRuntime: { importClipboardTags in
+                try await ClipboardHistoryPortableSettings.reconcile(
+                    module: module, defaults: fixture.defaults,
+                    importClipboardTags: importClipboardTags
+                )
+            },
+            wallNow: { 1_000 }
+        )
+
+        await engine.tick()
+
+        XCTAssertEqual(fixture.defaults.string(forKey: "menuBar.iconName"), "peer-icon")
+        let definitions = try await module.tagDefinitions()
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(definitions, [localTag.definition])
+        XCTAssertEqual(page.entries.first?.tagIDs, [localTag.definition.id])
+    }
+
     func testPersistsDefinitionsWithoutMembership() async throws {
         let fixture = try Fixture(testCase: self)
         let module = fixture.module
@@ -37,7 +87,7 @@ final class ClipboardHistoryPortableSettingsTests: XCTestCase {
         XCTAssertFalse(json.contains("private membership"))
     }
 
-    func testImportedDefinitionsReplaceOrderAndDropOnlyRemovedMembership()
+    func testManualBackupRoundTripReplacesDefinitionsAndRemovedMembership()
         async throws
     {
         let fixture = try Fixture(testCase: self)
@@ -62,10 +112,24 @@ final class ClipboardHistoryPortableSettingsTests: XCTestCase {
             forKey: ClipboardHistoryPortableKeys.customTags
         )
 
-        try await ClipboardHistoryPortableSettings.reconcile(
-            module: module,
-            defaults: fixture.defaults
+        let container = try ModelContainer(
+            for: Schema([KeyBinding.self, BuiltinPreference.self, Quicklink.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
+        let backup = BackupService(
+            context: container.mainContext,
+            defaults: fixture.defaults,
+            appPathResolver: { _ in nil },
+            reconcileRuntime: {
+                try await ClipboardHistoryPortableSettings.reconcile(
+                    module: module, defaults: fixture.defaults
+                )
+            }
+        )
+        let exported = try BackupCodec.encode(backup.exportSnapshot())
+        fixture.defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+
+        _ = try await backup.restore(BackupCodec.decode(exported))
 
         let definitions = try await module.tagDefinitions()
         XCTAssertEqual(

@@ -829,6 +829,16 @@ empty data, so `BackupCodec.decode` reports the failure). Automatic multi-device
 backup semantics; its storage seam is the `SyncTransport` protocol (`SyncFolderTransport`,
 `SyncWebDAVTransport`).
 
+Clipboard tag definitions remain portable through explicit Config Backup only.
+Automatic Config Sync excludes `clipboard.customTags` from local capture,
+retained local documents, and incoming peer documents, including tombstones;
+unknown settings from newer clients otherwise remain forward-compatible.
+It rewrites its own state file on the next successful sync without mutating
+other devices' files. Its runtime refresh passes `importClipboardTags: false`
+so an unrelated setting change cannot restore a stale tag mirror over local
+history. Clipboard monitoring rules still refresh. Manual restore retains tag
+reconciliation and its existing membership semantics. See [ADR-0028](../adr/0028-move-tag-sync-out-of-config-sync.md).
+
 ### Backup reconciliation errors are not swallowed
 
 Plugin import reconciliation is best-effort across every requested transition, but any failed

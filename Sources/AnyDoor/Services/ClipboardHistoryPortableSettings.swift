@@ -24,16 +24,16 @@ enum ClipboardHistoryPortableSettings {
             throw ClipboardHistoryModuleError.storageFailure
         }
         defaults.set(json, forKey: ClipboardHistoryPortableKeys.customTags)
-        NotificationCenter.default.post(
-            name: .portableConfigDidChange,
-            object: nil
-        )
     }
 
     static func reconcile(
         module: ClipboardHistoryModule,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        importClipboardTags: Bool = true
     ) async throws {
+        // Config Sync still refreshes monitoring rules, but must not restore
+        // a stale local tag mirror as a side effect of an unrelated setting.
+        guard importClipboardTags else { return }
         let definitions = try definitions(from: defaults)
         _ = try await module.replaceTagDefinitions(with: definitions)
     }

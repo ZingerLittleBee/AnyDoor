@@ -56,9 +56,28 @@ server. Notes:
 ## What never syncs
 
 - Clipboard history, translation history, API keys (Keychain)
+- Clipboard tag definitions and entry associations
 - Machine-local state: privileged-helper approval, Script Plugins and their
   developer mode, window positions
 - The sync configuration itself (folder choice, device identity)
+
+### Clipboard tags after upgrading
+
+Config Sync no longer transfers clipboard tags. The new Clipboard Sync design
+owns sharing selected tags; its native iCloud workflow is being implemented
+separately. Existing local tags and their history associations stay in place,
+and explicit Config Backup export/import still includes tag definitions.
+
+When Config Sync starts, it removes the retired tag record from its local sync
+document. Subsequent syncs ignore tag records from older clients and rewrite
+this Mac's state file without tags. An unavailable sync location delays that
+rewrite. Other devices' files, historical cloud copies, and older clients may
+still contain plaintext tag names; upgrading does not erase those copies.
+
+Ordinary configuration updates no longer restore a local tag mirror over the
+history module. Manual backup imports still apply their tag definitions.
+See [ADR-0028](adr/0028-move-tag-sync-out-of-config-sync.md) for the ownership
+decision.
 
 ## How it works
 

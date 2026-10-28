@@ -499,6 +499,7 @@ enum L10n {
         case settingsRecordingKeystrokes = "settings.recording.keystrokes"
         case settingsConfigSyncChooseFolder = "settings.configSync.chooseFolder"
         case settingsConfigSyncDescription = "settings.configSync.description"
+        case settingsConfigSyncTagMigrationNotice = "settings.configSync.tagMigrationNotice"
         case settingsConfigSyncDocsLink = "settings.configSync.docsLink"
         case settingsConfigSyncEnable = "settings.configSync.enable"
         case settingsConfigSyncFailureApplyFailed = "settings.configSync.failure.applyFailed"

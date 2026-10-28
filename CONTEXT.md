@@ -743,7 +743,8 @@ which describes an accepted design that is not implemented yet.
   stops a deleted record from being resurrected by a machine that still
   carries it; expired Tombstones are garbage-collected.
 - **Portable Setting** (可携带设置) — A configuration value allowed to travel
-  between machines, enumerated by a single whitelist.
+  between machines. Explicit Config Backup and automatic Config Sync may
+  support different sets of these settings.
 - **Machine-Local Setting** (机器本地设置) — A setting that deliberately never
   travels (e.g. helper approval, Script Plugin state, the Sync Folder choice
   itself). Not a Portable Setting.

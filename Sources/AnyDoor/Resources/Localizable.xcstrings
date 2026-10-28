@@ -10015,6 +10015,23 @@
         }
       }
     },
+    "settings.configSync.tagMigrationNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Config Sync no longer shares clipboard tags. Tag sharing is moving to selected tags in Clipboard Sync; manual backups still include tags. Older sync files and apps may retain tag names."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置同步不再共享剪贴板标签。标签共享将改由剪贴板同步按所选标签处理，手动备份仍包含标签。旧同步文件和旧版应用可能仍保留标签名称。"
+          }
+        }
+      }
+    },
     "settings.configSync.transport": {
       "extractionState": "manual",
       "localizations": {
