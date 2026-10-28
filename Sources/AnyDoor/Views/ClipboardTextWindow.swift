@@ -106,6 +106,7 @@ final class ClipboardTextWindow {
     /// the dirty-checked close prompt and returns false so the caller must wait
     /// for the user to resolve the edit before opening the modal.
     func yieldToModal() -> Bool {
+        guard model?.isSaving != true else { return false }
         if isEditing, model?.isDirty == true {
             requestClose()   // dirty-checked; user resolves the edit first
             return false
@@ -149,6 +150,7 @@ final class ClipboardTextWindow {
         onSave: @escaping (String) async throws -> Void,
         onClose: (() -> Void)?
     ) {
+        guard model?.isSaving != true else { return }
         // An in-progress dirty edit is never silently replaced; surface the
         // discard confirmation instead and let the user decide.
         if isEditing, model?.isDirty == true {
@@ -188,7 +190,10 @@ final class ClipboardTextWindow {
             text: text,
             isEditable: editable
         )
-        model.onDismiss = { [weak self] in self?.close() }
+        model.onDismiss = { [weak self, weak model] in
+            guard let self, let model, self.model === model else { return }
+            self.close()
+        }
         model.onEditRequest = { [weak self] in self?.requestEditFromPreview() }
         model.onCopyRequest = { [weak self] in self?.requestCopyFromPreview() }
         model.onSave = onSave
