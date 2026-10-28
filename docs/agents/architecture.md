@@ -82,6 +82,37 @@ store. A failed move reports `.storeRelocationFailed` (Retry only, never Reset) 
 the pre-v2 sweeps as a contract. **Keep the AnyDoor.store path when changing ModelConfiguration**,
 otherwise unrelated user data appears "lost".
 
+### Clipboard Sync
+
+`ClipboardHistoryModule` owns local participation, selected tags, encrypted outbox,
+remote inbox, and imported history in its existing SQLCipher store. The additive
+`v14_clipboard_sync` migration keeps those records separate from local content and
+leaves the device-only history master key unchanged. The current slice transfers
+existing and newly eligible single-item plain text for one selected tag. Other
+content, updates, withdrawal, conflict handling, and cloud reset follow the
+[implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+
+Every device starts disabled. Constructing the production services does not access
+CloudKit or the synchronizable Keychain. The host resumes stored consent only
+after legacy migration reports ready, and suspends work before store replacement
+or termination. Settings uses typed module commands and status; it cannot bypass
+migration readiness. Import writes history directly, preserves capture provenance,
+and never captures from or writes to the system pasteboard.
+
+The native adapter checks the actual signed capabilities before using the
+production private database. A separate immutable, account-scoped synchronizable
+Keychain item supplies application encryption; the cloud control record chooses
+one key identity by compare-and-swap. Missing keys wait, and previously observed
+control state is never silently recreated. Account changes revoke local
+participation. Metadata discovery excludes asset bodies; explicit downloads fetch
+the encrypted chunks. Remote tag selection does not authorize republishing
+history associated with another account; that requires explicit local tag
+selection for the new account. Durable operation identities, ciphertext, inbox receipts,
+and control fencing make retry and restart safe without sharing the local store
+or local-history key. See [release provisioning](../releasing.md) for the signed
+capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
+for isolated real-store coverage; those tests do not establish live iCloud delivery.
+
 ### Launch-time SwiftData seeding/migration
 
 `AppDelegate.applicationDidFinishLaunching` runs idempotent `BuiltinPreferenceSeeder` (one

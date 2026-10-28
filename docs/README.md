@@ -54,8 +54,11 @@ not fresh runtime verification of the operating system.
 
 - [Clipboard iCloud Sync](prds/2026-10-28-clipboard-icloud-sync.md) is the
   implementation specification published as [issue #163](https://github.com/ZingerLittleBee/AnyDoor/issues/163)
-  with the `ready-for-agent` label. Native Clipboard Sync is not implemented yet;
-  its automatic Config Sync tag-channel retirement is reflected in the current
+  with the `ready-for-agent` label. Its first native slice supports explicit device
+  activation, one selected tag, and encrypted plain-text history transfer; the
+  remaining content and lifecycle workflows are still in progress. See the
+  [runtime boundaries](agents/architecture.md#clipboard-sync) and
+  [provisioning requirements](releasing.md). The automatic Config Sync tag-channel retirement is reflected in the current
   [Config Sync contract](config-sync.md#clipboard-tags-after-upgrading). Its decisions cover
   [end-to-end encryption](adr/0026-encrypt-clipboard-sync-end-to-end.md),
   [linked file changes](adr/0027-track-linked-clipboard-files-bidirectionally.md),

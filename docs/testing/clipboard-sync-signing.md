@@ -33,6 +33,18 @@ The signing job validates authorization, embeds the profile before signing,
 and verifies the final signature. A wildcard development profile is insufficient.
 The production CloudKit schema must already contain the approved record types
 and fields; publish schema changes deliberately through the developer tools.
+The reviewed schema is [Resources/ClipboardSync.ckdb](../../Resources/ClipboardSync.ckdb).
+Its three application record types use the private database and require no
+query indexes or public grants. Keep this artifact aligned with the native
+adapter before any schema deployment. The inherited `Users` definition is the
+container's system baseline, not a public grant for clipboard records.
+
+On 2026-10-28, the owner-authorized setup associated this App ID and container,
+validated the Developer ID profile against the existing release certificate,
+configured the release secret, and deployed these exact types and fields to
+Production after comparing a fresh schema export. This establishes backend
+configuration only. The signed two-Mac transfer lane was skipped at the owner's
+request; no live CloudKit or synchronizable Keychain delivery is claimed.
 
 The profile can be checked locally without preparing, signing, or launching an app:
 
