@@ -175,3 +175,33 @@ scope counts. The native Settings UI, live CloudKit cleanup/CAS behavior, and si
 two-Mac withdrawal/rejoin are not demonstrated by these tests. The signed two-Mac
 lane remains **SKIPPED (user request)**. Tracked-file observers and complete file
 version lifecycle integration are verified in their dedicated implementation lane.
+
+## File conflict resolution evidence
+
+[File conflict tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryFileConflictTests.swift)
+exercise both offline directions through real original and working files, exact
+candidate choice, actual edited-base preservation, stable operation replay,
+interrupted freeze/staging, restart, and further saves after interruption.
+[Ancestry tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryFileConflictAncestryTests.swift)
+deliver authenticated metadata out of order, including a file version before its
+entry on a fresh receiver, and reject cycles without installing incomplete content.
+Large-file cases edit an older complete 6 MiB copy while a newer 7 MiB body remains
+undownloaded. Choosing the local bytes makes no request for the unchosen body.
+Explicit candidate downloads preserve both current/complete selections and dirty
+linked bytes until confirmation. Retained interrupted branches can be recovered
+from local ciphertext without a cloud body request.
+
+[Host conflict tests](../../Tests/AnyDoorTests/ClipboardFileConflictPresentationTests.swift)
+drive the production presentation model and real module for cancellation, stale
+choices, explicit download/use, offline pending publication, failed download retry,
+and dismissal while a download is held. Modal focus-policy tests preserve the wall
+while a candidate is opened. These tests use isolated stores, ordinary temporary
+files, named pasteboards, and external transport/key adapters; they do not use the
+standard pasteboard or real cloud data.
+
+These are local source/model/filesystem and compilation results. Actual native
+sheet rendering, keyboard/accessibility interaction, installed-app file opening,
+and live CloudKit conflict delivery are **NOT RUN**. Signed two-Mac acceptance
+remains **SKIPPED (user request)**. A separately authorized native lane should use
+synthetic files, save on both Macs while offline, inspect both candidates, select
+one, then repeat with a large undownloaded candidate and interruption/relaunch.
