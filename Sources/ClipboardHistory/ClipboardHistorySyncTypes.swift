@@ -76,11 +76,27 @@ public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {
     public let displayName: String
     public let isSelected: Bool
     public let eligibleEntryCount: Int
+    public let canDeselect: Bool
+    public let requiresLocalAuthorization: Bool
 
-    public init(id: String, displayName: String, isSelected: Bool, eligibleEntryCount: Int) {
+    public init(id: String, displayName: String, isSelected: Bool, eligibleEntryCount: Int,
+                canDeselect: Bool = true, requiresLocalAuthorization: Bool = false) {
         self.id = id
         self.displayName = displayName
         self.isSelected = isSelected
         self.eligibleEntryCount = eligibleEntryCount
+        self.canDeselect = canDeselect
+        self.requiresLocalAuthorization = requiresLocalAuthorization
     }
+}
+
+public struct ClipboardHistorySyncTagMergePreview: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let sourceID: String
+    public let targetID: String
+    public let displayName: String
+    public let newlyEligibleEntryCount: Int
+    public var canonicalTagID: String { min(sourceID, targetID) }
+    let historyRevision: Int64
+    let accountID: String
 }

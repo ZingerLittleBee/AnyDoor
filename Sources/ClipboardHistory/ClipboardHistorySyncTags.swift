@@ -27,6 +27,17 @@ extension ClipboardHistoryModule {
                 account_id TEXT NOT NULL, tag_id TEXT NOT NULL, state BLOB NOT NULL, pending INTEGER NOT NULL,
                 PRIMARY KEY(account_id, tag_id)
             ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_tag_aliases (
+                account_id TEXT NOT NULL, alias_id TEXT NOT NULL, canonical_id TEXT NOT NULL,
+                PRIMARY KEY(account_id, alias_id)
+            ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_tag_merge_outbox (
+                operation_id TEXT PRIMARY KEY NOT NULL, account_id TEXT NOT NULL, content BLOB NOT NULL
+            );
+            CREATE TABLE clipboard_sync_tag_blocked_entries (
+                account_id TEXT NOT NULL, local_entry_id TEXT NOT NULL,
+                PRIMARY KEY(account_id, local_entry_id)
+            ) WITHOUT ROWID;
             CREATE TABLE clipboard_sync_memberships (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, shared_id TEXT NOT NULL, tag_id TEXT NOT NULL,
                 present INTEGER NOT NULL, counter INTEGER NOT NULL, operation_id TEXT NOT NULL,
@@ -56,11 +67,12 @@ extension ClipboardHistoryModule {
     func seedSyncMemberships(_ tags: [ClipboardSyncTagContent], sharedID: String, localID: String,
                              account: ClipboardSyncAccount, epoch: UUID, in database: Database) throws {
         for tag in tags {
+            let tagID = try canonicalSyncTagID(tag.id, accountID: account.identifier, in: database)
             try database.execute(sql: """
                 INSERT OR IGNORE INTO clipboard_sync_memberships
                     (account_id, epoch, shared_id, tag_id, present, counter, operation_id)
                 VALUES (?, ?, ?, ?, 1, 0, '')
-                """, arguments: [account.identifier, epoch.uuidString, sharedID, tag.id])
+                """, arguments: [account.identifier, epoch.uuidString, sharedID, tagID])
         }
         try applySyncMemberships(sharedID: sharedID, localID: localID, account: account, epoch: epoch, in: database)
     }
@@ -115,6 +127,9 @@ extension ClipboardHistoryModule {
             throw ClipboardSyncServiceError.corruptData
         }
         try observeSyncTagRevision(membership.revision, in: database)
+        let membership = ClipboardSyncTagMembership(sharedID: membership.sharedID,
+            tagID: try canonicalSyncTagID(membership.tagID, accountID: account.identifier, in: database),
+            present: membership.present, revision: membership.revision)
         if let previous = try Row.fetchOne(database, sql: """
             SELECT * FROM clipboard_sync_memberships WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ?
             """, arguments: [account.identifier, epoch.uuidString, membership.sharedID, membership.tagID]),
@@ -152,6 +167,7 @@ extension ClipboardHistoryModule {
 
     func applySyncMemberships(sharedID: String, localID: String, account: ClipboardSyncAccount,
                                       epoch: UUID, in database: Database) throws {
+        let wasProtected = try protectionState(for: localID, in: database)
         let rows = try Row.fetchAll(database, sql: """
             SELECT membership.tag_id, membership.present FROM clipboard_sync_memberships AS membership
             JOIN clipboard_sync_tags AS tag ON tag.account_id = membership.account_id AND tag.tag_id = membership.tag_id
@@ -168,6 +184,9 @@ extension ClipboardHistoryModule {
                     arguments: [localID, tagID])
             }
         }
-        _ = try recomputeProtection(for: localID, in: database)
+        let isProtected = try recomputeProtection(for: localID, in: database)
+        if wasProtected && !isProtected {
+            try resetRetentionStart(for: localID, to: now(), in: database)
+        }
     }
 }

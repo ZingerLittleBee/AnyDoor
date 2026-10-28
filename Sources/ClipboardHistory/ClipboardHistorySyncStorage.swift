@@ -102,24 +102,22 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
         let pool = try requiredDatabase()
         try pool.write { database in
+            try stageSyncTagMerges(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
+            try stageSyncMetadata(account: account, control: control, key: key, in: database)
             let tags = try selectedSyncTags(accountID: account.identifier, in: database)
             guard !tags.isEmpty else { return }
-            let rows = try Row.fetchCursor(database, sql: """
+            let rows = try Row.fetchCursor(database, SQLRequest<Row>(literal: """
                 SELECT entry.id
                 FROM clipboard_entries AS entry
-                WHERE \(Self.syncEntryEligibility)
-                  AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                              JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                              WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1
-                                AND (selected.locally_authorized = 1 OR NOT EXISTS (
-                                    SELECT 1 FROM clipboard_sync_entries AS former
-                                    WHERE former.local_entry_id = entry.id AND former.account_id != selected.account_id)))
+                WHERE \(sql: Self.syncEntryEligibility)
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
-                                  WHERE shared.account_id = ? AND shared.epoch = ? AND shared.local_entry_id = entry.id)
+                    WHERE shared.account_id = \(account.identifier) AND shared.epoch = \(control.epoch.uuidString)
+                      AND shared.local_entry_id = entry.id)
                 ORDER BY entry.id
-                """, arguments: [account.identifier, account.identifier, control.epoch.uuidString])
+                """))
             while let row = try rows.next() {
                 let localID: String = row["id"]
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
@@ -136,6 +134,7 @@ extension ClipboardHistoryModule {
                 try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
                 try seedSyncMemberships(content.tags, sharedID: id.uuidString.lowercased(), localID: localID,
                     account: account, epoch: control.epoch, in: database)
+                try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }
             try stageSyncTextEdits(account: account, control: control, key: key, in: database)
         }
@@ -220,8 +219,13 @@ extension ClipboardHistoryModule {
                 try importSyncMembership(membership, account: account, epoch: record.epoch, in: database)
             case .tagState(let state):
                 try importSyncTagState(state, account: account, record: record, in: database)
+            case .metadata(let metadata):
+                try importSyncMetadata(metadata, account: account, record: record, in: database)
             case .fileBody:
                 throw ClipboardSyncServiceError.unsupportedVersion
+            case .tagMerge(let merge):
+                try applySyncTagMerge(merge, accountID: account.identifier, locallyConfirmed: false, in: database)
+                try applyAllSyncMemberships(account: account, epoch: record.epoch, in: database)
             }
             try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                 arguments: [account.identifier, record.epoch.uuidString, record.recordID])
@@ -239,6 +243,7 @@ extension ClipboardHistoryModule {
             throw ClipboardSyncServiceError.corruptData
         }
         // An initial snapshot cannot undo a later rename or selection change.
+        guard try canonicalSyncTagID(tag.id, accountID: account.identifier, in: database) == tag.id else { return }
         if try syncTagState(id: tag.id, accountID: account.identifier, in: database) != nil { return }
         // Names never establish identity. Do not replace the whole local tag list.
         try database.execute(sql: """
@@ -256,51 +261,11 @@ extension ClipboardHistoryModule {
 
     private func importSyncText(_ text: ClipboardSyncTextContent, account: ClipboardSyncAccount,
                                 record: ClipboardSyncRemoteRecord, in database: Database) throws {
-        guard !text.text.isEmpty, text.text.utf8.count <= PasteboardSnapshot.maximumByteCount,
-              !text.tags.isEmpty, ClipboardHistoryCaptureSourceProvenance(rawValue: text.sourceProvenance) != nil else {
-            throw ClipboardSyncServiceError.corruptData
-        }
-        let sharedID = text.id.uuidString.lowercased()
-        let existing = try String.fetchOne(database, sql: """
-            SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
-            """, arguments: [account.identifier, record.epoch.uuidString, sharedID])
-        // Updates are a subsequent vertical slice. Redelivery never recaptures.
-        guard existing == nil else { return }
-        var localID = sharedID
-        if try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)", arguments: [localID]) == true {
-            localID = UUID().uuidString.lowercased()
-        }
-        for tag in text.tags { try importSyncTag(tag, account: account, recordID: record.recordID, in: database) }
-        try database.execute(sql: """
-            INSERT INTO clipboard_entries(id, captured_at, last_captured_at, source_bundle_id,
-                source_display_name, source_provenance, preview_text, is_favorite)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, arguments: [localID, text.capturedAt.timeIntervalSince1970, text.capturedAt.timeIntervalSince1970,
-                text.sourceBundleID, text.sourceDisplayName, text.sourceProvenance, Self.boundedPreviewText(text.text), text.favorite])
-        try database.execute(sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)", arguments: [localID])
-        try database.execute(sql: """
-            INSERT INTO clipboard_representations(entry_id, item_index, representation_index, kind, type_identifier, text_value)
-            VALUES (?, 0, 0, 'text', 'public.utf8-plain-text', ?)
-            """, arguments: [localID, text.text])
-        try database.execute(sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'text')", arguments: [localID])
-        for tag in text.tags {
-            try database.execute(sql: "INSERT INTO clipboard_entry_tags(entry_id, tag_id) VALUES (?, ?)", arguments: [localID, tag.id])
-        }
-        try database.execute(sql: "INSERT INTO clipboard_retention_state(entry_id, retention_started_at, is_protected) VALUES (?, ?, 1)",
-            arguments: [localID, text.capturedAt.timeIntervalSince1970])
-        try Self.insertSearchField(value: text.text, kind: "exactText", index: 0,
-            rankingGroup: Self.searchRankingGroup(for: "exactText"), entryID: localID, into: database, faultInjector: faultInjector)
-        let identity = try CanonicalIdentity(snapshot: PasteboardSnapshot(items: [
-            PasteboardSnapshot.Item(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: text.text)])
-        ], extraFacets: [], allowsTextInference: true), fingerprintDigest: fingerprintDigest)
-        try database.execute(sql: """
-            INSERT INTO clipboard_duplicate_candidates(fingerprint, entry_id, canonical_byte_count, created_at) VALUES (?, ?, ?, ?)
-            """, arguments: [identity.fingerprint, localID, identity.canonicalByteCount, text.capturedAt.timeIntervalSince1970])
-        try database.execute(sql: """
-            INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
-            VALUES (?, ?, ?, ?, ?, 'remote')
-            """, arguments: [account.identifier, record.epoch.uuidString, sharedID, localID, record.recordID])
-        try seedSyncMemberships(text.tags, sharedID: sharedID, localID: localID,
-            account: account, epoch: record.epoch, in: database)
+        guard !text.text.isEmpty else { throw ClipboardSyncServiceError.corruptData }
+        try importSyncEntryContent(.init(id: text.id, capturedAt: text.capturedAt,
+            sourceBundleID: text.sourceBundleID, sourceDisplayName: text.sourceDisplayName,
+            sourceProvenance: text.sourceProvenance, favorite: text.favorite, tags: text.tags,
+            items: [.init(representations: [.text(typeIdentifier: "public.utf8-plain-text", value: text.text)])],
+            facets: ["text"], recognition: .init()), account: account, record: record, in: database)
     }
 }
