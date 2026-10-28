@@ -5,6 +5,42 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testExplicitApplicationUpdatePreservesItsSignedCompletePackage() async throws {
+        let bundleID = "dev.bybee.AnyDoor.tests.application.\(UUID().uuidString)"
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            _ = try ClipboardApplicationTestFixture.create(at: root, bundleIdentifier: bundleID, resource: "previous signed resource")
+        }, sourceName: "Linked Fixture.app")
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let old = ClipboardApplicationTestFixture(url: working.url)
+        try old.verifySignature()
+        let oldSnapshot = try old.contentsSnapshot()
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        let updated = try ClipboardApplicationTestFixture.create(at: fixture.root.appendingPathComponent("Update.app"),
+            bundleIdentifier: bundleID, resource: "new signed resource")
+        try FileManager.default.removeItem(at: fixture.original.appendingPathComponent("Contents"))
+        try FileManager.default.copyItem(at: updated.url.appendingPathComponent("Contents"), to: fixture.original.appendingPathComponent("Contents"))
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        XCTAssertEqual(try old.contentsSnapshot(), oldSnapshot)
+        let readyLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let displayed = try XCTUnwrap(readyLocations.first)
+
+        let plan = try await fixture.receiver.applicationUpdatePlan(.init(entryID: fixture.entryID,
+            locationID: displayed.id, expectedRevision: displayed.revision))
+        XCTAssertEqual(plan.state, .ready)
+        try await fixture.receiver.applyApplicationUpdate(plan)
+
+        try old.verifySignature()
+        XCTAssertEqual(try old.contentsSnapshot(), try updated.contentsSnapshot())
+        let applied = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(applied.first?.id, working.id)
+        XCTAssertEqual(applied.first?.baseVersionID, plan.versionID)
+    }
+
+    @MainActor
     func testApplicationVersionDownloadsWithoutReplacingItsLinkedLocation() async throws {
         let fixture = try await makeLinkedFixture(prepareSource: { root in
             try FileManager.default.removeItem(at: root)

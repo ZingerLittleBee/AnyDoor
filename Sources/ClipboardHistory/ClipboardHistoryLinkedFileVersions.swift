@@ -27,6 +27,11 @@ extension ClipboardHistoryModule {
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {
             try await admitSync(generation, account: account, services: services)
+            let isApplication = source.isApplication || ClipboardApplicationPackage.isApplication(source.url)
+            if isApplication, !source.isApplication {
+                try syncWrite { try $0.execute(sql: "UPDATE clipboard_sync_linked_locations SET is_application = 1 WHERE id = ?",
+                    arguments: [source.id.uuidString]) }
+            }
             if try linkedRead({ try Bool.fetchOne($0, sql: """
                 SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions
                   WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'preparing')
@@ -93,7 +98,7 @@ extension ClipboardHistoryModule {
             }
             // Receiving a complete package does not authorize replacing an
             // application at a linked location. Only Apply Update can do that.
-            guard !ClipboardApplicationPackage.isApplication(source.url) else { continue }
+            guard !isApplication else { continue }
             try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
         }
     }
@@ -114,7 +119,7 @@ extension ClipboardHistoryModule {
         publishMutation()
     }
 
-    private func linkedVersion(_ version: UUID, descendsFrom ancestor: UUID, objectID: UUID,
+    func linkedVersion(_ version: UUID, descendsFrom ancestor: UUID, objectID: UUID,
         account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> Bool {
         try linkedRead { database in
             let rows = try Row.fetchAll(database, sql: """
@@ -138,9 +143,13 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func applyLinkedFileVersion(_ version: ClipboardSyncVerifiedFileVersion, to source: ClipboardLinkedLocationSource,
-        account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+    func applyLinkedFileVersion(_ version: ClipboardSyncVerifiedFileVersion, to source: ClipboardLinkedLocationSource,
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64,
+        applicationPlan: ClipboardApplicationUpdateSnapshot? = nil) async throws {
         guard let services = syncServices else { return }
+        guard applicationPlan != nil || !(source.isApplication || ClipboardApplicationPackage.isApplication(source.url)) else {
+            throw ClipboardHistoryApplicationUpdateError.stalePlan
+        }
         let preparation = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.prepareReplacement(version, at: source.url) }
         let replacement = try await withTaskCancellationHandler { try await preparation.value } onCancel: { preparation.cancel() }
         var journaled = false
@@ -164,6 +173,7 @@ extension ClipboardHistoryModule {
                     // Serialize the last authority read with deletion, withdrawal,
                     // and reset writes. No hashing or network I/O holds this turn.
                     try database.write { database in
+                        if let applicationPlan { _ = try Self.validateApplicationUpdate(applicationPlan, phase: "applying", in: database) }
                         guard try Bool.fetchOne(database, sql: "SELECT enabled = 1 AND account_id = ? FROM clipboard_sync_settings WHERE id = 1",
                             arguments: [account.identifier]) == true,
                               let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
@@ -214,7 +224,7 @@ extension ClipboardHistoryModule {
 
     /// A replaced inode is adopted only through the journal's recorded identity.
     /// Edits made after the exchange stay dirty against the installed version.
-    private func recoverLinkedFileApplications(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
+    func recoverLinkedFileApplications(account: ClipboardSyncAccount, control: ClipboardSyncControl, generation: UInt64) async throws {
         guard let services = syncServices else { return }
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for source in sources {

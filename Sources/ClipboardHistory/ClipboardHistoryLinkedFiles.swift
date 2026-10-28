@@ -62,10 +62,13 @@ extension ClipboardHistoryModule {
 
     static func linkedFileLocations(entryID: String, in database: Database) throws -> [ClipboardHistoryLinkedFileLocation] {
         try Row.fetchAll(database, sql: """
-                SELECT DISTINCT location.* FROM clipboard_sync_linked_locations AS location
+                SELECT DISTINCT location.*, choice.current_version_id AS application_update_version
+                FROM clipboard_sync_linked_locations AS location
                 JOIN clipboard_sync_file_members AS member
                   ON member.account_id = location.account_id AND member.epoch = location.epoch
                     AND member.object_id = location.object_id
+                LEFT JOIN clipboard_sync_file_selections AS choice ON choice.account_id = location.account_id
+                  AND choice.epoch = location.epoch AND choice.object_id = location.object_id
                 WHERE member.entry_id = ? AND \(Self.liveSyncFileMember)
                   AND location.account_id = (SELECT account_id FROM clipboard_sync_settings WHERE id = 1)
                 ORDER BY location.kind, location.path, location.id
@@ -134,10 +137,13 @@ extension ClipboardHistoryModule {
         }
         let path: String = row["path"]
         let available = ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: row["identity"], nativeIdentity: row["native_identity"])
+        let isApplication = (row["is_application"] as Bool? ?? false) || ClipboardApplicationPackage.isApplication(URL(fileURLWithPath: path))
+        let applicationVersion = row.hasColumn("application_update_version")
+            ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
             url: URL(fileURLWithPath: path), kind: kind,
             state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
-            revision: row["revision"])
+            revision: row["revision"], applicationUpdateVersionID: isApplication && applicationVersion != base ? applicationVersion : nil)
     }
 
     private static func linkedObjectBase(

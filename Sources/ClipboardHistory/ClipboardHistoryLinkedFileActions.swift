@@ -55,7 +55,7 @@ extension ClipboardHistoryModule {
         if !paused, !syncSuspended { await retrySync() }
     }
 
-    private static func linkedFileActionRow(_ selection: ClipboardHistoryFileLocationSelection, in database: Database) throws -> Row {
+    static func linkedFileActionRow(_ selection: ClipboardHistoryFileLocationSelection, in database: Database) throws -> Row {
         guard let accountID = try String.fetchOne(database, sql: "SELECT account_id FROM clipboard_sync_settings WHERE id = 1"),
               let encoded = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID]),
               let control = try JSONDecoder().decode(ClipboardSyncAccountState.self, from: encoded).control,

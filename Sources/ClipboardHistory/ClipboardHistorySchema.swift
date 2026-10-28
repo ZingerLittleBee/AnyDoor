@@ -252,6 +252,9 @@ extension ClipboardHistoryModule {
                 WHERE transfer_state = 'unsupportedKind' AND local_bookmark IS NOT NULL AND local_identity IS NOT NULL
                 """)
         }
+        migrator.registerMigration("v28_clipboard_sync_application_updates") { database in
+            try Self.createApplicationUpdateSchema(in: database)
+        }
         migrator.registerMigration("v29_clipboard_sync_file_lifecycle") { database in
             try Self.createSyncFileLifecycleSchema(in: database)
         }

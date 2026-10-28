@@ -318,7 +318,8 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
 
     @MainActor
     func makeLinkedFixture(receiverFault: ClipboardHistoryFaultInjector = .init(), initialBytes: Data = Data("initial linked bytes".utf8),
-        prepareSource: ((URL) throws -> Void)? = nil, senderFault: ClipboardHistoryFaultInjector = .init()) async throws -> (
+        prepareSource: ((URL) throws -> Void)? = nil, senderFault: ClipboardHistoryFaultInjector = .init(),
+        sourceName: String = "Linked notes.txt") async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule,
         entryID: ClipboardHistoryEntryID, original: URL, root: URL, receiverRoot: URL,
         services: ClipboardSyncServices, cloud: LinkedFileCloud
@@ -326,7 +327,7 @@ final class ClipboardHistoryLinkedFileTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("linked-files-\(UUID())")
         removeClipboardHistoryDirectoryAfterTest(root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let original = root.appendingPathComponent("Linked notes.txt")
+        let original = root.appendingPathComponent(sourceName)
         try initialBytes.write(to: original)
         try prepareSource?(original)
         let cloud = LinkedFileCloud()

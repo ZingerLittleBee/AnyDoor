@@ -8,12 +8,14 @@ public struct ClipboardHistoryLinkedFileLocation: Equatable, Sendable, Identifia
     public let kind: ClipboardHistoryLinkedFileLocationKind
     public let state: ClipboardHistoryLinkedFileLocationState
     public let revision: UInt64
+    public let applicationUpdateVersionID: UUID?
 
     public init(id: UUID, objectID: UUID, baseVersionID: UUID, url: URL,
         kind: ClipboardHistoryLinkedFileLocationKind, state: ClipboardHistoryLinkedFileLocationState,
-        revision: UInt64 = 0) {
+        revision: UInt64 = 0, applicationUpdateVersionID: UUID? = nil) {
         self.id = id; self.objectID = objectID; self.baseVersionID = baseVersionID
         self.url = url; self.kind = kind; self.state = state; self.revision = revision
+        self.applicationUpdateVersionID = applicationUpdateVersionID
     }
 }
 

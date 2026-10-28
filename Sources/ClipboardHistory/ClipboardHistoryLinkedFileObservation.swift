@@ -73,6 +73,7 @@ struct ClipboardLinkedLocationSource: Codable, Sendable {
     let baseVersionID: UUID
     let baseDigest: Data
     let state: ClipboardHistoryLinkedFileLocationState
+    var isApplication: Bool = false
 }
 
 extension ClipboardHistoryModule {
@@ -222,6 +223,7 @@ extension ClipboardHistoryModule {
                     identity: row["identity"], bookmark: row["bookmark"], revision: row["revision"],
                     nativeIdentity: try (row["native_identity"] as Data?).map { try JSONDecoder().decode(ClipboardLinkedNativeIdentity.self, from: $0) },
                     hasPendingApplication: (row["applying_version_id"] as String?) != nil,
-                    baseVersionID: base, baseDigest: row["base_digest"], state: state)
+                    baseVersionID: base, baseDigest: row["base_digest"], state: state,
+                    isApplication: row["is_application"] ?? false)
     }
 }
