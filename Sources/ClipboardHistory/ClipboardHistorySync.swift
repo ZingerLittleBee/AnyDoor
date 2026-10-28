@@ -328,6 +328,7 @@ extension ClipboardHistoryModule {
         case .accountChanged: return .failed(.accountChanged)
         case .capabilityUnavailable: return .capabilityUnavailable
         case .keyLocked: return .keyLocked
+        case .keyUnavailable: return .waitingForKey
         case .accessDenied: return .accessDenied
         case .network, .conflict: return .failed(.network)
         case .quota: return .failed(.quota)
