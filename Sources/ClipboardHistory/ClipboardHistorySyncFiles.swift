@@ -97,7 +97,7 @@ extension ClipboardHistoryModule {
         generation: UInt64
     ) async throws {
         let sources = try syncFileRead { database in
-            try Row.fetchAll(database, sql: """
+            try Row.fetchAll(database, SQLRequest<Row>(literal: """
                 SELECT entry.id, representation.item_index, representation.representation_index,
                        member.display_name, member.bookmark_data, member.identity_data,
                        member.reference_provenance
@@ -106,18 +106,13 @@ extension ClipboardHistoryModule {
                 JOIN clipboard_file_members AS member ON member.entry_id = entry.id
                     AND member.item_index = representation.item_index
                 WHERE representation.kind = 'fileReference'
-                  AND EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                    JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                    WHERE membership.entry_id = entry.id AND selected.account_id = ? AND selected.selected = 1
-                      AND (selected.locally_authorized = 1 OR NOT EXISTS (
-                        SELECT 1 FROM clipboard_sync_entries AS former
-                        WHERE former.local_entry_id = entry.id AND former.account_id != selected.account_id)))
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_file_members AS existing
-                    WHERE existing.account_id = ? AND existing.epoch = ? AND existing.entry_id = entry.id
-                      AND existing.item_index = representation.item_index
+                    WHERE existing.account_id = \(account.identifier) AND existing.epoch = \(control.epoch.uuidString)
+                      AND existing.entry_id = entry.id AND existing.item_index = representation.item_index
                       AND existing.representation_index = representation.representation_index)
                 ORDER BY entry.id, representation.item_index, representation.representation_index
-                """, arguments: [account.identifier, account.identifier, control.epoch.uuidString]).map {
+                """)).map {
                     ClipboardSyncFileSource(
                         entryID: $0["id"], itemIndex: $0["item_index"],
                         representationIndex: $0["representation_index"], name: $0["display_name"],
@@ -167,17 +162,14 @@ extension ClipboardHistoryModule {
     private func syncFileSourceIsEligible(
         _ source: ClipboardSyncFileSource, account: ClipboardSyncAccount, in database: Database
     ) throws -> Bool {
-        try Bool.fetchOne(database, sql: """
-            SELECT EXISTS (SELECT 1 FROM clipboard_entry_tags AS membership
-                JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
-                WHERE membership.entry_id = ? AND selected.account_id = ? AND selected.selected = 1
-                  AND (selected.locally_authorized = 1 OR NOT EXISTS (
-                    SELECT 1 FROM clipboard_sync_entries AS former
-                    WHERE former.local_entry_id = membership.entry_id AND former.account_id != selected.account_id))
+        try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+            SELECT EXISTS (SELECT 1 FROM clipboard_entries AS entry
+                WHERE entry.id = \(source.entryID)
+                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
                   AND EXISTS (SELECT 1 FROM clipboard_representations AS current
-                    WHERE current.entry_id = membership.entry_id AND current.item_index = ?
-                      AND current.representation_index = ? AND current.kind = 'fileReference'))
-            """, arguments: [source.entryID, account.identifier, source.itemIndex, source.representationIndex]) ?? false
+                    WHERE current.entry_id = entry.id AND current.item_index = \(source.itemIndex)
+                      AND current.representation_index = \(source.representationIndex) AND current.kind = 'fileReference'))
+            """)) ?? false
     }
 
     func syncFileDescriptor(
