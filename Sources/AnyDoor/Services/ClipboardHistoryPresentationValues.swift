@@ -3,6 +3,21 @@ import ClipboardHistory
 import Foundation
 
 extension ClipboardHistoryEntry {
+    @MainActor
+    var syncFileStatusText: String? {
+        guard !syncFiles.isEmpty else { return nil }
+        if syncFiles.contains(where: { $0.state == .localUnavailable }) { return L(.clipboardSyncFileLocalUnavailable) }
+        if syncFiles.contains(where: { $0.state == .sourceUnavailable }) { return L(.clipboardSyncFileSourceUnavailable) }
+        if syncFiles.contains(where: { $0.state == .unsupportedKind }) { return L(.clipboardSyncFileUnsupportedKind) }
+        if syncFiles.contains(where: { $0.state == .waitingForUpload }) { return L(.clipboardSyncFileWaitingForUpload) }
+        if syncFiles.contains(where: { $0.state == .waitingForDownload }) { return L(.clipboardSyncFileWaitingForDownload) }
+        return L(.clipboardSyncFileAvailable)
+    }
+
+    var filePresentationIdentity: String {
+        id.value.uuidString + syncFiles.map { $0.versionID.uuidString + $0.state.rawValue }.joined()
+    }
+
     var presentationFacet: ClipboardHistoryFacet {
         for facet in [
             ClipboardHistoryFacet.screenshot,

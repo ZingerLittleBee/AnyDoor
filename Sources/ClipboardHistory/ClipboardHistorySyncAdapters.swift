@@ -29,6 +29,7 @@ struct ClipboardSyncControl: Codable, Equatable, Sendable {
 enum ClipboardSyncRecordKind: String, Codable, Sendable {
     case tag
     case entry
+    case fileBody
 }
 
 struct ClipboardSyncRemoteRecord: Codable, Equatable, Sendable {
@@ -59,6 +60,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case accountChanged
     case capabilityUnavailable
     case keyLocked
+    case keyUnavailable
     case accessDenied
     case network(retryAfter: TimeInterval?)
     case quota

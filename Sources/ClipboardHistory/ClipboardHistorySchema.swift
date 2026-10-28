@@ -189,6 +189,22 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v15_clipboard_sync_tags") { database in
             try Self.createSyncTagSchema(in: database)
         }
+        migrator.registerMigration("v16_clipboard_sync_recovery") { database in
+            try database.execute(sql: """
+                CREATE TABLE clipboard_sync_recovery (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    phase BLOB,
+                    retry_not_before REAL
+                );
+                INSERT INTO clipboard_sync_recovery(id) VALUES (1);
+                """)
+        }
+        migrator.registerMigration("v18_clipboard_sync_versions") { database in
+            try Self.createSyncVersionSchema(in: database)
+        }
+        migrator.registerMigration("v19_clipboard_sync_files") { database in
+            try Self.createSyncFileSchema(in: database)
+        }
         return migrator
     }
 

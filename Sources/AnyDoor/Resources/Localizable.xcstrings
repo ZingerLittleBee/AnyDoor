@@ -7,6 +7,166 @@
     "settings.clipboard.sync.merge.confirm": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge Tags"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并标签"}}}},
     "settings.clipboard.sync.merge.scope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Merge the independent “%@” tags? This includes %lld additional eligible entries on this Mac. The merge is shared with participating Macs, which may have additional matching history."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "合并独立的“%@”标签？这会在本机新增同步 %lld 条符合条件的历史。合并会同步到参与的 Mac，其他设备可能还包含更多匹配历史。"}}}},
     "clipboard.tag.chooseIdentity": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Several tags have this name. Choose the collection to use."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "多个标签使用了此名称。请选择要使用的分类。"}}}},
+    "clipboard.sync.fileLocalUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local working file unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地工作文件不可用" } }
+      }
+    },
+    "clipboard.sync.filesPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files are not available on this Mac yet. The whole entry must be ready before copying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件尚未在这台 Mac 上就绪。整条记录就绪后才能复制。"
+          }
+        }
+      }
+    },
+    "clipboard.fileExport.collision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A file already exists at the chosen location. Choose another name."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选位置已存在文件，请选择其他名称。"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileSourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original file unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原文件不可用"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileUnsupportedKind": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file type is waiting for sync support"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此文件类型尚待同步支持"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForUpload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file upload"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待上传文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForDownload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file download"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待下载文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileAvailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File available on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已在这台 Mac 上就绪"
+          }
+        }
+      }
+    },
+    "clipboard.action.openFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开"
+          }
+        }
+      }
+    },
+    "clipboard.action.saveFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save As…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另存为…"
+          }
+        }
+      }
+    },
     "capture.pinned.disableClickThrough": {
       "extractionState": "manual",
       "localizations": {
@@ -2485,6 +2645,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "继续编辑"
+          }
+        }
+      }
+    },
+    "clipboard.edit.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not save. Your text is still here. Try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存失败，文字已保留。请重试。"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resolve Text Conflict"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解决文本冲突"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This entry was edited on different Macs. Choose the version to use."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这条记录在不同的 Mac 上被修改。请选择要使用的版本。"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not apply your choice. Review the available versions and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法应用选择。请检查当前版本后重试。"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.use": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Selected Version"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用所选版本"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.select": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select this text version"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择此文本版本"
+          }
+        }
+      }
+    },
+    "clipboard.textConflict.selected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已选择"
           }
         }
       }
@@ -14802,13 +15081,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Share plain-text history across Macs using the same Apple Account. Enable sync separately on each Mac."
+            "value": "Share clipboard history across Macs using the same Apple Account. Enable sync separately on each Mac."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在使用同一 Apple 账户的 Mac 间同步纯文本历史。每台 Mac 都需要单独开启同步。"
+            "value": "在使用同一 Apple 账户的 Mac 间同步剪贴板历史。每台 Mac 都需要单独开启同步。"
           }
         }
       }
@@ -14836,13 +15115,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ (%lld text entries)"
+            "value": "%@ (%lld entries)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@（%lld 条文本记录）"
+            "value": "%@（%lld 条记录）"
           }
         }
       }
@@ -14853,13 +15132,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add a tag to a text entry in Clipboard History, then return here."
+            "value": "Add a tag to an entry in Clipboard History, then return here."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "先在剪贴板历史中为文本记录添加标签，再返回这里。"
+            "value": "先在剪贴板历史中为记录添加标签，再返回这里。"
           }
         }
       }
@@ -14983,6 +15262,23 @@
         }
       }
     },
+    "settings.clipboard.sync.recoveryHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple iCloud Keychain recovery help"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple iCloud 钥匙串恢复帮助"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.status.waitingForAccount": {
       "extractionState": "manual",
       "localizations": {
@@ -15006,13 +15302,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Waiting for the sync key from iCloud Keychain."
+            "value": "The sync key is not available on this Mac yet. Retry after iCloud Keychain becomes available. Your encrypted cloud data is unchanged."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在等待 iCloud 钥匙串中的同步密钥。"
+            "value": "这台 Mac 上暂时没有同步密钥。请在 iCloud 钥匙串可用后重试。加密的云端数据未被更改。"
           }
         }
       }
@@ -15023,13 +15319,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Unlock your keychain, then retry."
+            "value": "Keychain access is locked or requires interaction. Unlock this Mac, then retry."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请解锁钥匙串后重试。"
+            "value": "钥匙串访问被锁定或需要交互。请解锁这台 Mac 后重试。"
           }
         }
       }
@@ -15074,13 +15370,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Syncing selected text history…"
+            "value": "Syncing selected clipboard history…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在同步所选文本历史…"
+            "value": "正在同步所选剪贴板历史…"
           }
         }
       }
@@ -15176,13 +15472,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The sync key could not be recovered. Restore access through iCloud Keychain; your cloud data is unchanged."
+            "value": "The saved iCloud collection is missing or has changed. Check the Apple Account before retrying. Local history and existing cloud data are preserved."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法恢复同步密钥。请通过 iCloud 钥匙串恢复访问；云端数据未被更改。"
+            "value": "已保存的 iCloud 同步集合缺失或已更改。请检查 Apple 账户后重试。本地历史和现有云端数据均被保留。"
           }
         }
       }

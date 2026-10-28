@@ -108,8 +108,10 @@ actor ClipboardSyncKeychain: ClipboardSyncKeyStoring {
 
     private static func failure(_ status: OSStatus) -> ClipboardSyncServiceError {
         switch status {
-        case errSecInteractionNotAllowed, errSecNotAvailable:
+        case errSecInteractionNotAllowed, errSecInteractionRequired:
             .keyLocked
+        case errSecNotAvailable, errSecDataNotAvailable:
+            .keyUnavailable
         case errSecAuthFailed, errSecUserCanceled:
             .accessDenied
         case errSecMissingEntitlement:
@@ -117,7 +119,7 @@ actor ClipboardSyncKeychain: ClipboardSyncKeyStoring {
         case errSecDecode:
             .corruptData
         default:
-            .accessDenied
+            .keyUnavailable
         }
     }
 }

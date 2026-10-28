@@ -20,6 +20,8 @@ struct ClipboardWallView: View {
             PluginClipboardPayload
         ) -> Void
     let onRevealInFinder: (ClipboardHistoryEntry) -> Void
+    let onOpenFiles: (ClipboardHistoryEntry) -> Void
+    let onSaveFiles: (ClipboardHistoryEntry) -> Void
     let onDelete: (ClipboardHistoryEntry) -> Void
     let onToggleTag: (ClipboardHistoryEntry, String) -> Void
     let onNewTag: (ClipboardHistoryEntry) -> Void
@@ -735,6 +737,8 @@ struct ClipboardWallView: View {
                             onRevealInFinder: {
                                 state.select(item.id); onRevealInFinder(item)
                             },
+                            onOpenFiles: { state.select(item.id); onOpenFiles(item) },
+                            onSaveFiles: { state.select(item.id); onSaveFiles(item) },
                             onToggleTag: { state.select(item.id); onToggleTag(item, $0) },
                             onNewTag: { state.select(item.id); onNewTag(item) },
                             onIgnoreSource: { state.select(item.id); onIgnoreSource(item) },

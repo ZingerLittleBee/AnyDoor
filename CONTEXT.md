@@ -383,12 +383,17 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   source, capture time, favorite, and tags remain, an edit time is recorded,
   and Retention Start resets without moving recency. Equal content in another
   entry is not destructively merged.
+  A shared edit records the displayed version as its parent. Concurrent text
+  versions remain available for an explicit choice; resolving them creates a
+  new version that names all displayed conflict heads as parents. Editing or
+  receiving a shared entry never replaces the current system clipboard.
   _Avoid_: Rich Text Edit, Edit as New Capture, Duplicate Merge.
 - **Capture Safety Limit** (捕获安全上限) — A non-configurable per-entry guard
   of 128 MiB across the canonical plaintext bytes of all Standard Clipboard
   Representations selected for persistence, plus a 64-megapixel decoded-image
   limit, both aggregated across the complete Clipboard Entry. Referenced file
-  contents do not count because AnyDoor never reads or stores them. Exceeding
+  contents do not count because capture stores references without reading their
+  contents. Opted-in Clipboard Sync reads file content separately. Exceeding
   either limit rejects the entire history entry, leaves the system pasteboard
   unchanged, and shows a non-modal “content too large” notice, rate-limited so
   repeated rejections raise one notice rather than a stream. It never silently
