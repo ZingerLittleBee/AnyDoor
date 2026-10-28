@@ -118,6 +118,7 @@ public actor ClipboardHistoryModule {
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
         captureNoticeHandler = captureNotices
         notificationCenter = .default
+        syncServices = .production()
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )

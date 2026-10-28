@@ -6,6 +6,168 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDisabledResumeDoesNotConsultCloudOrCreateSyncKeys() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x21, time: 1_000)
+        await module.resumeSync()
+        let reads = await cloud.accountReadCount()
+        let keyCount = await keys.count()
+        XCTAssertEqual(reads, 0)
+        XCTAssertEqual(keyCount, 0)
+        let records = await cloud.currentUploads()
+        XCTAssertTrue(records.isEmpty)
+    }
+
+    func testSimultaneousFirstUseSelectsOneKeyAndBothDevicesReadTheCollection() async throws {
+        let cloud = SyncTestCloud()
+        await cloud.rendezvousInitialControlReads()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x23, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x24, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("one agreed key")))
+        let tag = try await first.createTagDefinition(named: "Race", assigningTo: entry.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        async let enableFirst: Void = first.setSyncEnabled(true)
+        async let enableSecond: Void = second.setSyncEnabled(true)
+        _ = try await (enableFirst, enableSecond)
+        await first.retrySync()
+        await second.retrySync()
+        let created = await keys.count()
+        XCTAssertEqual(created, 2, "Both isolated candidates must exist before the server chooses its winner")
+        let published = await cloud.currentUploads()
+        XCTAssertEqual(Set(published.map(\.record.keyID)).count, 1)
+        let page = try await second.page(.init())
+        XCTAssertEqual(page.entries.count, 1)
+        let final = await second.syncStatus()
+        XCTAssertEqual(final.phase, .upToDate)
+    }
+
+    func testLargeTextUsesEncryptedChunksAndDoesNotShareAnUnselectedTag() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x25, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x26, time: 2_000)
+        let value = String(repeating: "z", count: 4 * 1_024 * 1_024) + " confidential end marker"
+        let entry = try await first.capture(.init(source: .unknown, content: .text(value)))
+        let shared = try await first.createTagDefinition(named: "Shared secret label", assigningTo: entry.entryID)
+        _ = try await first.createTagDefinition(named: "Local private label", assigningTo: entry.entryID)
+        try await first.setSyncTagSelected(shared.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        let uploads = await cloud.currentUploads()
+        let textUpload = try XCTUnwrap(uploads.first { $0.record.kind == .entry })
+        XCTAssertGreaterThan(textUpload.chunks.count, 1)
+        for upload in uploads {
+            let metadata = try JSONEncoder().encode(upload.record)
+            for data in [metadata] + upload.chunks {
+                XCTAssertNil(data.range(of: Data("Shared secret label".utf8)))
+                XCTAssertNil(data.range(of: Data("Local private label".utf8)))
+                XCTAssertNil(data.range(of: Data("confidential end marker".utf8)))
+            }
+        }
+        try await second.setSyncEnabled(true)
+        let tags = try await second.tagDefinitions()
+        XCTAssertEqual(tags.map(\.id), [shared.definition.id])
+        let page = try await second.page(.init())
+        let received = try XCTUnwrap(page.entries.first)
+        let materialized = try await second.materialize(.init(entryID: received.id, purpose: .plainTextPaste))
+        XCTAssertEqual(materialized.items.first?.representations, [.text(typeIdentifier: "public.utf8-plain-text", value: value)])
+    }
+
+    func testMissingPreviouslyObservedControlNeverReinitializesOrReplacesKey() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let module = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x28, time: 1_000)
+        try await module.setSyncEnabled(true)
+        await cloud.removeControl()
+        await module.retrySync()
+        let status = await module.syncStatus()
+        XCTAssertEqual(status.phase, .failed(.recoveryRequired))
+        let count = await keys.count()
+        XCTAssertEqual(count, 1)
+        let account = await cloud.account()
+        let control = try await cloud.control(for: account)
+        XCTAssertNil(control)
+    }
+
+    func testLostCommitResponseAndRestartReuseFrozenOperationWithoutDuplicateImport() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-sync-restart-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x51, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0x52, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("survives lost response")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        await cloud.loseNextEntryCommitResponse()
+        try await first.setSyncEnabled(true)
+        let interrupted = await first.syncStatus()
+        XCTAssertEqual(interrupted.phase, .failed(.network))
+        try await first.closeStoreForTesting()
+
+        try await second.setSyncEnabled(true)
+        let next = try await second.capture(.init(source: .unknown, content: .text("peer advances control")))
+        _ = try await second.apply(.setTags(next.entryID, [tag.definition.id]))
+        await second.retrySync()
+        let publishedBeforeRetry = await cloud.currentUploads()
+        let reopened = makeModule(services: services, keyByte: 0x51, time: 3_000, root: root)
+        await reopened.resumeSync()
+        await reopened.retrySync()
+        await second.retrySync()
+        let publishedAfterRetry = await cloud.currentUploads()
+        XCTAssertEqual(publishedAfterRetry, publishedBeforeRetry)
+        let received = try await second.page(.init())
+        let restored = try await reopened.page(.init())
+        XCTAssertEqual(received.entries.count, 2)
+        XCTAssertEqual(restored.entries.count, 2)
+        let restoredState = await reopened.syncStatus()
+        XCTAssertEqual(restoredState.phase, .upToDate)
+        XCTAssertEqual(restoredState.uploadedEntryCount, 1)
+    }
+
+    func testDelayedSharedKeyWaitsWithoutReplacingCiphertextAndResumes() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let first = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0x61, time: 1_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("wait for system key delivery")))
+        let tag = try await first.createTagDefinition(named: "Secret label", assigningTo: entry.entryID)
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        let encryptedBefore = await cloud.currentUploads()
+        let delayedKeys = SyncTestDelayedKeys(backing: keys)
+        let second = makeModule(services: .init(transport: cloud, keys: delayedKeys, pollingInterval: nil), keyByte: 0x62, time: 2_000)
+        try await second.setSyncEnabled(true)
+        let waiting = await second.syncStatus()
+        XCTAssertEqual(waiting.phase, .waitingForKey)
+        let empty = try await second.page(.init())
+        XCTAssertTrue(empty.entries.isEmpty)
+        let encryptedAfter = await cloud.currentUploads()
+        XCTAssertEqual(encryptedAfter, encryptedBefore)
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+        await delayedKeys.deliver()
+        await second.retrySync()
+        let page = try await second.page(.init())
+        XCTAssertEqual(page.entries.count, 1)
+        let complete = await second.syncStatus()
+        XCTAssertEqual(complete.phase, .upToDate)
+    }
+
+    func testUnsignedNativeServicesFailBeforeAccountOrKeychainAccess() async throws {
+        let module = makeModule(services: .production(), keyByte: 0x71, time: 1_000)
+        let local = try await module.capture(.init(source: .unknown, content: .text("still usable")))
+        try await module.setSyncEnabled(true)
+        let status = await module.syncStatus()
+        XCTAssertEqual(status.phase, .capabilityUnavailable)
+        XCTAssertTrue(status.isEnabled)
+        XCTAssertNil(status.lastCompletedAt)
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [local.entryID])
+    }
+
     func testAccountChangeDisablesDeviceAndRequiresFreshSelectionForNewAccount() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -137,10 +299,23 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
     private var revision = 0
+    private var losesEntryResponse = false
+    private var reads = 0
+    private var rendezvous = false
+    private var initialReadWaiter: CheckedContinuation<ClipboardSyncControl?, Never>?
 
-    func account() -> ClipboardSyncAccount { currentAccount }
-    func control(for account: ClipboardSyncAccount) throws -> ClipboardSyncControl? {
+    func account() -> ClipboardSyncAccount { reads += 1; return currentAccount }
+    func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
+        if rendezvous, descriptors[account.identifier] == nil {
+            if let initialReadWaiter {
+                self.initialReadWaiter = nil
+                rendezvous = false
+                initialReadWaiter.resume(returning: nil)
+                return nil
+            }
+            return await withCheckedContinuation { initialReadWaiter = $0 }
+        }
         return descriptors[account.identifier]
     }
     func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) -> ClipboardSyncControl {
@@ -176,6 +351,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         records[account.identifier, default: []].append(upload)
         let result = advanced(descriptor)
         descriptors[account.identifier] = result
+        if losesEntryResponse, upload.record.kind == .entry {
+            losesEntryResponse = false
+            throw ClipboardSyncServiceError.network(retryAfter: nil)
+        }
         return result
     }
     func cancel() {}
@@ -183,6 +362,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: owner)
     }
     func currentUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
+    func loseNextEntryCommitResponse() { losesEntryResponse = true }
+    func rendezvousInitialControlReads() { rendezvous = true }
+    func removeControl() { descriptors[currentAccount.identifier] = nil }
+    func accountReadCount() -> Int { reads }
     private func checkAccount(_ account: ClipboardSyncAccount) throws {
         guard currentAccount == account else { throw ClipboardSyncServiceError.accountChanged }
     }
@@ -204,5 +387,20 @@ private actor SyncTestKeys: ClipboardSyncKeyStoring {
         if let existing = values[id], existing != key { throw ClipboardSyncServiceError.corruptData }
         values[id] = key
         return key
+    }
+    func count() -> Int { values.count }
+}
+
+private actor SyncTestDelayedKeys: ClipboardSyncKeyStoring {
+    let backing: SyncTestKeys
+    private var available = false
+    init(backing: SyncTestKeys) { self.backing = backing }
+    func deliver() { available = true }
+    func load(account: ClipboardSyncAccount, keyID: UUID) async throws -> Data? {
+        guard available else { return nil }
+        return await backing.load(account: account, keyID: keyID)
+    }
+    func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) async throws -> Data {
+        try await backing.create(account: account, keyID: keyID, key: key)
     }
 }
