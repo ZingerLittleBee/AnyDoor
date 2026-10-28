@@ -368,7 +368,7 @@ private struct LinkedFileLocalKey: ClipboardHistoryMasterKeyStoring {
     func delete() -> ClipboardHistoryMasterKeyResult { .missing }
 }
 
-private actor LinkedFileKeys: ClipboardSyncKeyStoring {
+actor LinkedFileKeys: ClipboardSyncKeyStoring {
     private var keys: [UUID: Data] = [:]
     func load(account: ClipboardSyncAccount, keyID: UUID) -> Data? { keys[keyID] }
     func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) throws -> Data {
