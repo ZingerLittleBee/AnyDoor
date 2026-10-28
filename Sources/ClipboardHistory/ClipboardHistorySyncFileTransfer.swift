@@ -11,6 +11,9 @@ struct ClipboardSyncFrozenFile: Sendable {
     let upload: ClipboardSyncFileUpload
     let originalByteCount: Int64
     let contentDigest: Data
+    var bodyFormat: ClipboardSyncFileBodyFormat = .segmentsV1
+    var kind: ClipboardSyncFileKind? = nil
+    var encodedByteCount: Int64? = nil
 }
 
 /// Background persistence contains only bounded authenticated ciphertext units.
@@ -69,6 +72,10 @@ enum ClipboardSyncFileTransfer {
     private static func freezeCoordinated(url: URL, bookmark: Data, identity: Data, directory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
         objectID: UUID, versionID: UUID) throws -> ClipboardSyncFrozenFile {
+        if try ClipboardFileTree.needsEncoding(url) {
+            return try freezeTree(url: url, bookmark: bookmark, identity: identity, directory: directory,
+                account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+        }
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard descriptor >= 0 else { throw ClipboardSyncServiceError.accessDenied }
         defer { close(descriptor) }

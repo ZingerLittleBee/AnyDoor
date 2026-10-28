@@ -76,7 +76,7 @@ extension ClipboardHistoryModule {
     func receiveSegmentedSyncFile(_ descriptor: ClipboardSyncFileDescriptor, account: ClipboardSyncAccount,
         control: ClipboardSyncControl, key: Data, services: ClipboardSyncServices, generation: UInt64
     ) async throws -> ClipboardSyncPublishedFile? {
-        guard let body = descriptor.body, let size = descriptor.originalByteCount else { throw ClipboardSyncServiceError.corruptData }
+        guard let body = descriptor.body, let size = descriptor.streamByteCount else { throw ClipboardSyncServiceError.corruptData }
         let directory = storeRoot.appendingPathComponent("SyncTransfers/Downloads/\(account.identifier)/\(control.epoch.uuidString)/\(descriptor.versionID.uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])

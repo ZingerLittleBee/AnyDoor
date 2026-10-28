@@ -46,6 +46,13 @@ enum ClipboardLinkedFileIO {
             destination.lastPathComponent + " (AnyDoor update " + UUID().uuidString + ")")
         var keep = false
         defer { if !keep { try? FileManager.default.removeItem(at: url) } }
+        if version.descriptor.bodyFormat == .treeSegmentsV1 {
+            try FileManager.default.copyItem(at: version.url, to: url)
+            let proof = try inspect(url)
+            guard proof.digest == digest, proof.byteCount == expectedBytes else { throw ClipboardSyncServiceError.corruptData }
+            keep = true
+            return proof
+        }
         let input = open(version.url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard input >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(input) }
@@ -101,12 +108,20 @@ enum ClipboardLinkedFileIO {
                 try faultInjector.check(.linkedFileBeforeReplacement)
                 let exchanged = try authorize {
                     guard before.stamp.matches(destination), prepared.stamp.matches(replacement.url) else { return false }
+                    if try ClipboardFileTree.needsEncoding(destination) {
+                        guard try inspectCoordinated(destination, expectedIdentity: source.identity).digest == before.digest,
+                              try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity).digest == prepared.digest else { return false }
+                    }
                     guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                     }
                     // The exchange can change ctime. Saved content changes alter
                     // the inode/size/mtime stamp and require immediate rollback.
-                    guard before.stamp.matches(replacement.url, includeMetadata: false) else {
+                    let oldIsTree = try ClipboardFileTree.needsEncoding(replacement.url)
+                    let oldTreeDigest = oldIsTree ? try? inspectCoordinated(replacement.url, expectedIdentity: source.identity).digest : nil
+                    let oldUnchanged = before.stamp.matches(replacement.url, includeMetadata: false)
+                        && (!oldIsTree || oldTreeDigest == before.digest)
+                    guard oldUnchanged else {
                         guard renamex_np(destination.path, replacement.url.path, UInt32(RENAME_SWAP)) == 0 else {
                             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                         }
@@ -146,7 +161,8 @@ enum ClipboardLinkedFileIO {
         guard file >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(file) }
         var before = stat()
-        guard fstat(file, &before) == 0, before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), before.st_size >= 0 else {
+        guard fstat(file, &before) == 0,
+              [mode_t(S_IFREG), mode_t(S_IFDIR)].contains(before.st_mode & mode_t(S_IFMT)), before.st_size >= 0 else {
             throw ClipboardHistoryModuleError.invalidFileAssociation
         }
         let nativeIdentity = try ClipboardLinkedNativeIdentity.read(url, status: before)
@@ -162,8 +178,9 @@ enum ClipboardLinkedFileIO {
         }
         var hasher = SHA256()
         var offset: Int64 = 0
+        let tree = try ClipboardFileTree.needsEncoding(url) ? ClipboardFileTree(url).stream { _ in } : nil
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
-        while offset < before.st_size {
+        while tree == nil && offset < before.st_size {
             try Task.checkCancellation()
             let readCount = buffer.withUnsafeMutableBytes {
                 pread(file, $0.baseAddress, Int(min(Int64($0.count), before.st_size - offset)), off_t(offset))
@@ -187,6 +204,6 @@ enum ClipboardLinkedFileIO {
         return ClipboardLinkedFileProof(url: url,
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
-            digest: Data(hasher.finalize()), byteCount: offset, stamp: ClipboardLinkedFileStamp(after), nativeIdentity: nativeIdentity)
+            digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after), nativeIdentity: nativeIdentity)
     }
 }

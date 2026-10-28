@@ -30,7 +30,8 @@ enum ClipboardSyncFileIO {
     static func isAvailable(path: String?, identity: Data?) -> Bool {
         guard let path, let identity else { return false }
         var status = stat()
-        guard lstat(path, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else { return false }
+        guard lstat(path, &status) == 0,
+              [mode_t(S_IFREG), mode_t(S_IFDIR)].contains(status.st_mode & mode_t(S_IFMT)) else { return false }
         let url = URL(fileURLWithPath: path)
         guard let values = try? url.resourceValues(forKeys: [.fileResourceIdentifierKey]),
               let current = values.fileResourceIdentifier as? NSObject,
@@ -87,6 +88,10 @@ enum ClipboardSyncFileIO {
         defer { close(descriptor) }
         var before = stat()
         guard fstat(descriptor, &before) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        if try ClipboardFileTree.needsEncoding(url) {
+            let measurement = try ClipboardFileTree(url).stream { _ in }
+            return .init(state: .pendingUpload, byteCount: measurement.original, bytes: nil, url: url, bookmark: bookmark)
+        }
         guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
             return ClipboardSyncFileSample(state: .unsupportedKind, byteCount: nil, bytes: nil, url: url, bookmark: bookmark)
         }

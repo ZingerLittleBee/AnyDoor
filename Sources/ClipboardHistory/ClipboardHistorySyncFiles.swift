@@ -203,7 +203,7 @@ extension ClipboardHistoryModule {
                 originalByteCount: frozen?.originalByteCount ?? sampled.byteCount,
                 contentDigest: frozen?.contentDigest ?? sampled.bytes.map { Data(SHA256.hash(data: $0)) },
                 body: frozen?.upload.record ?? body?.record, state: frozen == nil ? sampled.state : .available,
-                bodyFormat: frozen == nil ? nil : .segmentsV1
+                bodyFormat: frozen?.bodyFormat, kind: frozen?.kind, encodedByteCount: frozen?.encodedByteCount
             )
             stored = try syncWrite { database in
                 guard try syncFileSourceIsEligible(source, account: account, in: database) else { return false }
@@ -365,7 +365,7 @@ extension ClipboardHistoryModule {
                   let body = descriptor.body else { continue }
             do {
             let output: ClipboardSyncPublishedFile
-            if descriptor.bodyFormat == .segmentsV1 {
+            if descriptor.bodyFormat != nil {
                 guard let completed = try await receiveSegmentedSyncFile(descriptor, account: account, control: control,
                     key: key, services: services, generation: generation) else { continue }
                 output = completed
@@ -474,7 +474,13 @@ extension ClipboardHistoryModule {
                size > Self.automaticSyncFileDownloadBytes {
                 throw ClipboardSyncServiceError.corruptData
             }
-            if descriptor.bodyFormat == .segmentsV1, let size = descriptor.originalByteCount {
+            if descriptor.bodyFormat == .treeSegmentsV1 {
+                guard let encoded = descriptor.encodedByteCount, let original = descriptor.originalByteCount,
+                      encoded >= 13, encoded >= original, descriptor.kind != nil else { throw ClipboardSyncServiceError.corruptData }
+            } else if descriptor.encodedByteCount != nil || descriptor.kind == .directory {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            if descriptor.bodyFormat != nil, let size = descriptor.streamByteCount {
                 let unit = Int64(ClipboardSyncCodec.chunkByteCount)
                 let expected = max(1, size / unit + (size % unit == 0 ? 0 : 1))
                 let overhead = expected.multipliedReportingOverflow(by: 28)

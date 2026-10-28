@@ -23,7 +23,7 @@ extension ClipboardHistoryModule {
             account: account, control: control, key: key, objectID: objectID, versionID: versionID)
         let descriptor = ClipboardSyncFileDescriptor(objectID: objectID, versionID: versionID,
             displayName: displayName, originalByteCount: frozen.originalByteCount,
-            contentDigest: frozen.contentDigest, body: frozen.upload.record, state: .available, bodyFormat: .segmentsV1)
+            contentDigest: frozen.contentDigest, body: frozen.upload.record, state: .available, bodyFormat: frozen.bodyFormat, kind: frozen.kind, encodedByteCount: frozen.encodedByteCount)
         let event = try ClipboardSyncCodec.seal(.fileVersion(.init(descriptor: descriptor, parents: parents)),
             account: account, control: control, key: key, operationID: publicationID)
         return .init(descriptor: descriptor, parents: parents, uploadDirectory: frozen.upload.directory,
