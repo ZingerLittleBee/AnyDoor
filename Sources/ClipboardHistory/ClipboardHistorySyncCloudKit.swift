@@ -479,7 +479,6 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             return current
         } catch {
             try checkCancellation(generation)
-            if Self.hasCode(error, .unknownItem) { throw ClipboardSyncServiceError.conflict }
             throw Self.failure(error)
         }
     }
@@ -740,16 +739,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                     let deleteErrors = deleted.values.compactMap { result -> Error? in
                         if case .failure(let error) = result { return error }; return nil
                     }
-                    let errors = deleteErrors + collected.values.compactMap { result -> Error? in
+                    let saveErrors = collected.values.compactMap { result -> Error? in
                         if case .failure(let error) = result { return error }
                         return nil
                     }
-                    if let conflict = errors.first(where: { Self.hasCode($0, .serverRecordChanged) }) {
-                        throw conflict
-                    }
-                    if let substantive = errors.first(where: { !Self.hasCode($0, .batchRequestFailed) }) {
-                        throw substantive
-                    }
+                    if let error = Self.atomicModificationFailure(saveErrors: saveErrors, deleteErrors: deleteErrors) { throw error }
                     try outcome.get()
                     guard collected.count == records.count, deleted.count == ids.count else { throw ClipboardSyncServiceError.corruptData }
                     continuation.resume(returning: try collected.mapValues { try $0.get() })
@@ -861,6 +855,24 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         }
         try checkCancellation(generation)
         return value
+    }
+
+    nonisolated static func atomicModificationFailure(saveErrors: [Error], deleteErrors: [Error]) -> Error? {
+        let saveFailures = saveErrors.filter { !hasCode($0, .batchRequestFailed) }
+        let deleteFailures = deleteErrors.filter { !hasCode($0, .batchRequestFailed) }
+        // Missing authority and access failures cannot be hidden by an already
+        // absent deletion target. Atomic failure has not acknowledged the CAS.
+        if let failure = saveFailures.first(where: { !hasCode($0, .serverRecordChanged) }) { return Self.failure(failure) }
+        if let failure = deleteFailures.first(where: { !hasCode($0, .unknownItem) && !hasCode($0, .serverRecordChanged) }) {
+            return Self.failure(failure)
+        }
+        if (saveFailures + deleteFailures).contains(where: { hasCode($0, .serverRecordChanged) }) {
+            return ClipboardSyncServiceError.conflict
+        }
+        if deleteFailures.contains(where: { hasCode($0, .unknownItem) }) {
+            return ClipboardSyncServiceError.conflict
+        }
+        return nil
     }
 
     private nonisolated static func hasCode(_ error: Error, _ code: CKError.Code) -> Bool {
