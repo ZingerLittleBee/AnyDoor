@@ -29,6 +29,9 @@ public enum ClipboardHistoryLinkedFileLocationState: String, Codable, Sendable {
     case pendingUpload
     case conflict
     case unavailable
+    case detached
+    case identityUncertain
+    case paused
 }
 
 public struct ClipboardHistoryFileLocationAssociation: Sendable {
@@ -40,5 +43,24 @@ public struct ClipboardHistoryFileLocationAssociation: Sendable {
         self.entryID = entryID
         self.objectID = objectID
         self.url = url
+    }
+}
+
+public struct ClipboardHistoryFileLocationSelection: Sendable {
+    public let entryID: ClipboardHistoryEntryID
+    public let locationID: UUID
+    public let expectedRevision: UInt64
+
+    public init(entryID: ClipboardHistoryEntryID, locationID: UUID, expectedRevision: UInt64) {
+        self.entryID = entryID; self.locationID = locationID; self.expectedRevision = expectedRevision
+    }
+}
+
+public struct ClipboardHistoryFileLocationReassociation: Sendable {
+    public let selection: ClipboardHistoryFileLocationSelection
+    public let url: URL
+
+    public init(selection: ClipboardHistoryFileLocationSelection, url: URL) {
+        self.selection = selection; self.url = url
     }
 }

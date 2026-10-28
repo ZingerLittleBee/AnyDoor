@@ -69,12 +69,24 @@ struct ClipboardLinkedNativeIdentity: Codable, Equatable, Sendable {
     }
 }
 
+struct ClipboardLinkedFileIdentityEvent: Sendable {
+    let identity: Data
+    let candidate: URL?
+    let unlinked: Bool
+}
+
+enum ClipboardLinkedIdentityFailure: Error {
+    case removed
+    case replaced
+    case unavailable
+}
+
 enum ClipboardLinkedIdentityResolution {
-    static func inspect(_ source: ClipboardLinkedLocationSource) throws -> ClipboardLinkedFileProof {
+    static func inspect(_ source: ClipboardLinkedLocationSource, event: ClipboardLinkedFileIdentityEvent? = nil) throws -> ClipboardLinkedFileProof {
         var stale = false
         let bookmarkURL = try? URL(resolvingBookmarkData: source.bookmark, options: [.withoutUI, .withoutMounting],
             relativeTo: nil, bookmarkDataIsStale: &stale)
-        var candidates = [bookmarkURL, source.url].compactMap { $0 }
+        var candidates = [event?.candidate, bookmarkURL, source.url].compactMap { $0 }
         if let located = source.nativeIdentity?.locate() { candidates.insert(located, at: 0) }
         var visited = Set<String>()
         for url in candidates where visited.insert(url.path).inserted {
@@ -87,8 +99,29 @@ enum ClipboardLinkedIdentityResolution {
             guard sameObject || proof.nativeIdentity.map({ source.nativeIdentity?.provesContinuity(with: $0) == true }) == true else {
                 throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
+            var relationship: FileManager.URLRelationship = .other
+            try FileManager.default.getRelationship(&relationship, of: .trashDirectory, in: [], toItemAt: proof.url)
+            guard relationship != .contains && relationship != .same else { throw ClipboardLinkedIdentityFailure.removed }
             return proof
         }
-        throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+        var occupant = stat()
+        if lstat(source.url.path, &occupant) == 0 {
+            if let expected = source.nativeIdentity,
+               let current = try? ClipboardLinkedNativeIdentity.read(source.url, status: occupant),
+               current.volumeUUID != expected.volumeUUID { throw ClipboardLinkedIdentityFailure.unavailable }
+            throw ClipboardLinkedIdentityFailure.replaced
+        }
+        let missing = errno == ENOENT
+        let parent = source.url.deletingLastPathComponent()
+        var parentStatus = stat()
+        if missing, event?.unlinked == true, let expected = source.nativeIdentity,
+           lstat(parent.path, &parentStatus) == 0, parentStatus.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+           access(parent.path, R_OK | X_OK) == 0,
+           let current = try? ClipboardLinkedNativeIdentity.read(parent, status: parentStatus),
+           current.volumeUUID == expected.volumeUUID,
+           lstat(source.url.path, &occupant) != 0, errno == ENOENT {
+            throw ClipboardLinkedIdentityFailure.removed
+        }
+        throw ClipboardLinkedIdentityFailure.unavailable
     }
 }

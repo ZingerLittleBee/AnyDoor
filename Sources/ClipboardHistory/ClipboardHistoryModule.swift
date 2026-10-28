@@ -108,6 +108,7 @@ public actor ClipboardHistoryModule {
     let linkedFileMutationGate = ClipboardLinkedFileMutationGate()
     var linkedFileObservationTasks: [UUID: Task<Void, Never>] = [:]
     var linkedFileObservationRevisions: [UUID: UInt64] = [:]
+    var linkedFileIdentityEvents: [UUID: ClipboardLinkedFileIdentityEvent] = [:]
     var syncSuspended = true
     var syncAccountBindingGeneration: UInt64?
 

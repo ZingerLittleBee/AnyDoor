@@ -135,7 +135,8 @@ extension ClipboardHistoryModule {
         let path: String = row["path"]
         let available = ClipboardSyncFileIO.isAvailable(path: path, identity: row["identity"])
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
-            url: URL(fileURLWithPath: path), kind: kind, state: available ? storedState : .unavailable,
+            url: URL(fileURLWithPath: path), kind: kind,
+            state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
             revision: row["revision"])
     }
 
