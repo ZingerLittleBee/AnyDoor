@@ -26,6 +26,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ClipboardHistoryMaterializationRequest
         ) async throws -> ClipboardHistoryMaterialization
     let requestSyncFileDownload: @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void
+    let requestFileConflictDownload: @Sendable (ClipboardHistoryFileConflictPlan, UUID) async throws -> Void
+    let resolveFileConflict: @Sendable (ClipboardHistoryFileConflictPlan, ClipboardHistoryFileConflictChoice) async throws -> UUID
+    let fileConflictPlan: @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan
     let retrySyncFileTransfer: @Sendable () async -> Void
     let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
     let associateFileLocation: @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation
@@ -97,6 +100,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         requestSyncFileDownload = { entryID, objectID, versionID in
             try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID)
         }
+        requestFileConflictDownload = { try await module.requestFileConflictDownload($0, versionID: $1) }
+        resolveFileConflict = { try await module.resolveFileConflict($0, choosing: $1) }
+        fileConflictPlan = { try await module.fileConflictPlan(entryID: $0, objectID: $1) }
         retrySyncFileTransfer = { await module.retrySync() }
         exportFiles = { entryID, destinations in
             try await module.exportFiles(entryID, to: destinations)
@@ -193,6 +199,15 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         requestSyncFileDownload: @escaping @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void = { _, _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
         },
+        requestFileConflictDownload: @escaping @Sendable (ClipboardHistoryFileConflictPlan, UUID) async throws -> Void = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        resolveFileConflict: @escaping @Sendable (ClipboardHistoryFileConflictPlan, ClipboardHistoryFileConflictChoice) async throws -> UUID = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        fileConflictPlan: @escaping @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
         retrySyncFileTransfer: @escaping @Sendable () async -> Void = {},
         exportFiles: @escaping @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL] = { _, _ in
             throw ClipboardHistoryModuleError.operationUnavailable
@@ -212,6 +227,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.apply = apply
         self.materialize = materialize
         self.requestSyncFileDownload = requestSyncFileDownload
+        self.requestFileConflictDownload = requestFileConflictDownload
+        self.resolveFileConflict = resolveFileConflict
+        self.fileConflictPlan = fileConflictPlan
         self.retrySyncFileTransfer = retrySyncFileTransfer
         self.exportFiles = exportFiles
         self.associateFileLocation = associateFileLocation
@@ -351,6 +369,10 @@ enum ClipboardHistoryActionFailure: Equatable {
     }
 }
 
+enum ClipboardFileConflictNotice: Equatable {
+    case changed, unavailable, resolutionFailed, submitted, downloadPending, downloadFailed
+}
+
 @MainActor
 @Observable
 final class ClipboardHistoryPresentationModel {
@@ -398,6 +420,12 @@ final class ClipboardHistoryPresentationModel {
     private(set) var query = ClipboardHistoryQuery()
     private(set) var selectedID: ClipboardHistoryEntryID?
     private(set) var contentState: ClipboardHistoryContentState = .loading
+    private(set) var fileConflictNotice: ClipboardFileConflictNotice?
+    private(set) var fileConflictEntryID: ClipboardHistoryEntryID?
+    private(set) var fileConflictPlan: ClipboardHistoryFileConflictPlan?
+    private(set) var isPerformingFileConflictAction = false
+    private var fileConflictObjectID: UUID?
+    private var fileConflictGeneration = 0
     private(set) var actionFailure: ClipboardHistoryActionFailure?
     private(set) var tags: [ClipboardHistoryTagDefinition] = []
     private(set) var sources: [ClipboardHistoryPresentationSource] = []
@@ -543,6 +571,91 @@ final class ClipboardHistoryPresentationModel {
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
             return false
+        }
+    }
+
+    func beginFileConflict(entryID: ClipboardHistoryEntryID, objectID: UUID) async {
+        dismissFileConflict()
+        fileConflictEntryID = entryID
+        fileConflictObjectID = objectID
+        await refreshFileConflict()
+    }
+
+    func dismissFileConflict() {
+        fileConflictGeneration += 1
+        fileConflictEntryID = nil
+        fileConflictObjectID = nil
+        fileConflictPlan = nil
+        fileConflictNotice = nil
+        isPerformingFileConflictAction = false
+    }
+
+    func refreshFileConflict() async {
+        guard !isPerformingFileConflictAction, fileConflictNotice != .submitted else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        await loadFileConflict(generation: generation)
+        guard fileConflictGeneration == generation else { return }
+        isPerformingFileConflictAction = false
+    }
+
+    func resolveFileConflict(choosing choice: ClipboardHistoryFileConflictChoice) async {
+        guard !isPerformingFileConflictAction, let plan = fileConflictPlan,
+              plan.ancestryComplete,
+              plan.candidates.contains(where: { $0.id == choice && $0.availability == .available }) else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        do {
+            _ = try await operations.resolveFileConflict(plan, choice)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = nil
+            fileConflictNotice = .submitted
+            invalidateMaterializations(for: plan.entryID)
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictNotice = (error as? ClipboardHistoryFileConflictError) == .stalePlan ? .changed : .resolutionFailed
+        }
+        isPerformingFileConflictAction = false
+    }
+
+    func downloadFileConflictVersion(_ versionID: UUID) async {
+        guard !isPerformingFileConflictAction, let plan = fileConflictPlan,
+              plan.candidates.contains(where: { $0.id == .version(versionID) && $0.availability == .requiresDownload }) else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        do {
+            try await operations.requestFileConflictDownload(plan, versionID)
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            if let candidate = fileConflictPlan?.candidates.first(where: { $0.id == .version(versionID) }),
+               candidate.availability != .available {
+                fileConflictNotice = .downloadPending
+            }
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictNotice = (error as? ClipboardHistoryFileConflictError) == .stalePlan ? .changed : .downloadFailed
+        }
+        isPerformingFileConflictAction = false
+    }
+
+    private func loadFileConflict(generation: Int) async {
+        guard let entryID = fileConflictEntryID, let objectID = fileConflictObjectID else { return }
+        do {
+            let plan = try await operations.fileConflictPlan(entryID, objectID)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = plan
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = nil
+            fileConflictNotice = .unavailable
         }
     }
 

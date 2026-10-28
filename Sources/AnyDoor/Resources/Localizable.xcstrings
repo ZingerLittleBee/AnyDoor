@@ -6,6 +6,125 @@
     "settings.clipboard.sync.rejoinScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Selecting this tag restores %lld retained entries with their original shared identities."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "选择此标签将恢复 %lld 条保留历史的同步，并沿用原来的共享身份。"}}}},
     "settings.clipboard.sync.sharingScope": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Tag selection is shared across participating Macs, which may contain additional matching history. Another selected tag keeps an entry shared."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "标签选择会同步到参与的 Mac，其他设备可能还有更多匹配历史。记录仍匹配其他已选标签时会继续同步。"}}}},
     "settings.clipboard.sync.withdrawnStatus": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "%lld entries are withdrawn from sharing. Local copies remain; explicitly select their tag again to rejoin."}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 条历史已撤回共享，本地副本仍保留。重新选择相应标签可恢复同步。"}}}},
+    "clipboard.fileConflict.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Resolve File Conflict" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "解决文件冲突" } }
+      }
+    },
+    "clipboard.fileConflict.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the contents to keep sharing. Review or open a version before choosing." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择要继续共享的内容。选择前可查看或打开某个版本。" } }
+      }
+    },
+    "clipboard.fileConflict.sharedVersion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Shared version %lld" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "共享版本 %lld" } }
+      }
+    },
+    "clipboard.fileConflict.localChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local changes" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地更改" } }
+      }
+    },
+    "clipboard.fileConflict.available": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Available on this Mac" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已在此 Mac 上就绪" } }
+      }
+    },
+    "clipboard.fileConflict.download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Download This Version" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "下载此版本" } }
+      }
+    },
+    "clipboard.fileConflict.requiresDownload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Download required" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "需要下载" } }
+      }
+    },
+    "clipboard.fileConflict.candidateUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not available" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "不可用" } }
+      }
+    },
+    "clipboard.fileConflict.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "These choices are no longer available. Refresh after synchronization completes." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "这些选项目前不可用。同步完成后请刷新。" } }
+      }
+    },
+    "clipboard.fileConflict.use": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Use This Version" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "使用此版本" } }
+      }
+    },
+    "clipboard.fileConflict.submitted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choice saved. Synchronization and linked-file updates may still be pending." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择已保存。同步及关联文件的更新可能仍在等待处理。" } }
+      }
+    },
+    "clipboard.fileConflict.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The file or its versions changed. Review the refreshed choices." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "文件或其版本已发生变化。请查看刷新后的选项。" } }
+      }
+    },
+    "clipboard.fileConflict.resolutionFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The choice could not be saved. Review the versions and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法保存选择。请查看版本后重试。" } }
+      }
+    },
+    "clipboard.fileConflict.downloadPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This version is not ready yet. Retry the download or refresh after synchronization completes." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此版本尚未就绪。请重试下载，或在同步完成后刷新。" } }
+      }
+    },
+    "clipboard.fileConflict.downloadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This version could not be downloaded. Review the choices and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法下载此版本。请查看选项后重试。" } }
+      }
+    },
+    "clipboard.fileConflict.ancestry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Waiting for version history. Refresh after synchronization completes." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在等待版本历史。同步完成后请刷新。" } }
+      }
+    },
+    "clipboard.fileConflict.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Refresh" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "刷新" } }
+      }
+    },
     "clipboard.linkedFile.locations": {
       "extractionState": "manual",
       "localizations": {
