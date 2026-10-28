@@ -12,20 +12,40 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
     public let uploadedEntryCount: Int
     public let receivedEntryCount: Int
     public let lastCompletedAt: Date?
+    public let canClearCloudData: Bool
+    public let cloudReset: ClipboardHistoryCloudResetStatus?
 
     public init(
         isEnabled: Bool = false,
         phase: ClipboardHistorySyncPhase = .disabled,
         uploadedEntryCount: Int = 0,
         receivedEntryCount: Int = 0,
-        lastCompletedAt: Date? = nil
+        lastCompletedAt: Date? = nil,
+        cloudReset: ClipboardHistoryCloudResetStatus? = nil,
+        canClearCloudData: Bool = false
     ) {
         self.isEnabled = isEnabled
         self.phase = phase
         self.uploadedEntryCount = uploadedEntryCount
         self.receivedEntryCount = receivedEntryCount
         self.lastCompletedAt = lastCompletedAt
+        self.cloudReset = cloudReset
+        self.canClearCloudData = canClearCloudData
     }
+}
+
+/// Opaque confirmation bound to the account and collection shown to the user.
+public struct ClipboardHistoryCloudResetConfirmation: Equatable, Sendable {
+    let account: ClipboardSyncAccount
+    let control: ClipboardSyncControl
+}
+
+public struct ClipboardHistoryCloudResetStatus: Equatable, Sendable {
+    public enum Stage: String, Codable, Sendable { case preparing, clearing, completed, superseded }
+    public let stage: Stage
+    public let deletedRecordCount: Int
+    public let failure: ClipboardHistorySyncPhase?
+    public var isPending: Bool { stage == .preparing || stage == .clearing }
 }
 
 public enum ClipboardHistorySyncPhase: Codable, Equatable, Sendable {

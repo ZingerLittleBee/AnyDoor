@@ -690,7 +690,8 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 ## Clipboard Sync
 
 Vocabulary for the [Clipboard iCloud Sync specification](docs/prds/2026-10-28-clipboard-icloud-sync.md),
-which describes an accepted design that is not implemented yet.
+which describes the accepted design; its native workflow is being implemented in
+separate vertical slices.
 
 - **Clipboard Sync**: Optional sharing of selected Clipboard History across
   participating Macs using the same Apple Account. It is distinct from Config

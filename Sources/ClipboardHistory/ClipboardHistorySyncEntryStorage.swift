@@ -35,7 +35,7 @@ extension ClipboardHistoryModule {
         return .init(identity: identity, bitmaps: bitmaps, thumbnailID: thumbnailID)
     }
 
-    func syncEntryContent(id: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
+    func syncEntryContent(id: UUID, sharedID: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
                           control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntryContent {
         let storedID = id.uuidString.lowercased()
         guard let entry = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_entries WHERE id = ?", arguments: [storedID]) else {
@@ -80,7 +80,7 @@ extension ClipboardHistoryModule {
                 }
             })
         }
-        return ClipboardSyncEntryContent(id: id, capturedAt: Date(timeIntervalSince1970: entry["captured_at"]),
+        return ClipboardSyncEntryContent(id: sharedID, capturedAt: Date(timeIntervalSince1970: entry["captured_at"]),
             sourceBundleID: entry["source_bundle_id"], sourceDisplayName: entry["source_display_name"],
             sourceProvenance: entry["source_provenance"], favorite: entry["is_favorite"], tags: tags,
             items: items, facets: try String.fetchAll(database,

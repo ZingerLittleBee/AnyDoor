@@ -332,6 +332,7 @@ extension ClipboardHistoryModule {
             ORDER BY created_at, version_id
             """, arguments: [account.identifier, control.epoch.uuidString])
         for row in rows {
+            guard try !Self.isSyncDeleted(row["subject_id"], accountID: account.identifier, epoch: control.epoch.uuidString, in: database) else { continue }
             let encoded: Data = row["content"]
             let edit = try JSONDecoder().decode(ClipboardSyncTextEditContent.self, from: encoded)
             let upload = try ClipboardSyncCodec.seal(.textEdit(edit), account: account, control: control, key: key, operationID: edit.versionID)

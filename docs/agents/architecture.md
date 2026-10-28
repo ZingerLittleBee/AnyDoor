@@ -89,11 +89,26 @@ remote inbox, and imported history in its existing SQLCipher store. The additive
 `v14_clipboard_sync` migration keeps those records separate from local content and
 leaves the device-only history master key unchanged. Ordered entry envelopes
 preserve supported standard representations; ordinary files use independent
-encrypted version descriptors and bodies. Tag membership uses `v15_clipboard_sync_tags`;
-file versions and ordered membership use `v19_clipboard_sync_files`. Versioned
-text edits and explicit text conflict resolution are supported. Further file
-lifecycle, withdrawal, and cloud reset behavior follow the
+encrypted version descriptors and bodies. `v15_clipboard_sync_tags` adds per-tag
+revisions, selected associations, merge aliases, and account-specific enrollment
+guards; `v19_clipboard_sync_files` stores file versions and ordered membership.
+Versioned text edits and explicit text conflict resolution are supported. Further
+file lifecycle, withdrawal, and cloud reset behavior follow the
 [implementation specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+
+Selected definitions and associations use independent encrypted operations;
+unselected names and memberships remain local. Initial content snapshots seed
+associations without overwriting later operations. Same-name tags remain distinct
+in Settings, history filters, and card menus. Explicit merge previews disclose the
+newly eligible local history and reject stale confirmation; persistent aliases
+prevent old snapshots from recreating merged identities. Independent operations
+converge by a persisted logical revision and operation identity, not delivery order.
+A merge uses the smallest existing ID as the canonical identity, so overlapping
+merges converge without cycles. A remote merge never grants permission to move
+retained history between Apple Accounts; Settings exposes explicit local enrollment.
+Removing a selection that would lose the final matching tag remains unavailable
+until the withdrawal slice is implemented. Local copies still follow tag-protection
+and retention rules.
 
 The initial encrypted entry envelope retains every supported item and standard
 representation in order: exact text and links, rich text bytes, standard colors,
@@ -124,6 +139,24 @@ it displayed, keeps a failed save open, and never silently rebases an old draft.
 Text edits retain favorite/tag/provenance state and local recency. The v14 upgrade
 can replay the initial encrypted operation to recover ancestry while preserving
 an edit whose original upload chunks have already been reclaimed.
+
+The additive `v22_clipboard_sync_deletion` journal binds explicit deletion to an
+account, epoch, and shared identity. Only the explicitly confirmed bulk-clear IDs
+publish deletions; automatic retention remains local. Clear confirmations bind the
+shared identity set as well as the local revision, and disclose their cross-device
+scope. A deletion preserves each maximal unacknowledged local text branch as an
+independent history entry in the same transaction. A durable, dismissible Settings
+notice identifies those copies; their publication exclusion survives tag selection,
+account changes, and notice dismissal.
+
+Deleted identities fence initial content, edits, metadata, and membership replay.
+Authenticated content receipts drive bounded, conditional remote cleanup after
+the tombstone is published. The native adapter preserves the tombstone and control,
+removes chunks before their manifest, and distinguishes a missing deletion target
+from missing authority. Interrupted cleanup retries from its SQLCipher journal.
+A control conflict imports fresh lifecycle authority before retrying an upload.
+File-body and Linked Working Copy lifecycle integration follows the file lifecycle
+ticket; deletion never removes original or independently exported files.
 
 Every device starts disabled. Constructing the production services does not access
 CloudKit or the synchronizable Keychain. The host resumes stored consent only
@@ -196,11 +229,35 @@ Missing key material and unavailable Keychain services remain waiting states;
 they do not establish that Passwords & Keychain sync is disabled. Interaction
 restrictions, explicit access denial, and integrity/recovery failures are shown
 separately. Settings links to Apple's recovery guidance and never replaces a key
-or deletes cloud content to repair access. Disabled devices perform no account
-or key work; active runs revalidate the concrete account after awaited service
+or deletes cloud content to repair access. Disabled devices perform no ordinary sync account or key work. An explicitly
+confirmed, unfinished cloud clear resumes its account-scoped cleanup; active runs revalidate the concrete account after awaited service
 responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
+
+Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
+An interrupted clear for account A does not prevent explicit participation or
+an independent clear in account B. Only the current account can resume its
+journal; switching accounts never retargets a prior confirmation. The typed
+confirmation binds the visible account and collection; execution revalidates the
+current system account. The permanent control record first moves by atomic CAS
+to a resetting epoch, then each bounded metadata-only cleanup page deletes
+content and advances that same control in one atomic operation. Control, zone,
+shared key, local history, tag definitions, and memberships remain intact.
+Only confirmed stopped authority completes the clear. Ambiguous responses replay
+from durable progress; a newer manually activated epoch supersedes the old clear
+without touching newer content or claiming observed completion.
+
+Offline peers revoke participation and retire old publication queues when they
+observe retirement or another epoch. Manual activation reuses the existing key,
+creates a new active epoch by CAS, and requires fresh tag selection for local
+backfill. Reset preserves independent local-only and cross-account exclusion records.
+Its own retained-entry exclusions prevent remote tag selection from publishing
+pre-reset copies; explicit local selection or confirmed merge can authorize them
+again through the shared content-publication predicate. Cloud tag states, aliases,
+and queued merges retire with the old collection; local tags and memberships stay. Settings exposes preparation, confirmed deletion progress, interruption,
+and completion even while ordinary sync is off. See
+[cloud-reset evidence](../testing/clipboard-sync-signing.md#cloud-reset-evidence).
 
 ### Launch-time SwiftData seeding/migration
 
@@ -939,8 +996,7 @@ writes that key), and `BackupService.reconcileLiveRuntime()` re-reads settings i
 CommandPaletteService / LocalizationManager / HyperKeyService / ScheduledShutdownService /
 CaptureSettings / TranslationSettings, adopts the imported installed-plugin set through
 `PluginRegistry.reconcileAfterImport()` (real install/uninstall lifecycle, so plugin surfaces appear
-or disappear), re-applies the imported clipboard custom tags and monitoring settings to the history
-module, rebuilds QuicklinkStore and PanelStore, and refreshes hotkey snapshots so changes apply
+or disappear), refreshes clipboard monitoring settings, rebuilds QuicklinkStore and PanelStore, and refreshes hotkey snapshots so changes apply
 without relaunch. Backup has no storage protocol: `SyncSettingsView` writes the `BackupCodec` JSON
 atomically to the NSSavePanel URL and reads the NSOpenPanel URL directly (a missing file reads as
 empty data, so `BackupCodec.decode` reports the failure). Automatic multi-device Config Sync
@@ -954,10 +1010,18 @@ Automatic Config Sync excludes `clipboard.customTags` from local capture,
 retained local documents, and incoming peer documents, including tombstones;
 unknown settings from newer clients otherwise remain forward-compatible.
 It rewrites its own state file on the next successful sync without mutating
-other devices' files. Its runtime refresh passes `importClipboardTags: false`
-so an unrelated setting change cannot restore a stale tag mirror over local
-history. Clipboard monitoring rules still refresh. Manual restore retains tag
-reconciliation and its existing membership semantics. See [ADR-0028](../adr/0028-move-tag-sync-out-of-config-sync.md).
+other devices' files. Runtime refresh never reads tag definitions from preferences;
+clipboard monitoring rules still refresh. The active plaintext tag mirror is
+retired before the lifecycle reports ready or resumes monitoring/sync. Its one-time
+transaction adds missing definitions while preserving current encrypted identities
+and memberships; only a successful import permits deleting the preference. An
+encrypted completion marker rejects replay after restart, and failures retain the
+source for retry. New tag mutations never refresh a mirror. Manual export builds
+current definitions in memory from the module. Manual restore directly replaces
+definitions through the module, preserving memberships of retained IDs and removing
+those of removed IDs; missing backup fields leave tags unchanged. Distinct IDs with
+the same name round-trip without merging. See
+[ADR-0028](../adr/0028-move-tag-sync-out-of-config-sync.md).
 
 ### Backup reconciliation errors are not swallowed
 

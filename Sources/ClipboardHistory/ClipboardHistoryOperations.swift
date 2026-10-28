@@ -717,6 +717,7 @@ extension ClipboardHistoryModule {
                         payloadPaths: []
                     )
                 }
+                try Self.recordExplicitSyncDeletion(entryIDs: [storedID], in: database)
                 let paths = try logicallyDelete(
                     entryIDs: [storedID],
                     in: database

@@ -78,7 +78,7 @@ final class SyncEngine {
     private let transport: any SyncTransport
     private let stateStore: SyncLocalStateStore
     private let appPathResolver: (String) -> String?
-    private let reconcileRuntime: @MainActor (Bool) async throws -> Void
+    private let reconcileRuntime: @MainActor () async throws -> Void
     private let wallNow: () -> Int64
     private let localContentReader: (@MainActor () throws -> SyncSnapshotMapping.Content)?
 
@@ -109,8 +109,8 @@ final class SyncEngine {
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
         },
-        reconcileRuntime: @escaping @MainActor (Bool) async throws -> Void = { importClipboardTags in
-            try await BackupService.reconcileLiveRuntime(importClipboardTags: importClipboardTags)
+        reconcileRuntime: @escaping @MainActor () async throws -> Void = {
+            try await BackupService.reconcileLiveRuntime()
         },
         wallNow: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) },
         readLocalContent: (@MainActor () throws -> SyncSnapshotMapping.Content)? = nil
@@ -268,7 +268,7 @@ final class SyncEngine {
         if entriesChanged {
             do {
                 if try applyDocument() {
-                    try await reconcileRuntime(false)
+                    try await reconcileRuntime()
                 }
             } catch {
                 logger.error("sync apply failed: \(error)")

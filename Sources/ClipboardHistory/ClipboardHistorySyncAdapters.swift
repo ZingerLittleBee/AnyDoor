@@ -67,6 +67,13 @@ enum ClipboardSyncPendingUpload: Sendable {
     }
 }
 
+struct ClipboardSyncCleanupPage: Sendable {
+    let control: ClipboardSyncControl
+    let cursor: Data?
+    let deletedRecordCount: Int
+    let hasMore: Bool
+}
+
 enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case accountUnavailable
     case accountChanged
@@ -79,6 +86,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case localStorage
     case conflict
     case missingRemoteState
+    case recordUnavailable
     case corruptData
     case unsupportedVersion
 }
@@ -114,7 +122,34 @@ protocol ClipboardSyncTransport: Sendable {
     func downloadFileSegment(
         _ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount
     ) async throws -> Data
+    /// Removes a retired content operation and its chunks, with active control
+    /// CAS on every bounded batch. Only authenticated domain receipts qualify.
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl
     func cancel() async
+    /// Conditional phase transition on the permanent authority record.
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
+                    for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl
+    /// Deletes a bounded metadata-only page with the resetting control CAS in
+    /// the same atomic operation. Never removes the zone or control record.
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl,
+                   cursor: Data?) async throws -> ClipboardSyncCleanupPage
+}
+
+extension ClipboardSyncTransport {
+    func purge(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount,
+               control: ClipboardSyncControl) async throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+
+    func transition(_ control: ClipboardSyncControl, to phase: String, epoch: UUID,
+                    for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
+    func clearPage(for account: ClipboardSyncAccount, control: ClipboardSyncControl,
+                   cursor: Data?) async throws -> ClipboardSyncCleanupPage {
+        throw ClipboardSyncServiceError.capabilityUnavailable
+    }
 }
 
 protocol ClipboardSyncKeyStoring: Sendable {
