@@ -285,6 +285,7 @@ extension ClipboardHistoryModule {
             if control.phase == "resetting" ||
                 (!activationAuthorized && (control.phase != "active" || state.control.map { $0.epoch != control.epoch } == true)) {
                 try stopForRetiredCollection(control, state: &state)
+                try await resumeSyncFilePreservations()
                 return
             }
             if control.phase == "stopped" {
@@ -306,6 +307,7 @@ extension ClipboardHistoryModule {
             guard control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
             if let previous = state.control, previous.epoch != control.epoch {
                 try syncWrite { try retireLocalSyncCollection(accountID: account.identifier, in: $0) }
+                try await resumeSyncFilePreservations()
                 state.cursor = nil
             }
             state.candidate = nil

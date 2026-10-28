@@ -94,6 +94,15 @@ extension ClipboardHistoryModule {
     /// Keep user history, tags, memberships, and cross-account authorization
     /// records. Only this collection's publication state is retired.
     func retireLocalSyncCollection(accountID: String, in database: Database) throws {
+        // Snapshot file ownership and unuploaded saved work before outbox
+        // cascades remove the only encrypted transfer/publication references.
+        for row in try Row.fetchAll(database, sql: "SELECT epoch, shared_id FROM clipboard_sync_entries WHERE account_id = ?",
+            arguments: [accountID]) {
+            let epoch: String = row["epoch"], shared: String = row["shared_id"]
+            try Self.rememberSyncFileOwnership(sharedID: shared, accountID: accountID, epoch: epoch, in: database)
+            try Self.captureSyncFilePreservations(sharedID: shared, accountID: accountID, epoch: epoch, in: database)
+            try Self.captureSyncFileCleanup(sharedID: shared, accountID: accountID, epoch: epoch, retired: true, in: database)
+        }
         try database.execute(sql: """
             INSERT OR IGNORE INTO clipboard_sync_reset_exclusions(account_id, local_entry_id)
             SELECT ?, shared.local_entry_id FROM clipboard_sync_entries AS shared
@@ -105,6 +114,7 @@ extension ClipboardHistoryModule {
               WHERE selected.account_id = ? AND selected.selected = 1
             """, arguments: [accountID, accountID, accountID, accountID, accountID, accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_outbox WHERE account_id = ?", arguments: [accountID])
+        try database.execute(sql: "DELETE FROM clipboard_sync_file_rejoins WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_states WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_merge_outbox WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_aliases WHERE account_id = ?", arguments: [accountID])
@@ -113,6 +123,7 @@ extension ClipboardHistoryModule {
     }
 
     func stopForRetiredCollection(_ control: ClipboardSyncControl, state: inout ClipboardSyncAccountState) throws {
+        stopLinkedFileObservers()
         state.control = control
         state.cursor = nil
         state.candidate = nil
@@ -190,6 +201,7 @@ extension ClipboardHistoryModule {
                     try retireLocalSyncCollection(accountID: journal.account.identifier, in: database)
                     try saveCloudReset(journal, in: database)
                 }
+                try await resumeSyncFilePreservations()
                 syncSuspended = !(try hasPendingCloudResets())
                 setSyncPhase(.disabled)
                 return
@@ -210,6 +222,7 @@ extension ClipboardHistoryModule {
                 try retireLocalSyncCollection(accountID: journal.account.identifier, in: database)
                 try saveCloudReset(journal, in: database)
             }
+            try await resumeSyncFilePreservations()
             publishSyncStatus()
             while control.phase == "resetting" {
                 let page = try await services.transport.clearPage(for: journal.account, control: control, cursor: journal.cursor)

@@ -7,6 +7,7 @@ extension ClipboardHistoryModule {
         try database.execute(sql: """
             CREATE TABLE clipboard_sync_file_cleanup (
                 account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, version_id TEXT NOT NULL,
+                retired INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(account_id, epoch, object_id, version_id)
             ) WITHOUT ROWID;
             """)
@@ -14,7 +15,8 @@ extension ClipboardHistoryModule {
 
     /// Capture only transfer ownership. Visible working files, originals, and
     /// replacement backups are never cache-cleanup targets.
-    static func captureSyncFileCleanup(sharedID: String, accountID: String, epoch: String, in database: Database) throws {
+    static func captureSyncFileCleanup(sharedID: String, accountID: String, epoch: String,
+        retired: Bool = false, in database: Database) throws {
         let objects = try String.fetchAll(database, sql: """
             SELECT object_id FROM clipboard_sync_file_subjects WHERE account_id = ? AND epoch = ? AND shared_id = ?
             """, arguments: [accountID, epoch, sharedID])
@@ -31,8 +33,10 @@ extension ClipboardHistoryModule {
                 versions.insert(journal.resultID.uuidString)
             }
             for version in versions {
-                try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_file_cleanup VALUES (?, ?, ?, ?)",
-                    arguments: [accountID, epoch, object, version])
+                try database.execute(sql: """
+                    INSERT INTO clipboard_sync_file_cleanup(account_id, epoch, object_id, version_id, retired) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(account_id, epoch, object_id, version_id) DO UPDATE SET retired = MAX(retired, excluded.retired)
+                    """, arguments: [accountID, epoch, object, version, retired])
             }
         }
     }
@@ -44,10 +48,10 @@ extension ClipboardHistoryModule {
         let rows = try linkedRead { database in
             try Row.fetchAll(database, sql: """
                 SELECT cleanup.* FROM clipboard_sync_file_cleanup AS cleanup
-                WHERE NOT EXISTS (SELECT 1 FROM clipboard_sync_file_subjects AS owner
+                WHERE (cleanup.retired = 1 OR NOT EXISTS (SELECT 1 FROM clipboard_sync_file_subjects AS owner
                   WHERE owner.account_id = cleanup.account_id AND owner.epoch = cleanup.epoch AND owner.object_id = cleanup.object_id
                     AND NOT EXISTS (SELECT 1 FROM clipboard_sync_deletions AS deleted
-                      WHERE deleted.account_id = owner.account_id AND deleted.epoch = owner.epoch AND deleted.shared_id = owner.shared_id))
+                      WHERE deleted.account_id = owner.account_id AND deleted.epoch = owner.epoch AND deleted.shared_id = owner.shared_id)))
                   AND NOT EXISTS (SELECT 1 FROM clipboard_sync_file_preservations AS saved
                     JOIN clipboard_sync_file_subjects AS owner USING(account_id, epoch, shared_id)
                     WHERE owner.account_id = cleanup.account_id AND owner.epoch = cleanup.epoch AND owner.object_id = cleanup.object_id

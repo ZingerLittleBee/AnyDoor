@@ -6,6 +6,39 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testCloudResetPreservesQueuedFrozenVersionAndNewerSavedWork() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let frozen = Data("unpublished file version retained when cloud is cleared".utf8)
+        try frozen.write(to: fixture.original)
+        try await eventually { !(await fixture.cloud.partialFileRecordIDs()).isEmpty }
+        try await fixture.sender.setSyncEnabled(false)
+        let newer = Data("later local save before confirming cloud reset".utf8)
+        try newer.write(to: fixture.original)
+        await fixture.cloud.failCommits(false)
+        let confirmation = try await fixture.sender.prepareCloudReset()
+
+        try await fixture.sender.clearCloudDataAndStopSync(confirmation)
+
+        let notices = try await fixture.sender.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let value = try await fixture.sender.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = value.items.first?.representations.first else { return XCTFail("Missing retained reset work") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        XCTAssertEqual(try Data(contentsOf: fixture.original), newer)
+        let cloud = await fixture.cloud.visibleRecords()
+        XCTAssertTrue(cloud.isEmpty)
+        let partial = await fixture.cloud.partialFileRecordIDs()
+        XCTAssertTrue(partial.isEmpty)
+        let status = await fixture.sender.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+    }
+
+    @MainActor
     func testInterruptedPreservationRecoversMovedArtifactWithoutChangingUserCopy() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.syncFilePreservationAfterCopy]))
         let page = try await fixture.receiver.page(.init())
