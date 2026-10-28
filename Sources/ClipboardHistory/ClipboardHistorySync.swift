@@ -256,7 +256,15 @@ extension ClipboardHistoryModule {
             while let upload = try nextSyncUpload(account: account, control: control) {
                 do {
                     try await admitSync(generation, account: account, services: services)
-                    let committed = try await services.transport.commit(upload, for: account, control: control)
+                    let committed: ClipboardSyncControl
+                    switch upload {
+                    case .inline(let value):
+                        committed = try await services.transport.commit(value, for: account, control: control)
+                    case .file(let value):
+                        committed = try await services.transport.commitFile(value, for: account, control: control) { bytes in
+                            try await self.recordSyncFileUploadProgress(bytes, record: value.record, generation: generation)
+                        }
+                    }
                     try await admitSync(generation, account: account, services: services)
                     guard committed.epoch == control.epoch, committed.keyID == control.keyID else {
                         throw ClipboardSyncServiceError.missingRemoteState
