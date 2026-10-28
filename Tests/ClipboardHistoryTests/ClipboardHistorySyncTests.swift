@@ -181,6 +181,84 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testStandardColorAndExplicitRecognitionTextKeepTheirRepresentationsAndFacets() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x85, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x86, time: 2_000)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.sync-color.\(UUID())"))
+        pasteboard.clearContents()
+        let color = NSColor(displayP3Red: 0.25, green: 0.5, blue: 0.75, alpha: 0.5)
+        let bytes = try XCTUnwrap(color.pasteboardPropertyList(forType: .color) as? Data)
+        let item = NSPasteboardItem()
+        item.setData(bytes, forType: .color)
+        item.setString("original color label", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let colored) = try await first.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected a captured color")
+        }
+        let ocr = try await first.capture(.init(source: .unknown, content: .ocr("https://example.com/recognized")))
+        let qr = try await first.capture(.init(source: .unknown, content: .qrCode("qr result")))
+        let tag = try await first.createTagDefinition(named: "Content", assigningTo: colored.entryID)
+        _ = try await first.apply(.setTags(ocr.entryID, [tag.definition.id]))
+        _ = try await first.apply(.setTags(qr.entryID, [tag.definition.id]))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let page = try await second.page(.init())
+        XCTAssertEqual(page.entries.count, 3)
+        let restoredColor = try XCTUnwrap(page.entries.first { $0.id == colored.entryID })
+        XCTAssertEqual(restoredColor.facets, [.text, .color])
+        let normal = try await second.materialize(.init(entryID: restoredColor.id, purpose: .normalPaste))
+        XCTAssertEqual(normal.items, [.init(representations: [
+            .text(typeIdentifier: "public.utf8-plain-text", value: "original color label"),
+            .data(typeIdentifier: NSPasteboard.PasteboardType.color.rawValue, bytes),
+        ])])
+        XCTAssertEqual(page.entries.first { $0.id == ocr.entryID }?.facets, [.text, .ocr])
+        XCTAssertEqual(page.entries.first { $0.id == qr.entryID }?.facets, [.text, .qrCode])
+        let ocrSearch = try await second.page(.init(text: "recognized", facet: .ocr))
+        XCTAssertEqual(ocrSearch.entries.map(\.id), [ocr.entryID])
+    }
+
+    @MainActor
+    func testScreenshotTransfersOwnedPixelsAndThumbnailWithoutStartingReceiverRecognition() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x83, time: 1_000)
+        let receiverRecognizer = SyncTestRecognizer()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-owned-image-\(UUID())")
+        let second = makeModule(services: services, keyByte: 0x84, time: 2_000, root: root, recognizer: receiverRecognizer)
+        let bitmap = try makeSyncBitmap()
+        let captured = try await first.capture(.init(source: .init(bundleIdentifier: "test.capture", displayName: "Capture"),
+            content: .bitmap(bitmap, provenance: .anyDoorScreenshot)))
+        await first.awaitDerivedJobsForTesting()
+        _ = try await first.apply(.setFavorite(captured.entryID, true))
+        let tag = try await first.createTagDefinition(named: "Screenshots", assigningTo: captured.entryID)
+        let original = try await first.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
+        let preview = try await first.materialize(.init(entryID: captured.entryID, purpose: .preview))
+        try await first.setSyncTagSelected(tag.definition.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await second.awaitDerivedJobsForTesting()
+        let page = try await second.page(.init(facet: .screenshot))
+        let received = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(received.facets, [.image, .screenshot])
+        XCTAssertTrue(received.isFavorite)
+        XCTAssertEqual(received.capturedAt, Date(timeIntervalSince1970: 1_000))
+        let full = try await second.materialize(.init(entryID: received.id, purpose: .normalPaste))
+        let thumbnail = try await second.materialize(.init(entryID: received.id, purpose: .preview))
+        XCTAssertEqual(full, original)
+        XCTAssertEqual(thumbnail, preview)
+        let recognitionCalls = await receiverRecognizer.callCount()
+        XCTAssertEqual(recognitionCalls, 0)
+        let payloads = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("payloads"), includingPropertiesForKeys: nil)
+        XCTAssertEqual(payloads.count, 2)
+        for file in payloads {
+            XCTAssertNil(try Data(contentsOf: file).range(of: bitmap))
+        }
+    }
+
+    @MainActor
     func testSelectedOrdinaryFileArrivesAsUsableHistoryWithoutChangingPasteboard() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -277,6 +355,103 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(search.entries.map(\.id), [received.id])
         XCTAssertEqual(pasteboard.changeCount, generation)
         XCTAssertEqual(pasteboard.string(forType: .string), "receiver sentinel")
+    }
+
+    func testIndependentTagRenamesConvergeAcrossReversedDeliveryAndRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-tags-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x75, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0x76, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("renamed collections")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncEnabled(false)
+        try await second.setSyncEnabled(false)
+        _ = try await first.renameTagDefinition(id: work.id, to: "Focused work")
+        _ = try await second.renameTagDefinition(id: other.id, to: "Research")
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await first.retrySync()
+        let expected = [work.id: "Focused work", other.id: "Research"]
+        let firstTags = try await first.syncTags()
+        let secondTags = try await second.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: firstTags.map { ($0.id, $0.displayName) }), expected)
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: secondTags.map { ($0.id, $0.displayName) }), expected)
+        await cloud.reverseDelivery()
+        let third = makeModule(services: services, keyByte: 0x77, time: 3_000)
+        try await third.setSyncEnabled(true)
+        let reversedTags = try await third.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: reversedTags.map { ($0.id, $0.displayName) }), expected)
+        let reversedEntries = try await third.page(.init()).entries
+        XCTAssertEqual(reversedEntries.first?.tagIDs, [work.id, other.id])
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x75, time: 4_000, root: root)
+        await reopened.resumeSync()
+        let reopenedTags = try await reopened.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: reopenedTags.map { ($0.id, $0.displayName) }), expected)
+    }
+
+    func testSelectedMembershipChangesPreservePrivateTagsOnBothDevices() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x73, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x74, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("shared organization")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let personal = try await second.createTagDefinition(named: "Private on receiver", assigningTo: entry.entryID).definition
+        _ = try await first.apply(.setTags(entry.entryID, [other.id]))
+        await first.retrySync()
+        await second.retrySync()
+        let removed = try await second.page(.init()).entries
+        XCTAssertEqual(removed.first?.tagIDs, [other.id, personal.id])
+        _ = try await second.apply(.setTags(entry.entryID, [work.id, other.id, personal.id]))
+        await second.retrySync()
+        await first.retrySync()
+        let restored = try await first.page(.init()).entries
+        XCTAssertEqual(restored.first?.tagIDs, [work.id, other.id])
+        let firstDefinitions = try await first.tagDefinitions()
+        XCTAssertFalse(firstDefinitions.contains { $0.id == personal.id })
+        let countBeforeReplay = await cloud.currentUploads().count
+        await first.retrySync()
+        await second.retrySync()
+        let countAfterReplay = await cloud.currentUploads().count
+        XCTAssertEqual(countAfterReplay, countBeforeReplay)
+    }
+
+    func testMultipleSelectedTagsBackfillTheirUnionWithoutPrivateLabels() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x71, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x72, time: 2_000)
+        let workEntry = try await first.capture(.init(source: .unknown, content: .text("work history")))
+        let otherEntry = try await first.capture(.init(source: .unknown, content: .text("other history")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: workEntry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: otherEntry.entryID).definition
+        let personal = try await first.createTagDefinition(named: "Personal", assigningTo: workEntry.entryID).definition
+        _ = try await first.apply(.setTags(workEntry.entryID, [work.id, other.id, personal.id]))
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let choices = try await second.syncTags()
+        XCTAssertEqual(Set(choices.filter(\.isSelected).map(\.id)), [work.id, other.id])
+        XCTAssertFalse(choices.contains { $0.id == personal.id })
+        let entries = try await second.page(.init()).entries
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.first { $0.id == workEntry.entryID }?.tagIDs, [work.id, other.id])
+        await first.retrySync()
+        await second.retrySync()
+        let replayed = try await second.page(.init()).entries
+        XCTAssertEqual(replayed.count, 2)
     }
 
     func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
@@ -677,7 +852,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
     private func makeModule(
         services: ClipboardSyncServices, keyByte: UInt8, time: TimeInterval,
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
-        faults: ClipboardHistoryFaultInjector = .init()
+        faults: ClipboardHistoryFaultInjector = .init(),
+        recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-sync-\(UUID())")
@@ -687,6 +863,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
             keyStore: SyncTestLocalKeyStore(byte: keyByte),
             faultInjector: faults,
             now: clock ?? { Date(timeIntervalSince1970: time) },
+            visionRecognizer: recognizer,
             syncServices: services
         ))
     }
@@ -727,6 +904,25 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries.map(\.id), [captured.entryID])
     }
+
+    @MainActor
+    private func makeSyncBitmap() throws -> Data {
+        let image = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 16,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let color = NSColor(deviceRed: 1, green: 0.4, blue: 0.1, alpha: 1)
+        for y in 0..<16 { for x in 0..<32 { image.setColor(color, atX: x, y: y) } }
+        return try XCTUnwrap(image.representation(using: .png, properties: [:]))
+    }
+}
+
+private actor SyncTestRecognizer: ClipboardHistoryVisionRecognizing {
+    private var calls = 0
+    func recognize(_ kind: ClipboardHistoryDerivedJobKind, in bitmaps: [Data]) -> [String] {
+        calls += 1
+        return []
+    }
+    func callCount() -> Int { calls }
 }
 
 private struct SyncTestLocalKeyStore: ClipboardHistoryMasterKeyStoring {
@@ -758,6 +954,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var fileBodyDownloads = 0
     func damageNextFileBodyDownload() { damagesFileBody = true }
     func fileBodyDownloadCount() -> Int { fileBodyDownloads }
+    private var reversesDelivery = false
+    func reverseDelivery() { reversesDelivery = true }
 
     func account() throws -> ClipboardSyncAccount {
         reads += 1
@@ -797,7 +995,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
-        return ClipboardSyncChanges(records: uploads.dropFirst(offset).map(\.record),
+        let page = uploads.dropFirst(offset).map(\.record)
+        return ClipboardSyncChanges(records: reversesDelivery ? page.reversed() : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {

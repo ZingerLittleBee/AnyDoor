@@ -821,7 +821,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    fileprivate struct RepresentationPosition: Hashable {
+    struct RepresentationPosition: Hashable {
         let itemIndex: Int
         let representationIndex: Int
     }
