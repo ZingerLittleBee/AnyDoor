@@ -48,10 +48,9 @@ extension ClipboardHistoryModule {
             guard try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_tag_definitions WHERE id = ?)",
                                     arguments: [tagID]) == true else { throw ClipboardHistoryModuleError.tagDefinitionNotFound }
             let accountID = try syncSettings(in: database).accountID ?? ""
-            let current = try selectedSyncTags(accountID: accountID, in: database)
-            // The first slice enrolls one collection. Multi-selection and
-            // withdrawal are introduced with their complete lifecycle tickets.
-            guard selected, current.isEmpty || current.allSatisfy({ $0.id == tagID }) else {
+            // Final-tag withdrawal has its own lifecycle. Additional selected
+            // collections already share the same any-tag eligibility query.
+            guard selected else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             try database.execute(sql: """

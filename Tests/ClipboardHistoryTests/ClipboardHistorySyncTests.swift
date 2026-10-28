@@ -7,6 +7,103 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testIndependentTagRenamesConvergeAcrossReversedDeliveryAndRestart() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-tags-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0x75, time: 1_000, root: root)
+        let second = makeModule(services: services, keyByte: 0x76, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("renamed collections")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        try await first.setSyncEnabled(false)
+        try await second.setSyncEnabled(false)
+        _ = try await first.renameTagDefinition(id: work.id, to: "Focused work")
+        _ = try await second.renameTagDefinition(id: other.id, to: "Research")
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        await first.retrySync()
+        let expected = [work.id: "Focused work", other.id: "Research"]
+        let firstTags = try await first.syncTags()
+        let secondTags = try await second.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: firstTags.map { ($0.id, $0.displayName) }), expected)
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: secondTags.map { ($0.id, $0.displayName) }), expected)
+        await cloud.reverseDelivery()
+        let third = makeModule(services: services, keyByte: 0x77, time: 3_000)
+        try await third.setSyncEnabled(true)
+        let reversedTags = try await third.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: reversedTags.map { ($0.id, $0.displayName) }), expected)
+        let reversedEntries = try await third.page(.init()).entries
+        XCTAssertEqual(reversedEntries.first?.tagIDs, [work.id, other.id])
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x75, time: 4_000, root: root)
+        await reopened.resumeSync()
+        let reopenedTags = try await reopened.syncTags()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: reopenedTags.map { ($0.id, $0.displayName) }), expected)
+    }
+
+    func testSelectedMembershipChangesPreservePrivateTagsOnBothDevices() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x73, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x74, time: 2_000)
+        let entry = try await first.capture(.init(source: .unknown, content: .text("shared organization")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: entry.entryID).definition
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let personal = try await second.createTagDefinition(named: "Private on receiver", assigningTo: entry.entryID).definition
+        _ = try await first.apply(.setTags(entry.entryID, [other.id]))
+        await first.retrySync()
+        await second.retrySync()
+        let removed = try await second.page(.init()).entries
+        XCTAssertEqual(removed.first?.tagIDs, [other.id, personal.id])
+        _ = try await second.apply(.setTags(entry.entryID, [work.id, other.id, personal.id]))
+        await second.retrySync()
+        await first.retrySync()
+        let restored = try await first.page(.init()).entries
+        XCTAssertEqual(restored.first?.tagIDs, [work.id, other.id])
+        let firstDefinitions = try await first.tagDefinitions()
+        XCTAssertFalse(firstDefinitions.contains { $0.id == personal.id })
+        let countBeforeReplay = await cloud.currentUploads().count
+        await first.retrySync()
+        await second.retrySync()
+        let countAfterReplay = await cloud.currentUploads().count
+        XCTAssertEqual(countAfterReplay, countBeforeReplay)
+    }
+
+    func testMultipleSelectedTagsBackfillTheirUnionWithoutPrivateLabels() async throws {
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let first = makeModule(services: services, keyByte: 0x71, time: 1_000)
+        let second = makeModule(services: services, keyByte: 0x72, time: 2_000)
+        let workEntry = try await first.capture(.init(source: .unknown, content: .text("work history")))
+        let otherEntry = try await first.capture(.init(source: .unknown, content: .text("other history")))
+        let work = try await first.createTagDefinition(named: "Work", assigningTo: workEntry.entryID).definition
+        let other = try await first.createTagDefinition(named: "Other", assigningTo: otherEntry.entryID).definition
+        let personal = try await first.createTagDefinition(named: "Personal", assigningTo: workEntry.entryID).definition
+        _ = try await first.apply(.setTags(workEntry.entryID, [work.id, other.id, personal.id]))
+        try await first.setSyncTagSelected(work.id, selected: true)
+        try await first.setSyncTagSelected(other.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await second.setSyncEnabled(true)
+        let choices = try await second.syncTags()
+        XCTAssertEqual(Set(choices.filter(\.isSelected).map(\.id)), [work.id, other.id])
+        XCTAssertFalse(choices.contains { $0.id == personal.id })
+        let entries = try await second.page(.init()).entries
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.first { $0.id == workEntry.entryID }?.tagIDs, [work.id, other.id])
+        await first.retrySync()
+        await second.retrySync()
+        let replayed = try await second.page(.init()).entries
+        XCTAssertEqual(replayed.count, 2)
+    }
+
     func testDisableRevokesActivationDeferredByProviderBackoff() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -480,6 +577,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
+    private var reversesDelivery = false
+    func reverseDelivery() { reversesDelivery = true }
 
     func account() throws -> ClipboardSyncAccount {
         reads += 1
@@ -519,7 +618,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         try checkAccount(account)
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         let uploads = records[account.identifier] ?? []
-        return ClipboardSyncChanges(records: uploads.dropFirst(offset).map(\.record),
+        let page = uploads.dropFirst(offset).map(\.record)
+        return ClipboardSyncChanges(records: reversesDelivery ? page.reversed() : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
