@@ -41,7 +41,10 @@ final class ClipboardFileTree: @unchecked Sendable {
     private let scratch: URL
     private let database: DatabaseQueue
     private let rootDescriptor: Int32
-    private let rootMetadataDigest: Data
+    // Initialize before opening the source, so a throwing metadata read still
+    // destroys this fully initialized owner and closes its FD/encrypted scratch.
+    // This value is assigned only during construction.
+    private var rootMetadataDigest = Data()
 
     init(_ root: URL) throws {
         self.root = root
