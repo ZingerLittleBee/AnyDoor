@@ -56,7 +56,7 @@ extension ClipboardHistoryModule {
         try await Self.verifyPreparedFileVersion(prepared, account: basis.account, control: basis.control, key: key)
         let root = syncWorkingRoot.appendingPathComponent("Conflict Versions", isDirectory: true)
         let output = try await ClipboardSyncFilePublication.construct(descriptor: prepared.descriptor,
-            encryptedDirectory: prepared.uploadDirectory, root: root, account: basis.account, control: basis.control, key: key)
+            encryptedDirectory: prepared.uploadDirectory, root: root, account: basis.account, control: basis.control, key: key, faults: faultInjector)
         defer { ClipboardSyncFilePublication.discard(output) }
         try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
         try syncWrite { database in

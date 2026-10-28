@@ -47,10 +47,13 @@ extension ClipboardSyncFileTransfer {
         }
         try syncDirectory(directory)
         succeeded = true
+        var status = stat()
+        guard lstat(url.path, &status) == 0 else { throw ClipboardSyncServiceError.accessDenied }
         return .init(upload: .init(record: .init(recordID: "v1-\(versionID.uuidString.lowercased())", operationID: versionID,
             epoch: control.epoch, keyID: control.keyID, kind: .fileBody, chunkCount: chunks,
             encryptedByteCount: encryptedCount, digest: Data(hash.finalize())), directory: directory),
             originalByteCount: measurement.original, contentDigest: measurement.digest,
-            bodyFormat: .treeSegmentsV1, kind: .directory, encodedByteCount: measurement.encoded)
+            bodyFormat: .treeSegmentsV1, kind: status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) ? .directory : .file,
+            encodedByteCount: measurement.encoded)
     }
 }
