@@ -1,8 +1,8 @@
 // Stable release metadata resolved at build time from the mixed-channel feed.
+import { RELEASES } from './repo';
 import { latestStableRelease, latestVersion } from './version';
 
-export const REPO = 'https://github.com/ZingerLittleBee/AnyDoor';
-export const RELEASES = `${REPO}/releases`;
+export { REPO, RELEASES } from './repo';
 
 // Direct .dmg asset for the latest release. The release pipeline always
 // publishes both AnyDoor-<ver>.dmg and AnyDoor-<ver>.zip on the GitHub release.

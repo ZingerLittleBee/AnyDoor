@@ -1,18 +1,16 @@
 ---
+import { Font } from 'astro:assets';
 import '../styles/global.css';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
-import HotkeyDemo from '../components/HotkeyDemo.astro';
 import Why from '../components/Why.astro';
-import MoreFeatures from '../components/MoreFeatures.astro';
-import Toggles from '../components/Toggles.astro';
-import PortManager from '../components/PortManager.astro';
-import Actions from '../components/Actions.astro';
+import Workbench from '../components/Workbench.astro';
 import Capture from '../components/Capture.astro';
 import Settings from '../components/Settings.astro';
 import Download from '../components/Download.astro';
 import FAQ from '../components/FAQ.astro';
 import Footer from '../components/Footer.astro';
+import { RELEASES, REPO } from '../lib/repo';
 ---
 
 <!doctype html>
@@ -34,6 +32,9 @@ import Footer from '../components/Footer.astro';
         } catch (e) {}
       })();
     </script>
+    <!-- Without scripting the language stays Chinese and the switcher cannot
+         work, so hide it rather than show dead controls. -->
+    <noscript><style is:inline>[data-lang-switch] { display: none !important; }</style></noscript>
     <title>AnyDoor — 一颗按键，一扇任意门 · macOS menu bar control center</title>
     <meta name="description" content="AnyDoor is a free, open-source macOS menu bar control center driven by global hotkeys: launch and toggle apps, flip system settings, manage ports and hosts, and run built-in actions — without leaving the keyboard." />
     <link rel="canonical" href="https://anydoor.dev/" />
@@ -59,7 +60,14 @@ import Footer from '../components/Footer.astro';
     <meta name="twitter:description" content="One key. Any door. A macOS menu bar control center driven by global hotkeys." />
     <meta name="twitter:image" content="https://anydoor.dev/og.png" />
 
-    <meta name="theme-color" content="#050507" />
+    <!-- --bone (oklch(0.948 0.007 85)) in sRGB. -->
+    <meta name="theme-color" content="#f0ede9" />
+
+    <!-- Self-hosted fonts (astro.config.mjs `fonts`). Preload only the Latin
+         faces used above the fold; CJK slices load on demand. -->
+    <Font cssVariable="--font-plex-sans" preload={[{ weight: 400, subset: 'latin' }, { weight: 600, subset: 'latin' }]} />
+    <Font cssVariable="--font-plex-mono" preload={[{ weight: 500, subset: 'latin' }]} />
+    <Font cssVariable="--font-noto-sc" />
 
     <script type="application/ld+json" set:html={JSON.stringify({
       '@context': 'https://schema.org',
@@ -68,51 +76,27 @@ import Footer from '../components/Footer.astro';
       applicationCategory: 'UtilitiesApplication',
       operatingSystem: 'macOS 14+',
       url: 'https://anydoor.dev/',
-      downloadUrl: 'https://github.com/ZingerLittleBee/AnyDoor/releases',
-      sameAs: ['https://github.com/ZingerLittleBee/AnyDoor'],
-      license: 'https://github.com/ZingerLittleBee/AnyDoor/blob/main/LICENSE',
+      downloadUrl: RELEASES,
+      sameAs: [REPO],
+      license: `${REPO}/blob/main/LICENSE`,
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     })} />
   </head>
   <body>
-    <div class="cursor-glow" id="cursor-glow"></div>
+    <div class="page">
+      <Nav />
 
-    <Nav />
+      <main id="top">
+        <Hero />
+        <Why />
+        <Workbench />
+        <Capture />
+        <Settings />
+        <Download />
+        <FAQ />
+      </main>
 
-    <main>
-      <Hero />
-      <HotkeyDemo />
-      <Why />
-      <MoreFeatures />
-      <Toggles />
-      <PortManager />
-      <Actions />
-      <Capture />
-      <Settings />
-      <Download />
-      <FAQ />
-    </main>
-
-    <Footer />
-
-    <script>
-      // Cursor glow follows pointer — one compositor-only write per frame, and
-      // only on fine pointers when the user hasn't asked to reduce motion.
-      const glow = document.getElementById('cursor-glow');
-      const finePointer = window.matchMedia('(pointer: fine)').matches;
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (glow && finePointer && !reduceMotion) {
-        let x = 0, y = 0, raf = 0;
-        window.addEventListener('mousemove', (e) => {
-          x = e.clientX; y = e.clientY;
-          if (!raf) raf = requestAnimationFrame(() => {
-            glow.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
-            raf = 0;
-          });
-        }, { passive: true });
-      } else if (glow) {
-        glow.style.display = 'none';
-      }
-    </script>
+      <Footer />
+    </div>
   </body>
 </html>

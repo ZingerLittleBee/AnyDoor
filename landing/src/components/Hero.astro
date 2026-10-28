@@ -1,59 +1,68 @@
 ---
-import MenuPanel from './MenuPanel.astro';
-import { icons } from '../lib/icons';
-import { copy } from '../lib/copy';
+// Hero copy beside the interactive hotkey unit (#demo).
+import Bi from './Bi.astro';
+import HotkeyUnit from './HotkeyUnit.astro';
+import { hero } from '../lib/content/hero';
+import { dmgUrl, REPO } from '../lib/release';
 import { latestVersion } from '../lib/version';
 ---
 
-<section class="hero container-x">
-  <div>
-    <div class="eyebrow">
-      <span class="dot" />
-      <span data-i18n-zh>{copy.hero.eyebrow.zh}</span><span data-i18n-en>{copy.hero.eyebrow.en}</span>
-    </div>
-    <h1 class="hero-h">
-      <span class="gradient-text"><span data-i18n-zh>{copy.hero.h1a.zh}</span><span data-i18n-en>{copy.hero.h1a.en}</span></span><br />
-      <span class="accent-text"><span data-i18n-zh>{copy.hero.h1b.zh}</span><span data-i18n-en>{copy.hero.h1b.en}</span></span>
-    </h1>
-    <p class="lede">
-      <span data-i18n-zh>{copy.hero.lede.zh}</span><span data-i18n-en>{copy.hero.lede.en}</span>
-    </p>
-
-    <div class="hero-cta">
-      <a class="btn-primary" href="https://github.com/ZingerLittleBee/AnyDoor/releases" target="_blank" rel="noreferrer">
-        <span set:html={icons.bolt()} style="width:16px;height:16px" />
-        <span data-i18n-zh>{copy.hero.ctaPrimary.zh}{latestVersion}</span><span data-i18n-en>{copy.hero.ctaPrimary.en}{latestVersion}</span>
-      </a>
-      <a class="btn-secondary" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">
-        <span set:html={icons.github()} style="width:16px;height:16px" />
-        <span data-i18n-zh>{copy.hero.ctaSecondary.zh}</span><span data-i18n-en>{copy.hero.ctaSecondary.en}</span>
-      </a>
+<section class="hero wrap">
+  <div class="hero-grid">
+    <div class="hero-copy">
+      <div class="spec"><span>{hero.model}</span><span>{hero.rev}{latestVersion}</span><span>{hero.system}</span><span>{hero.arch}</span></div>
+      <p class="eyebrow"><Bi text={hero.eyebrow} /></p>
+      <h1 class="h1">
+        <span class="ln"><Bi text={hero.h1a} /></span>
+        <span class="ln"><Bi text={hero.h1b} /></span>
+        <span class="ln"><span class="tape"><Bi text={hero.h1c} /></span></span>
+      </h1>
+      <p class="lede"><Bi text={hero.lede} /></p>
+      <div class="cta-row">
+        <a class="btn btn-sig" href={dmgUrl}><Bi text={{ zh: hero.ctaPrimary.zh + latestVersion, en: hero.ctaPrimary.en + latestVersion }} /><span class="k">.dmg</span></a>
+        <a class="btn" href={REPO} target="_blank" rel="noreferrer"><Bi text={hero.ctaSecondary} /></a>
+      </div>
+      <ul class="meta">
+        {hero.meta.map((m) => <li><Bi text={m} /></li>)}
+      </ul>
     </div>
 
-    <div class="hero-meta">
-      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta1.zh}</span><span data-i18n-en>{copy.hero.meta1.en}</span></span>
-      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta2.zh}</span><span data-i18n-en>{copy.hero.meta2.en}</span></span>
-      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta3.zh}</span><span data-i18n-en>{copy.hero.meta3.en}</span></span>
-    </div>
-
-    <div class="feature-pills">
-      {copy.hero.pills.zh.map((p, i) => (
-        <span>
-          <span data-i18n-zh>{p}</span><span data-i18n-en>{copy.hero.pills.en[i]}</span>
-        </span>
-      ))}
-    </div>
-  </div>
-
-  <div class="hero-stage">
-    <div class="menubar-strip">
-      <span class="mb-apple" />
-      <span class="mb-right">
-        <img class="mb-door" src="/menubar-icon.png" alt="" style="width:15px;height:15px" />
-        <span>9:41</span>
-      </span>
-    </div>
-
-    <MenuPanel panelClass="" />
+    <HotkeyUnit />
   </div>
 </section>
+
+<style>
+  .hero { padding-block: clamp(28px, 4.5vw, 64px) clamp(48px, 6vw, 84px); }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 5.2fr) minmax(0, 7.2fr); gap: clamp(28px, 4vw, 60px); align-items: center; }
+  .spec { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 11px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); padding-bottom: 12px; border-bottom: 1px solid var(--rule); margin-bottom: clamp(24px, 3vw, 36px); }
+  .spec span + span::before { content: "/"; margin-right: 16px; color: var(--steel-2); }
+  .h1 { font-size: clamp(42px, 4.6vw, 68px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 600; }
+  :global(html[data-lang="zh"]) .h1 { letter-spacing: -0.015em; line-height: 1.14; }
+  .h1 .ln { display: block; }
+  .h1 .ln:last-child { margin-top: 0.12em; }
+  /* English gives the taped last line more room. */
+  :global(html[data-lang="en"]) .h1 .ln:last-child { margin-top: 0.22em; }
+  .h1 .tape { display: inline; background: var(--sig); color: var(--on-sig); padding: 0 0.14em; margin-left: -0.04em; border-radius: 0.08em; box-shadow: 0 0.06em 0 var(--sig-lo); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .hero .lede { margin-top: 26px; font-size: 17.5px; max-width: 44ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 32px; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 24px; font: 500 12px/1.3 var(--mono); color: var(--ink-2); }
+  .hero .meta li { display: flex; align-items: center; gap: 8px; }
+  .hero .meta li::before { content: ""; width: 5px; height: 5px; background: var(--ink); border-radius: 1px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-copy > * { animation: rise 520ms var(--ease) both; }
+    .hero-copy > *:nth-child(2) { animation-delay: 50ms; }
+    .hero-copy > *:nth-child(3) { animation-delay: 100ms; }
+    .hero-copy > *:nth-child(4) { animation-delay: 150ms; }
+    .hero-copy > *:nth-child(5) { animation-delay: 200ms; }
+    .hero-copy > *:nth-child(6) { animation-delay: 250ms; }
+  }
+
+  @media (max-width: 1080px) {
+    .hero-grid { grid-template-columns: minmax(0, 1fr); }
+    .hero .lede { max-width: 60ch; }
+  }
+  @media (max-width: 640px) {
+    .spec span:last-child { display: none; }
+  }
+</style>
