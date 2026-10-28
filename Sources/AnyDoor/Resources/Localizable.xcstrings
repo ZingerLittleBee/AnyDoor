@@ -14755,6 +14755,499 @@
           }
         }
       }
+    },
+    "settings.clipboard.sync.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard Sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板同步"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable iCloud sync on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在这台 Mac 上开启 iCloud 同步"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share plain-text history across Macs using the same Apple Account. Enable sync separately on each Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在使用同一 Apple 账户的 Mac 间同步纯文本历史。每台 Mac 都需要单独开启同步。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.backfill": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecting a tag shares its existing and future plain-text entries. Received history does not replace the current clipboard."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择标签后，会同步该标签下已有和之后新增的纯文本记录。收到的历史不会替换当前剪贴板。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.tag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Tag"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步标签"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.chooseTag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a tag"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择标签"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.tagCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (%lld text entries)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@（%lld 条文本记录）"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.noTags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a tag to a text entry in Clipboard History, then return here."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先在剪贴板历史中为文本记录添加标签，再返回这里。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.selectedTagHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To pause sharing from this Mac, turn off iCloud sync above."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "如需暂停这台 Mac 的同步，请关闭上方的 iCloud 同步开关。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.counts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploaded %lld · Received %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已上传 %lld 条 · 已接收 %lld 条"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.lastCompleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次完成"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.operationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard Sync could not complete the request. Retry to check its current state."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板同步无法完成请求。请重试以检查当前状态。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 的同步已关闭"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.connecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecting to iCloud…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在连接 iCloud…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.waitingForAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for your iCloud account. Check iCloud in System Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在等待 iCloud 账户。请在系统设置中检查 iCloud。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.waitingForKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for the sync key from iCloud Keychain."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在等待 iCloud 钥匙串中的同步密钥。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.keyLocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlock your keychain, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请解锁钥匙串后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.accessDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud or Keychain access was denied. Allow access, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 或钥匙串访问被拒绝。请允许访问后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.capabilityUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This installation cannot use iCloud sync. Install an AnyDoor build that supports iCloud."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前安装版本无法使用 iCloud 同步。请安装支持 iCloud 的 AnyDoor 版本。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.transferring": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing selected text history…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在同步所选文本历史…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.status.upToDate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync is up to date"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步已更新"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to connect. Check your network, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接。请检查网络后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.quota": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud storage is full. Free up space, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 储存空间已满。请释放空间后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.storage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to save on this Mac. Check available storage, then retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法在这台 Mac 上保存。请检查可用储存空间后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.corruptData": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sync data could not be verified and was not added to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分同步数据无法验证，未被添加到历史。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.recoveryRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sync key could not be recovered. Restore access through iCloud Keychain; your cloud data is unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法恢复同步密钥。请通过 iCloud 钥匙串恢复访问；云端数据未被更改。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.accountChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Apple Account changed. Enable sync for this account to continue."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 账户已更改。请为此账户开启同步以继续。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.failure.unsupportedVersion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This sync data needs a newer version of AnyDoor."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此同步数据需要更新版本的 AnyDoor。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
