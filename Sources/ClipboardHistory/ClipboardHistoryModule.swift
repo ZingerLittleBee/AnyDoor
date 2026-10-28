@@ -102,6 +102,7 @@ public actor ClipboardHistoryModule {
     var syncServices: ClipboardSyncServices?
     var syncPhase: ClipboardHistorySyncPhase = .disabled
     var syncGeneration: UInt64 = 0
+    var activeFileConflictResolutions: Set<UUID> = []
     var syncTask: Task<Void, Never>?
     var syncPollTask: Task<Void, Never>?
     var linkedFileObservers: [UUID: ClipboardLinkedFileObservation] = [:]

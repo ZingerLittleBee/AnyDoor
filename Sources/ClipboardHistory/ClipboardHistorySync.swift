@@ -174,7 +174,7 @@ extension ClipboardHistoryModule {
         await retrySync()
     }
 
-    private func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+    func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
                                     state initial: ClipboardSyncAccountState, services: ClipboardSyncServices,
                                     generation: UInt64) async throws -> ClipboardSyncAccountState {
         var state = initial
@@ -329,6 +329,7 @@ extension ClipboardHistoryModule {
             state = try await receiveSyncChanges(account: account, control: control, key: key,
                 state: state, services: services, generation: generation)
             try syncWrite { try Self.seedInitialLinkedFileLocations(in: $0) }
+            try await resumeFileConflictResolutions(account: account, control: control)
             try await reconcileLinkedFileObservations(account: account, control: control, generation: generation)
             try await receivePendingSyncFiles(account: account, control: control, key: key,
                 services: services, generation: generation)
@@ -428,6 +429,7 @@ extension ClipboardHistoryModule {
             }
             state.lastCompletedAt = now()
             try acknowledgeLinkedFileVersions(account: account, control: control)
+            try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
             await finishSync(.upToDate, generation: generation)
         } catch is CancellationError {

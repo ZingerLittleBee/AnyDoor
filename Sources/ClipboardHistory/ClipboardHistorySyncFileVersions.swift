@@ -77,31 +77,21 @@ extension ClipboardHistoryModule {
             throw ClipboardSyncServiceError.keyUnavailable
         }
         try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-        let bookmark = try sourceURL.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil)
         let versionID = UUID()
-        let frozen = try await ClipboardSyncFileTransfer.freeze(url: sourceURL, bookmark: bookmark, identity: expectedSourceIdentity,
-            directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
-            account: account, control: control, key: key, objectID: objectID, versionID: versionID)
+        let prepared = try await prepareFileVersion(sourceURL: sourceURL, objectID: objectID, versionID: versionID,
+            publicationID: UUID(), parents: parents, expectedSourceIdentity: expectedSourceIdentity,
+            displayName: displayName, account: account, control: control, key: key)
         var stored = false
-        defer { if !stored { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
+        defer { if !stored { try? FileManager.default.removeItem(at: prepared.uploadDirectory) } }
         try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         guard try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
-        let descriptor = ClipboardSyncFileDescriptor(objectID: objectID, versionID: versionID,
-            displayName: displayName, originalByteCount: frozen.originalByteCount,
-            contentDigest: frozen.contentDigest, body: frozen.upload.record, state: .available, bodyFormat: .segmentsV1)
-        let event = try ClipboardSyncCodec.seal(.fileVersion(.init(descriptor: descriptor, parents: parents)),
-            account: account, control: control, key: key)
         try syncWrite { database in
             guard try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents, in: database) else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
-            try storeSyncFileUpload(frozen.upload, objectID: objectID, account: account, in: database)
-            try storeSyncFileDescriptor(descriptor, account: account, epoch: control.epoch,
-                localPath: sourceURL.path, bookmark: bookmark, identity: expectedSourceIdentity,
-                transferState: "complete", parents: parents, publicationRecordID: event.record.recordID, in: database)
-            try storeSyncUpload(event, subjectID: objectID.uuidString, account: account, in: database)
+            try storePreparedFileVersion(prepared, account: account, control: control, in: database)
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)
         }

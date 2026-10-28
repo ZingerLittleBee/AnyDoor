@@ -25,6 +25,19 @@ extension ClipboardHistoryModule {
                 id TEXT PRIMARY KEY NOT NULL, account_id TEXT NOT NULL,
                 epoch TEXT NOT NULL, object_id TEXT NOT NULL, snapshot BLOB NOT NULL
             ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_file_resolutions (
+                plan_id TEXT PRIMARY KEY NOT NULL REFERENCES clipboard_sync_file_conflict_plans(id),
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL,
+                phase TEXT NOT NULL, journal BLOB NOT NULL
+            ) WITHOUT ROWID;
+            CREATE UNIQUE INDEX clipboard_sync_file_resolution_active
+                ON clipboard_sync_file_resolutions(account_id, epoch, object_id)
+                WHERE phase IN ('preparing', 'staged');
+            CREATE TABLE clipboard_sync_file_conflict_pins (
+                plan_id TEXT NOT NULL REFERENCES clipboard_sync_file_conflict_plans(id),
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, object_id TEXT NOT NULL, version_id TEXT NOT NULL,
+                PRIMARY KEY(plan_id, version_id)
+            ) WITHOUT ROWID;
             """)
     }
 
@@ -50,7 +63,7 @@ extension ClipboardHistoryModule {
         let versionProofs = Dictionary(uniqueKeysWithValues: inspected.1)
         let locations = basis.locations.map { location in
             let proof = saved[location.id] ?? nil
-            return ClipboardSyncFileConflictLocation(id: location.id, path: location.url.path, identity: location.identity,
+            return ClipboardSyncFileConflictLocation(id: location.id, path: location.url.path, identity: location.identity, revision: location.revision,
                 baseVersionID: location.baseVersionID, baseDigest: location.baseDigest, state: location.state.rawValue,
                 savedDigest: proof?.digest, byteCount: proof?.byteCount)
         }
@@ -68,7 +81,7 @@ extension ClipboardHistoryModule {
                 localURL: available ? proof?.url : nil))
         }
         let nodes = basis.nodes
-        let complete = basis.heads.allSatisfy { ClipboardSyncVersionGraph.isComplete($0, nodes: nodes) }
+        let complete = !nodes.isEmpty && nodes.allSatisfy { ClipboardSyncVersionGraph.isComplete($0.id, nodes: nodes) }
         guard candidates.count > 1 || basis.locations.contains(where: { $0.state == .conflict }) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
@@ -120,7 +133,7 @@ extension ClipboardHistoryModule {
             sources.contains { source in
                 source.id == location.id && source.identity == location.identity && source.url.path == location.path
                     && source.baseVersionID == location.baseVersionID && source.baseDigest == location.baseDigest
-                    && source.state.rawValue == location.state
+                    && source.state.rawValue == location.state && source.revision == location.revision
             }
         }
     }

@@ -9,6 +9,11 @@ public enum ClipboardHistoryFileConflictAvailability: String, Codable, Sendable 
     case available, requiresDownload, unavailable
 }
 
+public enum ClipboardHistoryFileConflictError: Error, Equatable, Sendable {
+    case stalePlan, incompleteAncestry, candidateUnavailable
+    case downloadRequired(UUID)
+}
+
 public struct ClipboardHistoryFileConflictCandidate: Equatable, Sendable, Identifiable {
     public let id: ClipboardHistoryFileConflictChoice
     public let originalByteCount: Int64?
@@ -31,6 +36,7 @@ struct ClipboardSyncFileConflictLocation: Codable, Equatable, Sendable {
     let id: UUID
     let path: String
     let identity: Data
+    let revision: UInt64
     let baseVersionID: UUID
     let baseDigest: Data
     let state: String

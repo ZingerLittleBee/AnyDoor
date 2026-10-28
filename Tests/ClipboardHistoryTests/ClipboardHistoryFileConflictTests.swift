@@ -6,6 +6,38 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testChoosingLocalConflictPublishesOneMergeAndConvergesWithoutRecapture() async throws {
+        let fixture = try await makeLinkedFixture()
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        try await fixture.sender.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false)
+        try Data("original competing edit".utf8).write(to: fixture.original)
+        let chosen = Data("chosen local working edit".utf8)
+        try chosen.write(to: working.url)
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let plan = try await fixture.receiver.fileConflictPlan(entryID: fixture.entryID, objectID: working.objectID)
+
+        let result = try await fixture.receiver.resolveFileConflict(plan, choosing: .localLocation(working.id))
+        await fixture.sender.retrySync()
+
+        XCTAssertEqual(try Data(contentsOf: fixture.original), chosen)
+        XCTAssertEqual(try Data(contentsOf: working.url), chosen)
+        let senderPage = try await fixture.sender.page(.init())
+        let receiverPage = try await fixture.receiver.page(.init())
+        XCTAssertEqual(senderPage.entries.map(\.id), [fixture.entryID])
+        XCTAssertEqual(receiverPage.entries.map(\.id), [fixture.entryID])
+        XCTAssertEqual(senderPage.entries.first?.syncFiles.first?.versionID, result)
+        XCTAssertEqual(receiverPage.entries.first?.linkedFileLocations.first?.state, .current)
+        let beforeReplay = await fixture.cloud.uploadCount()
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let afterReplay = await fixture.cloud.uploadCount()
+        XCTAssertEqual(afterReplay, beforeReplay)
+    }
+
+    @MainActor
     func testOfflineDivergenceExposesBothContentsAndSurvivesRestart() async throws {
         let fixture = try await makeLinkedFixture()
         let initial = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
