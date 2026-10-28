@@ -1,6 +1,166 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "clipboard.sync.fileLocalUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local working file unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地工作文件不可用" } }
+      }
+    },
+    "clipboard.sync.filesPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files are not available on this Mac yet. The whole entry must be ready before copying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件尚未在这台 Mac 上就绪。整条记录就绪后才能复制。"
+          }
+        }
+      }
+    },
+    "clipboard.fileExport.collision": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A file already exists at the chosen location. Choose another name."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选位置已存在文件，请选择其他名称。"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileSourceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original file unavailable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原文件不可用"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileUnsupportedKind": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This file type is waiting for sync support"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此文件类型尚待同步支持"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForUpload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file upload"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待上传文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileWaitingForDownload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for file download"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待下载文件"
+          }
+        }
+      }
+    },
+    "clipboard.sync.fileAvailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File available on this Mac"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已在这台 Mac 上就绪"
+          }
+        }
+      }
+    },
+    "clipboard.action.openFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开"
+          }
+        }
+      }
+    },
+    "clipboard.action.saveFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save As…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另存为…"
+          }
+        }
+      }
+    },
     "capture.pinned.disableClickThrough": {
       "extractionState": "manual",
       "localizations": {
@@ -14915,13 +15075,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Share plain-text history across Macs using the same Apple Account. Enable sync separately on each Mac."
+            "value": "Share clipboard history across Macs using the same Apple Account. Enable sync separately on each Mac."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在使用同一 Apple 账户的 Mac 间同步纯文本历史。每台 Mac 都需要单独开启同步。"
+            "value": "在使用同一 Apple 账户的 Mac 间同步剪贴板历史。每台 Mac 都需要单独开启同步。"
           }
         }
       }
@@ -14932,13 +15092,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Selecting a tag shares its existing and future plain-text entries. Received history does not replace the current clipboard."
+            "value": "Selecting a tag shares its existing and future entries. Received history does not replace the current clipboard."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择标签后，会同步该标签下已有和之后新增的纯文本记录。收到的历史不会替换当前剪贴板。"
+            "value": "选择标签后，会同步该标签下已有和之后新增的记录。收到的历史不会替换当前剪贴板。"
           }
         }
       }
@@ -14983,13 +15143,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ (%lld text entries)"
+            "value": "%@ (%lld entries)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@（%lld 条文本记录）"
+            "value": "%@（%lld 条记录）"
           }
         }
       }
@@ -15000,13 +15160,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Add a tag to a text entry in Clipboard History, then return here."
+            "value": "Add a tag to an entry in Clipboard History, then return here."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "先在剪贴板历史中为文本记录添加标签，再返回这里。"
+            "value": "先在剪贴板历史中为记录添加标签，再返回这里。"
           }
         }
       }
@@ -15238,13 +15398,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Syncing selected text history…"
+            "value": "Syncing selected clipboard history…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在同步所选文本历史…"
+            "value": "正在同步所选剪贴板历史…"
           }
         }
       }
