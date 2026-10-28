@@ -1,4 +1,6 @@
 import ClipboardHistoryTestSupport
+import AppKit
+import Darwin
 import Foundation
 import XCTest
 
@@ -7,6 +9,48 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsModelTests: XCTestCase {
+    func testDeniedWorkingFolderShowsLocalAccessGuidanceInSettingsAndFileControls() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-permission-ui-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let working = root.appendingPathComponent("Working Copies")
+        try FileManager.default.createDirectory(at: working, withIntermediateDirectories: true)
+        XCTAssertEqual(chmod(working.path, 0o500), 0)
+        defer { _ = chmod(working.path, 0o700) }
+        let services = ClipboardSyncServices(transport: SharingSettingsSyncTransport(),
+            keys: SharingSettingsSyncKeys(), pollingInterval: nil)
+        let sender = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root.appendingPathComponent("Sender"),
+            keyStore: SettingsSyncLocalKeyStore(), syncServices: services))
+        let receiver = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root.appendingPathComponent("Receiver"),
+            keyStore: SettingsSyncLocalKeyStore(), syncServices: services, testingSyncWorkingRoot: working))
+        let source = root.appendingPathComponent("Source.txt")
+        try Data("file permission guidance".utf8).write(to: source)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.permission-test.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString(source.absoluteString, forType: .fileURL)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        guard case .captured(let captured) = try await sender.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected an isolated file capture")
+        }
+        let tag = try await sender.createTagDefinition(named: "Files", assigningTo: captured.entryID).definition
+        try await sender.setSyncTagSelected(tag.id, selected: true)
+        try await sender.setSyncEnabled(true)
+        let model = ClipboardSyncSettingsModel(module: receiver)
+
+        await model.setEnabled(true)
+
+        XCTAssertEqual(model.status.phase, .failed(.localFileAccessDenied))
+        XCTAssertEqual(model.status.phase.presentationMessageKey, .settingsClipboardSyncFileAccessDenied)
+        XCTAssertNil(model.recoveryHelpURL)
+        let page = try await receiver.page(.init())
+        let failure = try XCTUnwrap(page.entries.first?.syncFiles.first?.transferFailure)
+        XCTAssertEqual(failure, .localFileAccessDenied)
+        XCTAssertEqual(failure.presentationMessageKey, .settingsClipboardSyncFileAccessDenied)
+        XCTAssertNotEqual(L(failure.presentationMessageKey), L(.settingsClipboardSyncStorageFailure))
+        XCTAssertNotEqual(L(failure.presentationMessageKey), L(.settingsClipboardSyncAccessDenied))
+    }
+
     func testSettingsCanWithdrawAndRejoinTheLastTagWhileShowingItsLocalScope() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         removeClipboardHistoryDirectoryAfterTest(directory)

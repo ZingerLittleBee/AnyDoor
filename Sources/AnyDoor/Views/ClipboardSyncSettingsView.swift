@@ -245,26 +245,6 @@ struct ClipboardSyncSettingsView: View {
     }
 
     private var statusKey: L10n.Key {
-        switch model.status.cloudReset?.failure ?? model.status.phase {
-        case .disabled: .settingsClipboardSyncDisabled
-        case .connecting: .settingsClipboardSyncConnecting
-        case .waitingForAccount: .settingsClipboardSyncWaitingForAccount
-        case .waitingForKey: .settingsClipboardSyncWaitingForKey
-        case .keyLocked: .settingsClipboardSyncKeyLocked
-        case .accessDenied: .settingsClipboardSyncAccessDenied
-        case .capabilityUnavailable: .settingsClipboardSyncCapabilityUnavailable
-        case .transferring: .settingsClipboardSyncTransferring
-        case .upToDate: .settingsClipboardSyncUpToDate
-        case .failed(let failure):
-            switch failure {
-            case .network: .settingsClipboardSyncNetworkFailure
-            case .quota: .settingsClipboardSyncQuotaFailure
-            case .localStorage: .settingsClipboardSyncStorageFailure
-            case .corruptData: .settingsClipboardSyncCorruptData
-            case .recoveryRequired: .settingsClipboardSyncRecoveryRequired
-            case .accountChanged: .settingsClipboardSyncAccountChanged
-            case .unsupportedVersion: .settingsClipboardSyncUnsupportedVersion
-            }
-        }
+        (model.status.cloudReset?.failure ?? model.status.phase).presentationMessageKey
     }
 }

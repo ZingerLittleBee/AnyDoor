@@ -501,6 +501,7 @@ extension ClipboardHistoryModule {
     }
 
     func syncFailurePhase(_ error: Error) -> ClipboardHistorySyncPhase {
+        if ClipboardSyncFileErrors.isAccessDenied(error) { return .failed(.localFileAccessDenied) }
         guard let error = error as? ClipboardSyncServiceError else { return .failed(.localStorage) }
         switch error {
         case .accountUnavailable: return .waitingForAccount
@@ -512,6 +513,7 @@ extension ClipboardHistoryModule {
         case .network, .conflict: return .failed(.network)
         case .quota: return .failed(.quota)
         case .localStorage: return .failed(.localStorage)
+        case .localFileAccessDenied: return .failed(.localFileAccessDenied)
         case .recordUnavailable: return .failed(.network)
         case .missingRemoteState: return .failed(.recoveryRequired)
         case .corruptData: return .failed(.corruptData)

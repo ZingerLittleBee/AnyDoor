@@ -1,6 +1,13 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.clipboard.sync.failure.fileAccess": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Can't access a file or folder on this Mac. Check file permissions and AnyDoor's access in System Settings, then retry." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法访问这台 Mac 上的文件或文件夹。请检查文件权限及系统设置中的 AnyDoor 访问权限，然后重试。" } }
+      }
+    },
       "clipboard.linkedFile.reassociate": {
         "extractionState": "manual",
         "localizations": {

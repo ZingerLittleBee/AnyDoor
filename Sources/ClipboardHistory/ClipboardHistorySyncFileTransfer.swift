@@ -27,24 +27,25 @@ enum ClipboardSyncFileTransfer {
 
     static func readSegment(in directory: URL, index: Int) throws -> Data {
         let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard parent >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(parent) }
         let descriptor = openat(parent, "\(index).ciphertext", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(descriptor) }
         return try readEncryptedDescriptor(descriptor)
     }
 
     static func readAsset(at url: URL) throws -> Data {
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(descriptor) }
         return try readEncryptedDescriptor(descriptor)
     }
 
     private static func readEncryptedDescriptor(_ descriptor: Int32) throws -> Data {
         var status = stat()
-        guard fstat(descriptor, &status) == 0, status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+        guard fstat(descriptor, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
               status.st_size >= 28, status.st_size <= maximumEncryptedSegmentBytes else {
             throw ClipboardSyncServiceError.corruptData
         }
@@ -64,7 +65,7 @@ enum ClipboardSyncFileTransfer {
                     objectID: objectID, versionID: versionID)
             }
         }
-        if coordinationError != nil { throw ClipboardSyncServiceError.accessDenied }
+        if let coordinationError { throw coordinationError }
         guard let result else { throw ClipboardSyncServiceError.localStorage }
         return try result.get()
     }
@@ -77,10 +78,11 @@ enum ClipboardSyncFileTransfer {
                 account: account, control: control, key: key, objectID: objectID, versionID: versionID)
         }
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else { throw ClipboardSyncServiceError.accessDenied }
+        guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(descriptor) }
         var before = stat()
-        guard fstat(descriptor, &before) == 0, before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+        guard fstat(descriptor, &before) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
               before.st_size >= 0 else { throw ClipboardSyncServiceError.accessDenied }
         guard try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
             throw ClipboardSyncServiceError.accessDenied
@@ -113,8 +115,10 @@ enum ClipboardSyncFileTransfer {
         }
         var after = stat()
         var atPath = stat()
-        guard fstat(descriptor, &after) == 0, lstat(url.path, &atPath) == 0,
-              sameSnapshot(before, after), sameSnapshot(after, atPath),
+        guard fstat(descriptor, &after) == 0, lstat(url.path, &atPath) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        guard sameSnapshot(before, after), sameSnapshot(after, atPath),
               try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
             throw ClipboardSyncServiceError.accessDenied
         }
@@ -132,38 +136,38 @@ enum ClipboardSyncFileTransfer {
             throw ClipboardSyncServiceError.corruptData
         }
         let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard parent >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(parent) }
         let temporary = "\(UUID().uuidString).partial"
         let descriptor = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(descriptor); _ = unlinkat(parent, temporary, 0) }
         try bytes.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {
                 let written = Darwin.write(descriptor, buffer.baseAddress?.advanced(by: offset), buffer.count - offset)
                 if written < 0, errno == EINTR { continue }
-                guard written > 0 else { throw ClipboardSyncServiceError.localStorage }
+                guard written > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(written == 0 ? EIO : errno) }
                 offset += written
             }
         }
-        guard fsync(descriptor) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard fsync(descriptor) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         guard linkat(parent, temporary, parent, "\(index).ciphertext", 0) == 0,
-              fsync(parent) == 0 else { throw ClipboardSyncServiceError.localStorage }
+              fsync(parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
     }
 
     static func removeSegment(in directory: URL, index: Int) throws {
         let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard parent >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard parent >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(parent) }
-        guard unlinkat(parent, "\(index).ciphertext", 0) == 0 || errno == ENOENT else { throw ClipboardSyncServiceError.localStorage }
+        guard unlinkat(parent, "\(index).ciphertext", 0) == 0 || errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
     }
 
     static func syncDirectory(_ directory: URL) throws {
         let descriptor = open(directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard descriptor >= 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard descriptor >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { close(descriptor) }
-        guard fsync(descriptor) == 0 else { throw ClipboardSyncServiceError.localStorage }
+        guard fsync(descriptor) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
     }
 
     private static func read(_ descriptor: Int32, count: Int, offset: Int64) throws -> Data {
@@ -173,7 +177,7 @@ enum ClipboardSyncFileTransfer {
             while filled < count {
                 let received = pread(descriptor, buffer.baseAddress?.advanced(by: filled), count - filled, off_t(offset + Int64(filled)))
                 if received < 0, errno == EINTR { continue }
-                guard received > 0 else { throw ClipboardSyncServiceError.localStorage }
+                guard received > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(received == 0 ? EIO : errno) }
                 filled += received
             }
         }

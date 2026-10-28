@@ -424,6 +424,11 @@ extension ClipboardHistoryModule {
                     UPDATE clipboard_sync_file_auto_candidates SET completed = 1
                     WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
                     """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_downloads SET failure = NULL
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString,
+                        descriptor.objectID.uuidString, descriptor.versionID.uuidString])
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
