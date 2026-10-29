@@ -137,6 +137,20 @@ struct ClipboardSyncSettingsView: View {
                 .font(.caption)
             }
 
+            if model.status.canRecoverMissingCloudCollection {
+                LocalizedText(.settingsClipboardSyncMissingCollection)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L(.settingsClipboardSyncNewCollectionAction)) {
+                    Task { await model.prepareMissingCollectionRecovery() }
+                }
+                .disabled(!isStoreReady || model.isPerformingAction)
+            } else if model.didRecoverMissingCollection && !model.status.isEnabled {
+                LocalizedText(.settingsClipboardSyncNewCollectionPrepared)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if model.status.uploadedEntryCount > 0
                 || model.status.receivedEntryCount > 0
             {
@@ -226,6 +240,17 @@ struct ClipboardSyncSettingsView: View {
         } message: { preview in
             Text(L(.settingsClipboardSyncMergeScope, preview.displayName, preview.newlyEligibleEntryCount))
         }
+        .alert(L(.settingsClipboardSyncNewCollectionAction), isPresented: Binding(
+            get: { model.missingCollectionConfirmation != nil },
+            set: { if !$0 { model.cancelMissingCollectionRecovery() } }
+        ), presenting: model.missingCollectionConfirmation) { confirmation in
+            Button(L(.settingsClipboardSyncNewCollectionAction)) {
+                Task { await model.confirmMissingCollectionRecovery(confirmation) }
+            }
+            Button(L(.clipboardEditCancel), role: .cancel) { model.cancelMissingCollectionRecovery() }
+        } message: { _ in
+            LocalizedText(.settingsClipboardSyncNewCollectionExplanation)
+        }
     }
 
     private var isTransferring: Bool {
@@ -238,7 +263,7 @@ struct ClipboardSyncSettingsView: View {
     }
 
     private var offersRetry: Bool {
-        if model.operationFailed || model.status.cloudReset?.failure != nil { return true }
+        if model.operationFailed || model.status.cloudReset?.failure != nil || model.status.canRecoverMissingCloudCollection { return true }
         guard model.status.isEnabled else { return false }
         switch model.status.phase {
         case .disabled, .connecting, .transferring, .upToDate:
