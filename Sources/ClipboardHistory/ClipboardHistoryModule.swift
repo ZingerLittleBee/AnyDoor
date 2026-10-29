@@ -108,6 +108,7 @@ public actor ClipboardHistoryModule {
     var syncPollTask: Task<Void, Never>?
     var syncRerunRequested = false
     var linkedFileObservers: [UUID: ClipboardLinkedFileObservation] = [:]
+    var linkedFileReconciliationTask: Task<Void, Never>?
     let linkedFileMutationGate = ClipboardLinkedFileMutationGate()
     var linkedFileObservationTasks: [UUID: Task<Void, Never>] = [:]
     var linkedFileObservationRevisions: [UUID: UInt64] = [:]

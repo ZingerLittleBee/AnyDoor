@@ -4,11 +4,13 @@ import GRDB
 enum ClipboardSyncFileWork: Sendable {
     case download(UUID)
     case linkedLocation(UUID)
+    case source(UUID)
 
     var identifier: String {
         switch self {
         case .download(let version): "download/\(version.uuidString)"
         case .linkedLocation(let location): "location/\(location.uuidString)"
+        case .source(let object): "source/\(object.uuidString)"
         }
     }
 }
@@ -32,6 +34,13 @@ extension ClipboardHistoryModule {
         case .recordUnavailable, .corruptData, .localFileAccessDenied: return true
         default: return false
         }
+    }
+
+    /// Source publication also reads keys and stored metadata. Only native
+    /// source-access/identity failures are local to that publication attempt.
+    static func isIsolatedSyncSourceFailure(_ error: Error) -> Bool {
+        ClipboardSyncFileErrors.isAccessDenied(error) || ClipboardSyncFileErrors.isSourceChanged(error)
+            || (error as? ClipboardSyncServiceError) == .localFileAccessDenied
     }
 
     func shouldDeferSyncFileWork(_ work: ClipboardSyncFileWork, account: ClipboardSyncAccount,
