@@ -10,9 +10,11 @@ import contextlib
 import io
 import os
 import plistlib
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 from test_release_shell import (
@@ -20,6 +22,7 @@ from test_release_shell import (
 )
 
 import provisioning
+import release_conf
 
 TEAM = "9VM4RM39R3"
 BUNDLE = "dev.bybee.AnyDoor"
@@ -60,17 +63,21 @@ class ProvisioningTests(FakeToolTestCase):
         (self.app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": BUNDLE}))
         self.profile = self.root / "AnyDoor.provisionprofile"
         self.entitlements = self.root / "signing.entitlements"
+        self.command = RELEASE_DIR / "provisioning.py"
         self.values = profile_fixture()
         self.write_profile()
 
     def write_profile(self) -> None:
         self.profile.write_bytes(plistlib.dumps(self.values))
 
-    def provision(self, command: str = "prepare", *, umask: int = -1, **environment: str) -> subprocess.CompletedProcess[str]:
+    def provision(
+        self, command: str = "prepare", *, umask: int = -1, config: Path | None = None, **environment: str,
+    ) -> subprocess.CompletedProcess[str]:
+        configuration = ["--config", str(config)] if config is not None else []
         return subprocess.run(
-            [sys.executable, str(RELEASE_DIR / "provisioning.py"), command,
+            [sys.executable, str(self.command), command,
              "--app", str(self.app), "--profile", str(self.profile), "--identity", IDENTITY,
-             "--entitlements", str(self.entitlements)],
+             "--entitlements", str(self.entitlements), *configuration],
             env=self.environment(FAKE_ENTITLEMENTS_PATH=str(self.entitlements), **environment),
             capture_output=True, text=True, umask=umask,
         )
@@ -83,6 +90,100 @@ class ProvisioningTests(FakeToolTestCase):
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = provisioning.main(arguments, now=now)
         return subprocess.CompletedProcess(arguments, result, stdout.getvalue(), stderr.getvalue())
+
+    def test_release_configuration_drift_fails_before_preparation_changes_the_app(self) -> None:
+        configuration = self.root / "release.conf"
+        embedded = self.app / "Contents/embedded.provisionprofile"
+        for key, value in [
+            ("APPLE_TEAM_ID", "FIXTURE123"),
+            ("BUNDLE_ID", "dev.bybee.AnyDoorAlternate"),
+            ("CLIPBOARD_SYNC_CONTAINER_ID", "iCloud.dev.bybee.AnyDoorAlternate"),
+            ("CLIPBOARD_SYNC_ENVIRONMENT", "Development"),
+        ]:
+            with self.subTest(key=key):
+                values = release_conf.load()
+                values[key] = value
+                configuration.write_text("".join(f"{name}={setting}\n" for name, setting in values.items()))
+                # This profile and artifact authorize the edited release configuration;
+                # only disagreement with the actual Swift runtime should reject them.
+                self.values = profile_fixture()
+                self.values["TeamIdentifier"] = [values["APPLE_TEAM_ID"]]
+                group = f'{values["APPLE_TEAM_ID"]}.{values["BUNDLE_ID"]}'
+                self.values["Entitlements"].update({
+                    "com.apple.application-identifier": group,
+                    "com.apple.developer.team-identifier": values["APPLE_TEAM_ID"],
+                    "com.apple.developer.icloud-container-identifiers": [values["CLIPBOARD_SYNC_CONTAINER_ID"]],
+                    "com.apple.developer.icloud-container-environment": values["CLIPBOARD_SYNC_ENVIRONMENT"],
+                    "keychain-access-groups": [group],
+                })
+                self.write_profile()
+                (self.app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": values["BUNDLE_ID"]}))
+                embedded.write_bytes(b"previous profile")
+                self.entitlements.write_bytes(b"previous entitlements")
+
+                result = self.provision(config=configuration)
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("ClipboardSyncNativeConfiguration", result.stderr)
+                self.assertIn("release.conf", result.stderr)
+                self.assertEqual(embedded.read_bytes(), b"previous profile")
+                self.assertEqual(self.entitlements.read_bytes(), b"previous entitlements")
+                self.assertEqual(self.recorded(), [])
+
+    def test_runtime_declarations_must_be_unique_literals_in_the_configuration_type(self) -> None:
+        checkout = self.root / "source checkout"
+        release_directory = checkout / "scripts/release"
+        release_directory.mkdir(parents=True)
+        for name in ("provisioning.py", "release_conf.py", "release.conf"):
+            shutil.copyfile(RELEASE_DIR / name, release_directory / name)
+        runtime_relative = Path("Sources/ClipboardHistory/ClipboardHistorySyncKeychain.swift")
+        runtime = checkout / runtime_relative
+        runtime.parent.mkdir(parents=True)
+        source = (RELEASE_DIR.parents[1] / runtime_relative).read_text()
+        runtime.write_text(source)
+        resources = checkout / "Resources"
+        resources.mkdir()
+        shutil.copyfile(RELEASE_DIR.parents[1] / "Resources/AnyDoor.entitlements", resources / "AnyDoor.entitlements")
+        self.command = release_directory / "provisioning.py"
+        # The unmodified production declarations pass through the copied real command.
+        accepted = self.provision()
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        embedded = self.app / "Contents/embedded.provisionprofile"
+        approved_profile, approved_entitlements = embedded.read_bytes(), self.entitlements.read_bytes()
+        declaration = next(line for line in source.splitlines() if "static let team =" in line)
+        for reason, replacement in [
+            ("missing", source.replace(declaration, "")),
+            ("duplicate", source.replace(declaration, f"{declaration}\n{declaration}")),
+            ("expression", source.replace(declaration, declaration + ' + ""')),
+            ("outside type", source.replace(declaration, "") + f"\nenum Unrelated {{\n{declaration}\n}}\n"),
+            ("comment", source.replace(declaration, "// " + declaration)),
+            ("duplicate after method", source.replace("    static func validate", declaration + "\n    static func validate")),
+            ("duplicate type", source + "\nenum ClipboardSyncNativeConfiguration {}\n"),
+        ]:
+            with self.subTest(reason=reason):
+                runtime.write_text(replacement)
+
+                result = self.provision()
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("ClipboardSyncNativeConfiguration", result.stderr)
+                self.assertEqual(embedded.read_bytes(), approved_profile)
+                self.assertEqual(self.entitlements.read_bytes(), approved_entitlements)
+                self.assertEqual(self.recorded(), [])
+
+    def test_validation_and_final_verification_reject_runtime_drift_before_external_inspection(self) -> None:
+        self.assertEqual(self.provision().returncode, 0)
+        configuration = self.root / "release.conf"
+        values = release_conf.load()
+        values["CLIPBOARD_SYNC_CONTAINER_ID"] += ".changed"
+        configuration.write_text("".join(f"{name}={setting}\n" for name, setting in values.items()))
+        for command in ("validate", "verify"):
+            with self.subTest(command=command):
+                result = self.provision(command, config=configuration, FAKE_CMS_FAILURE="1")
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("release.conf disagrees with ClipboardSyncNativeConfiguration", result.stderr)
+                self.assertEqual(self.recorded(), [])
 
     def test_preparation_requires_thirty_days_of_profile_validity_before_writing(self) -> None:
         now = datetime(2030, 1, 1, tzinfo=timezone.utc)

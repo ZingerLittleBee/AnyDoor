@@ -208,6 +208,13 @@ trusted signing job decodes `ANYDOOR_PROVISIONING_PROFILE_BASE64` into a tempora
 file and passes its path to `codesign.sh --profile`. The script validates the
 profile before signing, embeds it as `Contents/embedded.provisionprofile`, and
 generates concrete CloudKit and Keychain entitlements from `release.conf`.
+Before inspecting a profile or changing the app, the provisioning command checks
+the release team, bundle-derived access group, container, and environment against
+the literal declarations in `ClipboardSyncNativeConfiguration`. A mismatch or an
+unreadable, missing, duplicate, or nonliteral declaration fails the preflight.
+Update both declarations together when changing this configuration. Final
+signature verification requires the actual entitlements to equal that checked
+release configuration.
 
 The profile must authorize the repository's team, explicit bundle identifier,
 selected signing certificate, production CloudKit container/environment, and

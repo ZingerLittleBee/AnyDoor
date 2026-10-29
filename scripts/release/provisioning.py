@@ -39,13 +39,28 @@ class SigningConfiguration:
         return f"{self.team}.{self.bundle}"
 
     @classmethod
-    def load(cls) -> SigningConfiguration:
-        return cls(
-            team=release_conf.get("APPLE_TEAM_ID"),
-            bundle=release_conf.get("BUNDLE_ID"),
-            container=release_conf.get("CLIPBOARD_SYNC_CONTAINER_ID"),
-            environment=release_conf.get("CLIPBOARD_SYNC_ENVIRONMENT"),
-        )
+    def load(cls, path: Path = release_conf.CONF_PATH) -> SigningConfiguration:
+        try:
+            values = release_conf.load(path)
+            configuration = cls(
+                team=values["APPLE_TEAM_ID"],
+                bundle=values["BUNDLE_ID"],
+                container=values["CLIPBOARD_SYNC_CONTAINER_ID"],
+                environment=values["CLIPBOARD_SYNC_ENVIRONMENT"],
+            )
+        except (KeyError, ValueError) as error:
+            raise ProvisioningError("invalid release.conf signing configuration") from error
+        runtime = runtime_configuration()
+        expected = {
+            "container": configuration.container, "environment": configuration.environment,
+            "accessGroup": configuration.app_identifier, "team": configuration.team,
+        }
+        mismatches = [name for name, value in expected.items() if runtime[name] != value]
+        if mismatches:
+            raise ProvisioningError(
+                "release.conf disagrees with ClipboardSyncNativeConfiguration: " + ", ".join(mismatches)
+            )
+        return configuration
 
     def entitlements(self) -> dict[str, object]:
         base = read_plist((REPO_ROOT / "Resources/AnyDoor.entitlements").read_bytes(), "base entitlements")
@@ -58,6 +73,43 @@ class SigningConfiguration:
             "com.apple.developer.icloud-container-environment": self.environment,
             "keychain-access-groups": [self.app_identifier],
         }
+
+
+def runtime_configuration() -> dict[str, str]:
+    """Read the runtime's literal declarations, rejecting unsupported source shapes."""
+    source = (REPO_ROOT / "Sources/ClipboardHistory/ClipboardHistorySyncKeychain.swift").read_text()
+    # Preserve offsets while excluding comments from declarations and braces.
+    tokens = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[{}]', re.DOTALL)
+    source = tokens.sub(lambda match: re.sub(r"[^\n]", " ", match[0]) if match[0].startswith("/") else match[0], source)
+    declarations = list(re.finditer(r"(?m)^enum ClipboardSyncNativeConfiguration\s*\{", source))
+    if len(declarations) != 1:
+        raise ProvisioningError("cannot read one ClipboardSyncNativeConfiguration declaration")
+    start = declarations[0].end()
+    depth = 1
+    end = None
+    for token in tokens.finditer(source, start):
+        if token[0] == "{":
+            depth += 1
+        elif token[0] == "}":
+            depth -= 1
+            if depth == 0:
+                end = token.start()
+                break
+    if end is None:
+        raise ProvisioningError("unterminated ClipboardSyncNativeConfiguration declaration")
+    values: dict[str, str] = {}
+    names = {"container", "environment", "accessGroup", "team"}
+    for declaration in re.finditer(r"(?m)^\s*static let (\w+)\b([^\n]*)$", source[start:end]):
+        name = declaration[1]
+        if name not in names:
+            continue
+        literal = re.fullmatch(r'\s*=\s*"([^"\\]*)"\s*', declaration[2])
+        if name in values or literal is None:
+            raise ProvisioningError(f"ClipboardSyncNativeConfiguration.{name} must be one string literal")
+        values[name] = literal[1]
+    if values.keys() != names:
+        raise ProvisioningError("ClipboardSyncNativeConfiguration is missing required literal declarations")
+    return values
 
 
 def read_plist(data: bytes, description: str) -> dict[str, object]:
@@ -147,7 +199,7 @@ def validate_app(app_path: Path, configuration: SigningConfiguration) -> None:
 
 
 def prepare(args: argparse.Namespace, *, now: datetime) -> None:
-    configuration = SigningConfiguration.load()
+    configuration = SigningConfiguration.load(args.config)
     profile = decode_profile(args.profile)
     validate_profile(profile, args.identity, configuration, now=now)
     validate_app(args.app, configuration)
@@ -161,7 +213,7 @@ def prepare(args: argparse.Namespace, *, now: datetime) -> None:
 
 
 def verify(args: argparse.Namespace, *, now: datetime) -> None:
-    configuration = SigningConfiguration.load()
+    configuration = SigningConfiguration.load(args.config)
     validate_app(args.app, configuration)
     embedded = args.app / "Contents/embedded.provisionprofile"
     if not embedded.is_file() or embedded.read_bytes() != args.profile.read_bytes():
@@ -202,13 +254,15 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--identity", required=True)
     parser.add_argument("--entitlements", type=Path)
+    parser.add_argument("--config", type=Path, default=release_conf.CONF_PATH)
     args = parser.parse_args(argv)
     if args.command != "validate" and (args.app is None or args.entitlements is None):
         parser.error("prepare and verify require --app and --entitlements")
     try:
         now = now if now is not None else datetime.now(timezone.utc)
         if args.command == "validate":
-            validate_profile(decode_profile(args.profile), args.identity, SigningConfiguration.load(), now=now)
+            configuration = SigningConfiguration.load(args.config)
+            validate_profile(decode_profile(args.profile), args.identity, configuration, now=now)
             print("Validated Developer ID Clipboard Sync profile authorization")
         elif args.command == "prepare":
             prepare(args, now=now)
