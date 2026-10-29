@@ -264,6 +264,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v31_legacy_tag_recovery") { database in
             try Self.createLegacyTagRecoverySchema(in: database)
         }
+        migrator.registerMigration("v32_working_output_recovery") { database in
+            try Self.createWorkingOutputRecoverySchema(in: database)
+        }
         return migrator
     }
 
