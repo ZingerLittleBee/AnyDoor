@@ -156,7 +156,8 @@ extension ClipboardHistoryModule {
     }
 
     func importSyncMetadata(_ operation: ClipboardSyncMetadataContent, account: ClipboardSyncAccount,
-                            record: ClipboardSyncRemoteRecord, fromCheckpoint: Bool = false, in database: Database) throws {
+                            record: ClipboardSyncRemoteRecord, fromCheckpoint: Bool = false, applying: Bool = true,
+                            in database: Database) throws {
         let revision = operation.revision
         let validRevision = revision.counter > 0 && revision.counter < Int64.max - 1
             && UUID(uuidString: revision.operationID) != nil
@@ -171,7 +172,18 @@ extension ClipboardHistoryModule {
                                           epoch: record.epoch.uuidString, in: database), current.revision >= operation.revision { return }
         // The register is durable even when the entry has not arrived yet.
         try saveSyncMetadata(operation, accountID: account.identifier, epoch: record.epoch.uuidString, pending: false, in: database)
-        try applySyncMetadata(operation, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+        if applying {
+            try applySyncMetadata(operation, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+        }
+    }
+
+    func applyRetainedSyncMetadata(sharedID: String, accountID: String, epoch: String, in database: Database) throws {
+        for value in try Data.fetchAll(database, sql: """
+            SELECT value FROM clipboard_sync_metadata WHERE account_id = ? AND epoch = ? AND shared_id = ?
+            """, arguments: [accountID, epoch, sharedID]) {
+            let operation = try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: value)
+            try applySyncMetadata(operation, accountID: accountID, epoch: epoch, in: database)
+        }
     }
 
     private func syncMetadata(id: UUID, field: String, accountID: String, epoch: String, in database: Database) throws -> ClipboardSyncMetadataContent? {

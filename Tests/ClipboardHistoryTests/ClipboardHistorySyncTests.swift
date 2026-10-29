@@ -737,6 +737,57 @@ final class ClipboardHistorySyncTests: XCTestCase {
         }
     }
 
+    func testNativeDeletedZoneCanCreateFreshCollectionOnlyAfterExplicitRecovery() async throws {
+        let account = ClipboardHistorySyncCloudKitReadTests.account
+        let cloud = SyncTestCloud(account: account)
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("deleted-zone-recovery-\(UUID())")
+        let module = makeModule(services: services, keyByte: 0xE8, time: 1_000, root: root)
+        let local = try await module.capture(.init(source: .unknown, content: .text("retained after native zone deletion")))
+        let tag = try await module.createTagDefinition(named: "Shared", assigningTo: local.entryID).definition
+        try await module.setSyncTagSelected(tag.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let oldControl = try await cloud.control(for: account)
+        let previous = try XCTUnwrap(oldControl)
+        await cloud.removeControl(using: ClipboardSyncCloudKit(recordReader: { requestedAccount, _, _ in
+            XCTAssertEqual(requestedAccount, account)
+            throw CKError(.userDeletedZone)
+        }))
+        await module.retrySync()
+        let missing = await module.syncStatus()
+        XCTAssertEqual(missing.phase, .failed(.recoveryRequired))
+        XCTAssertTrue(missing.canRecoverMissingCloudCollection)
+        let confirmation = try await module.prepareMissingCloudCollectionRecovery()
+        try await module.recoverMissingCloudCollection(confirmation)
+        let retired = await module.syncStatus()
+        XCTAssertFalse(retired.isEnabled)
+        XCTAssertFalse(retired.canRecoverMissingCloudCollection)
+        let choices = try await module.syncTags()
+        XCTAssertTrue(choices.allSatisfy { !$0.isSelected })
+        try await module.closeStoreForTesting()
+
+        let reopened = makeModule(services: services, keyByte: 0xE8, time: 1_001, root: root)
+        await reopened.resumeSync()
+        let off = await reopened.syncStatus()
+        XCTAssertFalse(off.isEnabled)
+        try await reopened.setSyncEnabled(true)
+        let active = await reopened.syncStatus()
+        XCTAssertEqual(active.phase, .upToDate, "A deleted native zone must not strand an explicitly recovered collection")
+        guard active.phase == .upToDate else { return }
+        let newControl = try await cloud.control(for: account)
+        let created = try XCTUnwrap(newControl)
+        XCTAssertNotEqual(created.epoch, previous.epoch)
+        XCTAssertEqual(created.keyID, previous.keyID)
+        let retained = try await reopened.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+        let beforeSelection = await cloud.currentUploads().filter { $0.record.epoch == created.epoch && $0.record.kind == .entry }
+        XCTAssertTrue(beforeSelection.isEmpty)
+        try await reopened.setSyncTagSelected(tag.id, selected: true)
+        let selectedUploads = await cloud.currentUploads().filter { $0.record.epoch == created.epoch && $0.record.kind == .entry }
+        XCTAssertFalse(selectedUploads.isEmpty)
+    }
+
     func testMissingCollectionRecoveryKeepsLocalWorkAndRequiresFreshParticipation() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -834,6 +885,87 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let restored = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
         guard case .file(let afterRestart) = restored.items.first?.representations.first else { return XCTFail("Expected reopened file") }
         XCTAssertEqual(try Data(contentsOf: afterRestart.currentURL), Data("accepted remote file edit".utf8))
+    }
+
+    func testRetainedWithdrawalMetadataWaitsForConsentAndHonorsLaterLocalFavorite() async throws {
+        for editsLocally in [false, true] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("retained-metadata-\(UUID())")
+            let first = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root)
+            let peer = makeModule(services: services, keyByte: 0xE7, time: 2_000)
+            let captured = try await first.capture(.init(source: .unknown, content: .text("favorite revision wins")))
+            let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+            try await first.setSyncTagSelected(tag.id, selected: true)
+            try await first.setSyncEnabled(true)
+            try await peer.setSyncEnabled(true)
+            try await first.setSyncEnabled(false)
+            try await first.setSyncTagSelected(tag.id, selected: false)
+            _ = try await peer.apply(.setFavorite(captured.entryID, true))
+            await peer.retrySync()
+            try await first.setSyncEnabled(true)
+            let withdrawn = try await first.page(.init()).entries
+            XCTAssertFalse(try XCTUnwrap(withdrawn.first).isFavorite, "Receiving metadata cannot modify the withdrawn local copy")
+            await peer.retrySync()
+            if editsLocally {
+                _ = try await first.apply(.setFavorite(captured.entryID, true))
+                _ = try await first.apply(.setFavorite(captured.entryID, false))
+            }
+            try await first.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xE6, time: 3_000, root: root)
+            await reopened.resumeSync()
+            let retained = try await reopened.page(.init()).entries
+            XCTAssertFalse(try XCTUnwrap(retained.first).isFavorite)
+            try await reopened.setSyncTagSelected(tag.id, selected: true)
+            let rejoined = try await reopened.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(rejoined.first).isFavorite, !editsLocally)
+            await peer.retrySync()
+            let peerEntries = try await peer.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(peerEntries.first).isFavorite, !editsLocally)
+            let fresh = makeModule(services: services, keyByte: 0xE8, time: 4_000)
+            try await fresh.setSyncEnabled(true)
+            let freshEntries = try await fresh.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(freshEntries.first).isFavorite, !editsLocally)
+        }
+    }
+
+    func testUnpublishedWithdrawalRetainsRemoteFavoriteBeforeReactivation() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pending-metadata-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root)
+        let peer = makeModule(services: services, keyByte: 0xE7, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("retained favorite")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await peer.setSyncEnabled(true)
+        try await first.setSyncEnabled(false)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        _ = try await peer.apply(.setFavorite(captured.entryID, true))
+        await peer.retrySync()
+        let unrelated = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: "Advance tag clock")
+        _ = try await peer.replaceTagDefinitions(with: [tag, unrelated])
+        for _ in 0..<3 {
+            try await peer.setSyncTagSelected(unrelated.id, selected: true)
+            try await peer.setSyncTagSelected(unrelated.id, selected: false)
+        }
+        try await peer.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        let entries = try await first.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(entries.first).isFavorite)
+        await peer.retrySync()
+        let peerEntries = try await peer.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(peerEntries.first).isFavorite)
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xE6, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let restored = try await reopened.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(restored.first).isFavorite)
+        let fresh = makeModule(services: services, keyByte: 0xE8, time: 4_000)
+        try await fresh.setSyncEnabled(true)
+        let freshEntries = try await fresh.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(freshEntries.first).isFavorite)
     }
 
     func testUnpublishedWithdrawalRetainsRemoteEditBeforeLaterReactivation() async throws {
@@ -4856,7 +4988,11 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         fileSegmentFailure = failure
     }
     func requestedFileSegments() -> [Int] { fileSegmentRequests }
-    private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
+    private var currentAccount: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "test-user")) {
+        currentAccount = account
+    }
+    private var absentControlReader: ClipboardSyncCloudKit?
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
     private var losesPurgeResponse = false
@@ -4928,6 +5064,9 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func failNextAccountReadWithNative(_ native: ClipboardSyncCloudKit) { nativeAccountFault = native }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
+        if descriptors[account.identifier] == nil, let absentControlReader {
+            return try await absentControlReader.control(for: account)
+        }
         if corruptsNextControl {
             corruptsNextControl = false
             throw ClipboardSyncServiceError.corruptData
@@ -5188,7 +5327,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
-    func removeControl() { descriptors[currentAccount.identifier] = nil }
+    func removeControl(using native: ClipboardSyncCloudKit? = nil) {
+        descriptors[currentAccount.identifier] = nil
+        absentControlReader = native
+    }
     func returnControlAtNextCreation(_ control: ClipboardSyncControl) { nextCreationControl = control }
     func accountReadCount() -> Int { reads }
     private func checkAccount(_ account: ClipboardSyncAccount) throws {
