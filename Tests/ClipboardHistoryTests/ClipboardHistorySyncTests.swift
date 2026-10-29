@@ -1147,6 +1147,51 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testOccupiedDownloadDestinationDoesNotBlockSharingAndRetainsRetryDeadline() async throws {
+        let bytes = Data(repeating: 0x41, count: 5_000_001)
+        let fixture = try await fileFixture(names: ["Occupied.bin"], contents: [bytes])
+        let tags = try await fixture.sender.syncTags()
+        let tag = try XCTUnwrap(tags.first)
+        let removed = try await fixture.sender.capture(.init(source: .unknown, content: .text("delete despite destination conflict")))
+        _ = try await fixture.sender.apply(.setTags(removed.entryID, [tag.id]))
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
+        let entries = try await fixture.receiver.page(.init()).entries
+        let entry = try XCTUnwrap(entries.first { !$0.syncFiles.isEmpty })
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        let account = try await fixture.cloud.account()
+        let directory = fixture.receiverRoot.appendingPathComponent("Linked Working Copies")
+            .appendingPathComponent(account.identifier).appendingPathComponent(file.id.uuidString.lowercased())
+            .appendingPathComponent(file.versionID.uuidString.lowercased())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let occupied = directory.appendingPathComponent(file.displayName)
+        let unrelatedBytes = Data("user-owned destination".utf8)
+        try unrelatedBytes.write(to: occupied)
+        _ = try await fixture.receiver.apply(.delete(removed.entryID))
+        let added = try await fixture.receiver.capture(.init(source: .unknown, content: .text("share despite destination conflict")))
+        _ = try await fixture.receiver.apply(.setTags(added.entryID, [tag.id]))
+        try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        await fixture.sender.retrySync()
+        let peerEntries = try await fixture.sender.page(.init()).entries
+        XCTAssertFalse(peerEntries.contains { $0.id == removed.entryID })
+        XCTAssertTrue(peerEntries.contains { $0.id == added.entryID })
+        XCTAssertEqual(try Data(contentsOf: occupied), unrelatedBytes, "A destination conflict must never overwrite unrelated bytes")
+        let failed = try await fixture.receiver.page(.init()).entries
+        XCTAssertEqual(failed.first { $0.id == entry.id }?.syncFiles.first?.transferFailure, .localStorage)
+        try await fixture.receiver.closeStoreForTesting()
+        try FileManager.default.removeItem(at: occupied)
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 2_000, root: fixture.receiverRoot)
+        await reopened.resumeSync()
+        let deferred = try await reopened.page(.init()).entries
+        XCTAssertEqual(deferred.first { $0.id == entry.id }?.syncFiles.first?.state, .waitingForDownload,
+            "Restart must retain the object deadline even after the destination is repaired")
+        try await reopened.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+        let content = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let received) = content.items.first?.representations.first else { return XCTFail("Expected downloaded file") }
+        XCTAssertEqual(try Data(contentsOf: received.currentURL), bytes)
+    }
+
+    @MainActor
     func testPersistentFileFailureAllowsIndependentSharingAndBacksOffAcrossRestart() async throws {
         let fixture = try await fileFixture(names: ["Damaged.txt", "Healthy.txt"],
             contents: [Data("damaged body".utf8), Data("healthy body".utf8)])

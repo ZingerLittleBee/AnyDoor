@@ -2,6 +2,28 @@ import Darwin
 import Foundation
 
 enum ClipboardSyncFileErrors {
+    /// Native errors from one file operation do not establish a database or
+    /// authority failure, even when the destination volume is unavailable.
+    static func isLocalOperationFailure(_ error: Error) -> Bool {
+        let codes = [EEXIST, EROFS, ENAMETOOLONG, ENOSPC, EDQUOT]
+        if case .fileOperationFailed(let code) = error as? ClipboardHistoryStorageError {
+            return codes.contains(code)
+        }
+        var current = error as NSError
+        for _ in 0..<8 {
+            if current.domain == NSPOSIXErrorDomain {
+                return codes.contains { Int($0) == current.code }
+            }
+            guard current.domain == NSCocoaErrorDomain else { return false }
+            if [NSFileWriteFileExistsError, NSFileWriteOutOfSpaceError, NSFileWriteVolumeReadOnlyError].contains(current.code) {
+                return true
+            }
+            guard let underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError else { return false }
+            current = underlying
+        }
+        return false
+    }
+
     static func isSourceChanged(_ error: Error) -> Bool {
         if case .fileOperationFailed(let code) = error as? ClipboardHistoryStorageError { return code == ESTALE }
         return false
