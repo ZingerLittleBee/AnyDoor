@@ -156,6 +156,7 @@ class ProvisioningTests(FakeToolTestCase):
             ("duplicate", source.replace(declaration, f"{declaration}\n{declaration}")),
             ("expression", source.replace(declaration, declaration + ' + ""')),
             ("outside type", source.replace(declaration, "") + f"\nenum Unrelated {{\n{declaration}\n}}\n"),
+            ("nested type", source.replace(declaration, f"    enum Nested {{\n{declaration}\n    }}")),
             ("comment", source.replace(declaration, "// " + declaration)),
             ("duplicate after method", source.replace("    static func validate", declaration + "\n    static func validate")),
             ("duplicate type", source + "\nenum ClipboardSyncNativeConfiguration {}\n"),

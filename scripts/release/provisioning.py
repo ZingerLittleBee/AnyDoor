@@ -99,7 +99,17 @@ def runtime_configuration() -> dict[str, str]:
         raise ProvisioningError("unterminated ClipboardSyncNativeConfiguration declaration")
     values: dict[str, str] = {}
     names = {"container", "environment", "accessGroup", "team"}
-    for declaration in re.finditer(r"(?m)^\s*static let (\w+)\b([^\n]*)$", source[start:end]):
+    body = source[start:end]
+    scopes = iter((token.start(), 1 if token[0] == "{" else -1)
+                  for token in tokens.finditer(body) if token[0] in ("{", "}"))
+    next_scope = next(scopes, None)
+    depth = 0
+    for declaration in re.finditer(r"(?m)^\s*static let (\w+)\b([^\n]*)$", body):
+        while next_scope is not None and next_scope[0] < declaration.start():
+            depth += next_scope[1]
+            next_scope = next(scopes, None)
+        if depth != 0:
+            continue
         name = declaration[1]
         if name not in names:
             continue
