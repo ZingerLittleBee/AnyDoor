@@ -48,7 +48,7 @@ sys.stdout.buffer.write(pathlib.Path(sys.argv[sys.argv.index("-i") + 1]).read_by
 
 def profile_fixture() -> dict[str, object]:
     return {
-        "ExpirationDate": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30),
+        "ExpirationDate": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=90),
         "Platform": ["OSX"],
         "TeamIdentifier": ["9VM4RM39R3"],
         "ProvisionsAllDevices": True,

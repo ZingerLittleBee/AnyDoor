@@ -6,14 +6,20 @@ Fixtures never access a signing identity, an Apple service, or a real Keychain.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
 import plistlib
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 from test_release_shell import (
     FAKE_CMS, IDENTITY, FakeToolTestCase, RELEASE_DIR, profile_fixture, write_executable,
 )
+
+import provisioning
 
 TEAM = "9VM4RM39R3"
 BUNDLE = "dev.bybee.AnyDoor"
@@ -68,6 +74,61 @@ class ProvisioningTests(FakeToolTestCase):
             env=self.environment(FAKE_ENTITLEMENTS_PATH=str(self.entitlements), **environment),
             capture_output=True, text=True, umask=umask,
         )
+
+    def provision_at(self, now: datetime, command: str = "prepare") -> subprocess.CompletedProcess[str]:
+        arguments = [command, "--app", str(self.app), "--profile", str(self.profile),
+                     "--identity", IDENTITY, "--entitlements", str(self.entitlements)]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, self.environment(FAKE_ENTITLEMENTS_PATH=str(self.entitlements)), clear=True), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = provisioning.main(arguments, now=now)
+        return subprocess.CompletedProcess(arguments, result, stdout.getvalue(), stderr.getvalue())
+
+    def test_preparation_requires_thirty_days_of_profile_validity_before_writing(self) -> None:
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        embedded = self.app / "Contents/embedded.provisionprofile"
+        for expiry, accepted in [
+            (datetime(2030, 1, 30, 23, 59, 59), False),
+            (datetime(2030, 1, 31), True),
+            (datetime(2030, 1, 31, 0, 0, 1), True),
+        ]:
+            with self.subTest(expiry=expiry):
+                self.values["ExpirationDate"] = expiry
+                self.write_profile()
+                embedded.write_bytes(b"previous profile")
+                self.entitlements.write_bytes(b"previous entitlements")
+
+                result = self.provision_at(now)
+
+                self.assertEqual(result.returncode, 0 if accepted else 1, result.stdout + result.stderr)
+                if accepted:
+                    self.assertEqual(embedded.read_bytes(), self.profile.read_bytes())
+                    self.assertIn("keychain-access-groups", plistlib.loads(self.entitlements.read_bytes()))
+                else:
+                    self.assertIn("at least 30 days", result.stderr)
+                    self.assertEqual(embedded.read_bytes(), b"previous profile")
+                    self.assertEqual(self.entitlements.read_bytes(), b"previous entitlements")
+
+    def test_validation_and_final_verification_recheck_remaining_profile_validity(self) -> None:
+        now = datetime(2030, 1, 1, tzinfo=timezone.utc)
+        self.values["ExpirationDate"] = datetime(2030, 1, 31)
+        self.write_profile()
+        self.assertEqual(self.provision_at(now).returncode, 0)
+        embedded = self.app / "Contents/embedded.provisionprofile"
+        approved_profile, approved_entitlements = embedded.read_bytes(), self.entitlements.read_bytes()
+        for command in ("validate", "verify"):
+            with self.subTest(command=command):
+                accepted = self.provision_at(now, command)
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                signature_checks = self.recorded("codesign")
+
+                rejected = self.provision_at(datetime(2030, 1, 1, 0, 0, 1, tzinfo=timezone.utc), command)
+
+                self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
+                self.assertIn("at least 30 days", rejected.stderr)
+                self.assertEqual(self.recorded("codesign"), signature_checks)
+                self.assertEqual(embedded.read_bytes(), approved_profile)
+                self.assertEqual(self.entitlements.read_bytes(), approved_entitlements)
 
     def test_authorized_profile_embeds_exact_bytes_and_concrete_capabilities(self) -> None:
         result = self.provision()

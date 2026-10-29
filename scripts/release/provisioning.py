@@ -12,13 +12,15 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
 import release_conf
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Repository release policy, not an Apple provisioning requirement.
+MINIMUM_PROFILE_VALIDITY = timedelta(days=30)
 
 
 class ProvisioningError(Exception):
@@ -77,12 +79,16 @@ def decode_profile(path: Path) -> dict[str, object]:
     return read_plist(result.stdout, "provisioning profile")
 
 
-def validate_profile(profile: dict[str, object], identity: str, configuration: SigningConfiguration) -> None:
+def validate_profile(
+    profile: dict[str, object], identity: str, configuration: SigningConfiguration, *, now: datetime,
+) -> None:
     if not re.fullmatch(r"[0-9A-Fa-f]{40}", identity):
         raise ProvisioningError("identity must be the signing certificate's SHA-1 fingerprint")
     expiry = profile.get("ExpirationDate")
-    if not isinstance(expiry, datetime) or expiry.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc):
+    if not isinstance(expiry, datetime) or expiry.replace(tzinfo=timezone.utc) <= now:
         raise ProvisioningError("provisioning profile is expired or has no expiration date")
+    if expiry.replace(tzinfo=timezone.utc) - now < MINIMUM_PROFILE_VALIDITY:
+        raise ProvisioningError("provisioning profile must remain valid for at least 30 days")
     if profile.get("TeamIdentifier") != [configuration.team]:
         raise ProvisioningError("profile team does not match release.conf")
     if profile.get("ProvisionsAllDevices") is not True or "ProvisionedDevices" in profile:
@@ -140,10 +146,10 @@ def validate_app(app_path: Path, configuration: SigningConfiguration) -> None:
         raise ProvisioningError("app bundle identifier does not match release.conf")
 
 
-def prepare(args: argparse.Namespace) -> None:
+def prepare(args: argparse.Namespace, *, now: datetime) -> None:
     configuration = SigningConfiguration.load()
     profile = decode_profile(args.profile)
-    validate_profile(profile, args.identity, configuration)
+    validate_profile(profile, args.identity, configuration, now=now)
     validate_app(args.app, configuration)
     args.entitlements.write_bytes(plistlib.dumps(configuration.entitlements()))
     embedded = args.app / "Contents/embedded.provisionprofile"
@@ -154,13 +160,13 @@ def prepare(args: argparse.Namespace) -> None:
     print("Prepared Developer ID Clipboard Sync capabilities")
 
 
-def verify(args: argparse.Namespace) -> None:
+def verify(args: argparse.Namespace, *, now: datetime) -> None:
     configuration = SigningConfiguration.load()
     validate_app(args.app, configuration)
     embedded = args.app / "Contents/embedded.provisionprofile"
     if not embedded.is_file() or embedded.read_bytes() != args.profile.read_bytes():
         raise ProvisioningError("embedded profile differs from the approved profile")
-    validate_profile(decode_profile(embedded), args.identity, configuration)
+    validate_profile(decode_profile(embedded), args.identity, configuration, now=now)
     expected = configuration.entitlements()
     requirement = (
         f'identifier "{configuration.bundle}" and anchor apple generic '
@@ -189,24 +195,25 @@ def verify(args: argparse.Namespace) -> None:
     print("Verified Developer ID Clipboard Sync profile and capabilities")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["validate", "prepare", "verify"])
     parser.add_argument("--app", type=Path)
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--identity", required=True)
     parser.add_argument("--entitlements", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command != "validate" and (args.app is None or args.entitlements is None):
         parser.error("prepare and verify require --app and --entitlements")
     try:
+        now = now if now is not None else datetime.now(timezone.utc)
         if args.command == "validate":
-            validate_profile(decode_profile(args.profile), args.identity, SigningConfiguration.load())
+            validate_profile(decode_profile(args.profile), args.identity, SigningConfiguration.load(), now=now)
             print("Validated Developer ID Clipboard Sync profile authorization")
         elif args.command == "prepare":
-            prepare(args)
+            prepare(args, now=now)
         else:
-            verify(args)
+            verify(args, now=now)
     except (ProvisioningError, OSError) as error:
         print(f"Provisioning failed: {error}", file=sys.stderr)
         return 1

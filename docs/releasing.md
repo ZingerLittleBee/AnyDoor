@@ -213,6 +213,12 @@ The profile must authorize the repository's team, explicit bundle identifier,
 selected signing certificate, production CloudKit container/environment, and
 application Keychain group. Expired, development, foreign, and insufficient
 profiles fail the release; the script never silently drops these capabilities.
+As a repository release policy, the profile must have at least 30 days of
+remaining validity at validation, preparation, and final verification. Exactly
+30 days passes; a shorter lifetime fails before preparation changes the app.
+This margin is an AnyDoor policy, not an Apple-mandated duration. The distributed
+app requires its capability-authorizing profile even when a user leaves Clipboard
+Sync off.
 Final verification checks the embedded profile, the actual signing certificate,
 the Developer ID requirement, and the main executable's and app's entitlements.
 
