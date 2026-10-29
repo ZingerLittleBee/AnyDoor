@@ -28,6 +28,7 @@ extension ClipboardHistoryModule {
         for source in sources {
             try await admitSync(generation, account: account, services: services)
             guard !activeApplicationUpdates.contains(source.id) else { continue }
+            guard !source.hasPendingApplication else { continue }
             if try linkedRead({ try Bool.fetchOne($0, sql: """
                 SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions
                   WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'preparing')
@@ -274,8 +275,16 @@ extension ClipboardHistoryModule {
                   let version = UUID(uuidString: row["applying_version_id"]), let digest: Data = row["applying_digest"],
                   let identity: Data = row["replacement_identity"], let path: String = row["replacement_path"] else { continue }
             try await admitSync(generation, account: account, services: services)
-            let inspection = Task.detached(priority: .utility) { try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) }
-            let proof = await inspection.value
+            let replacementURL = URL(fileURLWithPath: path)
+            let inspection = Task.detached(priority: .utility) {
+                if let installed = try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: identity) {
+                    return (installed as ClipboardLinkedFileProof?, nil as ClipboardLinkedFileProof?, nil as ClipboardLinkedFileProof?)
+                }
+                let original = try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
+                let prepared = try? ClipboardLinkedFileIO.inspect(replacementURL, expectedIdentity: identity)
+                return (nil as ClipboardLinkedFileProof?, original, prepared)
+            }
+            let (proof, original, prepared) = await inspection.value
             try await admitSync(generation, account: account, services: services)
             guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
                 replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
@@ -291,11 +300,15 @@ extension ClipboardHistoryModule {
                 guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
                     replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
                 try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
-            } else {
-                // No exchange occurred. Remove only our verified replacement.
-                if ClipboardSyncFileIO.isAvailable(path: path, identity: identity) { try? FileManager.default.removeItem(atPath: path) }
+            } else if let original, let prepared, original.digest == source.baseDigest, prepared.digest == digest,
+                      original.stamp.matches(source.url), prepared.stamp.matches(replacementURL) {
+                // Both original names and complete contents positively prove
+                // that no exchange is pending. Keep the visible prepared output:
+                // it can be independently edited after this inspection.
                 try clearLinkedApplication(source.id)
             }
+            // An unreadable, moved, or changed root proves neither outcome.
+            // Retain the exact journal and both outputs for a later recovery.
         }
     }
 
