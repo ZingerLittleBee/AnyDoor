@@ -667,6 +667,8 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     private var heldDownload: CheckedContinuation<Void, Never>?
     private var cancellations = 0
     private var fileDownloads: [UUID] = []
+    private var observationProviderRequests = 0
+    func observationProviderRequestCount() -> Int { observationProviderRequests }
     private var partialFileRecords: [String: ClipboardSyncRemoteRecord] = [:]
     func partialFileRecordIDs() -> Set<String> { Set(partialFileRecords.keys) }
     func downloadedFileVersions() -> [UUID] { fileDownloads }
@@ -695,8 +697,14 @@ actor LinkedFileCloud: ClipboardSyncTransport {
     func downloadIsHeld() -> Bool { heldDownload != nil }
     func releaseDownload() { heldDownload?.resume(); heldDownload = nil }
 
-    func account() -> ClipboardSyncAccount { identity }
-    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? { currentControl }
+    func account() -> ClipboardSyncAccount {
+        observationProviderRequests += 1
+        return identity
+    }
+    func control(for account: ClipboardSyncAccount) -> ClipboardSyncControl? {
+        observationProviderRequests += 1
+        return currentControl
+    }
     func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) -> ClipboardSyncControl {
         if let currentControl { return currentControl }
         let created = advanced(candidate)
@@ -704,6 +712,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         return created
     }
     func changes(for account: ClipboardSyncAccount, control: ClipboardSyncControl, cursor: Data?) -> ClipboardSyncChanges {
+        observationProviderRequests += 1
         let offset = cursor.flatMap { Int(String(decoding: $0, as: UTF8.self)) } ?? 0
         return .init(records: uploads.dropFirst(offset).filter { !purgedRecords.contains($0.record.recordID) }.map(\.record), cursor: Data(String(uploads.count).utf8), hasMore: false)
     }

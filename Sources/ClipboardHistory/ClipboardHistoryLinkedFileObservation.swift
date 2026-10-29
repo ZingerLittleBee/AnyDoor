@@ -127,22 +127,43 @@ extension ClipboardHistoryModule {
             linkedFileReconciliationTask?.cancel()
             linkedFileReconciliationTask = nil
         } else if linkedFileReconciliationTask == nil {
-            // One owned wakeup covers every overflow or temporarily unwatchable
-            // location fairly, even when provider polling is disabled. Reuse
-            // automatic sync so file/provider retry deadlines remain intact.
+            // Rotate a bounded set of local inspections even when provider
+            // polling is disabled. Unchanged or unavailable locations do not
+            // authorize a provider request or a full reconciliation pass.
             linkedFileReconciliationTask = Task { [weak self] in
+                var after: String?
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                    guard await self?.reconcileUnobservedLinkedFiles(generation: generation) == true else { return }
+                    guard let next = await self?.reconcileUnobservedLinkedFiles(account: account,
+                        epoch: control.epoch, generation: generation, after: after), next.continues else { return }
+                    after = next.after
                 }
             }
         }
     }
 
-    private func reconcileUnobservedLinkedFiles(generation: UInt64) async -> Bool {
-        guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return false }
-        await retrySyncAutomatically()
-        return !Task.isCancelled && generation == syncGeneration && !syncSuspended
+    private func reconcileUnobservedLinkedFiles(account: ClipboardSyncAccount, epoch: UUID,
+        generation: UInt64, after: String?) async -> (continues: Bool, after: String?) {
+        guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return (false, after) }
+        do {
+            let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, in: $0) }
+                .filter { linkedFileObservers[$0.id] == nil && linkedFileObservationTasks[$0.id] == nil }
+            let cursor = after ?? ""
+            let following = sources.filter { $0.id.uuidString > cursor }
+            let preceding = sources.filter { $0.id.uuidString <= cursor }
+            let batch = (following + preceding).prefix(16)
+            var changed = false
+            for source in batch {
+                changed = try await observeLinkedLocation(source.id, account: account, epoch: epoch,
+                    generation: generation, automatic: true, providerIndependent: true) || changed
+            }
+            if changed { await retrySyncAutomatically() }
+            return (!Task.isCancelled && generation == syncGeneration && !syncSuspended, batch.last?.id.uuidString ?? after)
+        } catch is CancellationError {
+            return (false, after)
+        } catch {
+            return (generation == syncGeneration && !syncSuspended, after)
+        }
     }
 
     private func linkedFileDidChange(_ id: UUID, event: ClipboardLinkedFileIdentityEvent, account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) {
@@ -186,9 +207,10 @@ extension ClipboardHistoryModule {
     }
 
     private func observeLinkedLocation(_ id: UUID, account: ClipboardSyncAccount, epoch: UUID,
-        generation: UInt64, automatic: Bool = false) async throws -> Bool {
+        generation: UInt64, automatic: Bool = false, providerIndependent: Bool = false) async throws -> Bool {
         guard let services = syncServices else { return false }
-        try await admitSyncFileObservation(generation, account: account, epoch: epoch, services: services, automatic: automatic)
+        try await admitLinkedFileObservation(generation, account: account, epoch: epoch, services: services,
+            automatic: automatic, providerIndependent: providerIndependent)
         guard let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: $0).first }) else { return false }
         guard !source.hasPendingApplication else { return false }
         let event = linkedFileIdentityEvents[id].flatMap { $0.identity == source.identity ? $0 : nil }
@@ -199,7 +221,8 @@ extension ClipboardHistoryModule {
             await inspection.value
         } onCancel: { inspection.cancel() }
         try Task.checkCancellation()
-        try await admitSyncFileObservation(generation, account: account, epoch: epoch, services: services, automatic: automatic)
+        try await admitLinkedFileObservation(generation, account: account, epoch: epoch, services: services,
+            automatic: automatic, providerIndependent: providerIndependent)
         let changed = try syncWrite { database in
             guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: database).first,
                   current.revision == source.revision,
@@ -236,6 +259,23 @@ extension ClipboardHistoryModule {
         }
         if changed { publishMutation() }
         return changed
+    }
+
+    private func admitLinkedFileObservation(_ generation: UInt64, account: ClipboardSyncAccount, epoch: UUID,
+        services: ClipboardSyncServices, automatic: Bool, providerIndependent: Bool) async throws {
+        guard providerIndependent else {
+            try await admitSyncFileObservation(generation, account: account, epoch: epoch, services: services, automatic: automatic)
+            return
+        }
+        // A local observation only records saved-byte/availability facts. Any
+        // resulting publication still revalidates the provider's account in
+        // the ordinary sync pass, including its explicit-retry and delay gates.
+        try await waitForWriteTurn()
+        try admitSync(generation)
+        guard let context = try syncFileRead({ try syncFileContext(in: $0) }),
+              context.account == account, context.control.epoch == epoch, context.control.phase == "active" else {
+            throw ClipboardSyncServiceError.accountChanged
+        }
     }
 
     static func linkedLocationSources(accountID: String, epoch: UUID, id: UUID? = nil, in database: Database) throws -> [ClipboardLinkedLocationSource] {
