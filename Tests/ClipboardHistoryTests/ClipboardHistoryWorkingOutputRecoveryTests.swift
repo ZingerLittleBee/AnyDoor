@@ -7,7 +7,141 @@ import os
 
 @testable import ClipboardHistory
 
+private struct WorkingOutputStoreKey: ClipboardHistoryMasterKeyStoring {
+    func load() -> ClipboardHistoryMasterKeyResult { .key(Data(repeating: 0x52, count: 32)) }
+    func create() -> ClipboardHistoryMasterKeyResult { load() }
+    func delete() -> ClipboardHistoryMasterKeyResult { .missing }
+}
+
 extension ClipboardHistoryLinkedFileTests {
+    @MainActor
+    func testStoreReplacementCreatesMissingExclusiveLeaseBeforeDiscard() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("working-output-missing-lock-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let locked = OSAllocatedUnfairLock(initialState: false)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
+            keyStore: WorkingOutputStoreKey(), faultInjector: .init { point in
+                guard point == .legacyMigrationBeforePublication else { return false }
+                let fd = open(root.appendingPathComponent("working-output.lock").path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+                if fd >= 0 {
+                    defer { close(fd) }
+                    locked.withLock { $0 = flock(fd, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK }
+                }
+                return true
+            }))
+        _ = try await module.workingOutputRecoveries()
+        let entry = try await module.capture(.init(source: .unknown, content: .text("keep until verified replacement")))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("working-output.lock"))
+        let request = ClipboardHistoryLegacyMigrationRequest(transfer: .init(entries: [], tags: [],
+            categoryOrder: [], retentionPeriod: .thirtyDays), payloadDirectory: root)
+        do {
+            _ = try await module.migrateLegacy(request, discardingEntries: 1)
+            XCTFail("Expected the actual publication boundary fault")
+        } catch { XCTAssertEqual(error as? ClipboardHistoryModuleError, .legacyMigrationFailed) }
+        XCTAssertTrue(locked.withLock { $0 }, "An absent sidecar must not bypass store replacement exclusion")
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.map(\.id), [entry.entryID])
+    }
+
+    @MainActor
+    func testStoreReplacementPreservesUnexpectedLockFileContentsAndKinds() async throws {
+        for kind in ["file", "directory", "symlink"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("working-output-lock-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let store = root.appendingPathComponent("Store")
+            let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: store,
+                keyStore: WorkingOutputStoreKey()))
+            _ = try await module.workingOutputRecoveries()
+            try await module.closeStoreForTesting()
+            let lock = store.appendingPathComponent("working-output.lock")
+            try FileManager.default.removeItem(at: lock)
+            let sentinel = root.appendingPathComponent("keep.txt")
+            let bytes = Data("unowned lock-name occupant".utf8)
+            try bytes.write(to: sentinel)
+            switch kind {
+            case "file": try bytes.write(to: lock)
+            case "directory":
+                try FileManager.default.createDirectory(at: lock, withIntermediateDirectories: false)
+                try bytes.write(to: lock.appendingPathComponent("member.txt"))
+            default: try FileManager.default.createSymbolicLink(at: lock, withDestinationURL: sentinel)
+            }
+            let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: store,
+                keyStore: WorkingOutputStoreKey()))
+            let request = ClipboardHistoryLegacyMigrationRequest(transfer: .init(entries: [], tags: [],
+                categoryOrder: [], retentionPeriod: .thirtyDays), payloadDirectory: root)
+            do {
+                _ = try await reopened.migrateLegacy(request)
+                XCTFail("An unexpected lock-name occupant must prevent replacement: \(kind)")
+            } catch {}
+            try await reopened.closeStoreForTesting()
+            XCTAssertEqual(try Data(contentsOf: sentinel), bytes)
+            if kind == "directory" { XCTAssertEqual(try Data(contentsOf: lock.appendingPathComponent("member.txt")), bytes) }
+            else { XCTAssertEqual(try Data(contentsOf: lock), bytes) }
+            if kind == "symlink" { XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: lock.path), sentinel.path) }
+        }
+    }
+
+    @MainActor
+    func testPendingWorkingOutputPreventsLegacyMigrationAndEmptyStoreAdoption() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("working-output-store-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let cloud = LinkedFileCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: LinkedFileKeys(), pollingInterval: nil)
+        let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51)
+        let target = root.appendingPathComponent("Current")
+        let working = root.appendingPathComponent("Visible")
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: target,
+            keyStore: WorkingOutputStoreKey(), faultInjector: .init { $0 == .syncWorkingOutputDuringConstruction },
+            syncServices: services, testingSyncWorkingRoot: working))
+        let source = root.appendingPathComponent("source.txt")
+        let bytes = Data("pending output retains durable ownership".utf8)
+        try bytes.write(to: source)
+        let pasteboard = NSPasteboard(name: .init("dev.bybee.AnyDoor.working-output-store.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.setString(source.absoluteString, forType: .fileURL)
+        guard case .captured(let captured) = try await sender.capture(.init(pasteboard: pasteboard), source: .unknown) else {
+            return XCTFail("Expected file capture")
+        }
+        let tag = try await sender.createTagDefinition(named: "Shared", assigningTo: captured.entryID)
+        try await sender.setSyncTagSelected(tag.definition.id, selected: true)
+        try await sender.setSyncEnabled(true)
+        try await module.setSyncEnabled(true)
+        try await module.setSyncEnabled(false)
+        let notices = try await module.workingOutputRecoveries()
+        let notice = try XCTUnwrap(notices.first)
+        _ = try await module.apply(.delete(captured.entryID))
+        let empty = try await module.page(.init())
+        XCTAssertTrue(empty.entries.isEmpty)
+        try await module.closeStoreForTesting()
+        let transferCache = target.appendingPathComponent("SyncTransfers")
+        if FileManager.default.fileExists(atPath: transferCache.path) { try FileManager.default.removeItem(at: transferCache) }
+        let children = try FileManager.default.contentsOfDirectory(atPath: target.path)
+        XCTAssertTrue(Set(children).isSubset(of: ["history.sqlite", "history.sqlite-wal", "history.sqlite-shm",
+            "payloads", "staging", "working-output.lock"]), "Only pending ownership may prevent empty-store adoption")
+        let migrationModule = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: target,
+            keyStore: WorkingOutputStoreKey(), syncServices: services, testingSyncWorkingRoot: working))
+        let request = ClipboardHistoryLegacyMigrationRequest(transfer: .init(entries: [], tags: [],
+            categoryOrder: [], retentionPeriod: .thirtyDays), payloadDirectory: root)
+        do {
+            _ = try await migrationModule.migrateLegacy(request)
+            XCTFail("An entry count cannot authorize discarding external output ownership")
+        } catch { XCTAssertEqual(error as? ClipboardHistoryModuleError, .operationUnavailable) }
+        try await migrationModule.closeStoreForTesting()
+        let legacyRoot = root.appendingPathComponent("Legacy")
+        let legacy = makeLinkedModule(root: legacyRoot, services: services, key: 0x52)
+        _ = try await legacy.capture(.init(source: .unknown, content: .text("displaced history must remain archived")))
+        try await legacy.closeStoreForTesting()
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: target,
+            legacyStoreRoot: legacyRoot, keyStore: WorkingOutputStoreKey(), syncServices: services,
+            testingSyncWorkingRoot: working))
+        let retained = try await reopened.workingOutputRecoveries()
+        XCTAssertEqual(retained.map(\.id), [notice.id])
+        XCTAssertEqual(try Data(contentsOf: notice.url), bytes)
+        let page = try await reopened.page(.init())
+        XCTAssertTrue(page.entries.isEmpty, "Pending ownership makes this store nonempty for adoption")
+    }
+
     @MainActor
     func testLegacyInlineConstructionIsRevokedByOffAndRecoversAfterReview() async throws {
         let barrier = LinkedReplacementBarrier()
@@ -141,6 +275,14 @@ extension ClipboardHistoryLinkedFileTests {
         let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
         let active = try await module.workingOutputRecoveries()
         XCTAssertTrue(active.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pending.appendingPathComponent("member.txt").path))
+        let count = try await module.page(.init()).entries.count
+        let request = ClipboardHistoryLegacyMigrationRequest(transfer: .init(entries: [], tags: [],
+            categoryOrder: [], retentionPeriod: .thirtyDays), payloadDirectory: root)
+        do {
+            _ = try await module.migrateLegacy(request, discardingEntries: count)
+            XCTFail("Store replacement must not unlink another process's active lease")
+        } catch { XCTAssertEqual(error as? ClipboardHistoryModuleError, .operationUnavailable) }
         XCTAssertTrue(FileManager.default.fileExists(atPath: pending.appendingPathComponent("member.txt").path))
         try Data().write(to: root.appendingPathComponent("release"))
         let exited = try await result
