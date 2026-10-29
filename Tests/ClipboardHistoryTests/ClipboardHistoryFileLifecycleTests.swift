@@ -274,26 +274,52 @@ extension ClipboardHistoryLinkedFileTests {
     func testLateFileVersionAfterDeletionIsPurgedWithoutRevivingHistory() async throws {
         let fixture = try await makeLinkedFixture()
         try await fixture.receiver.setSyncEnabled(false)
+        try await fixture.sender.setSyncEnabled(false)
         let initialRecords = Set(await fixture.cloud.uploadedRecords().map { $0.record.recordID })
         try Data("a version this offline receiver has never seen".utf8).write(to: fixture.original)
-        try await eventually { await fixture.cloud.uploadedRecords().filter { $0.record.kind == .fileBody }.count == 2 }
+        // Complete the fresh pass before capturing both the body and the
+        // authenticated version that gives an unseen body its retired owner.
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.sender.setSyncEnabled(false)
         let late = await fixture.cloud.uploadedRecords().filter {
             !initialRecords.contains($0.record.recordID) && ($0.record.kind == .entry || $0.record.kind == .fileBody)
         }
+        XCTAssertEqual(late.count, 2)
+        let body = try XCTUnwrap(late.first { $0.record.kind == .fileBody })
+        let envelope = try XCTUnwrap(late.first { $0.record.kind == .entry })
+        let account = await fixture.cloud.account()
+        let remoteControl = await fixture.cloud.control(for: account)
+        let control = try XCTUnwrap(remoteControl)
+        let loadedKey = try await fixture.services.keys.load(account: account, keyID: control.keyID)
+        let key = try XCTUnwrap(loadedKey)
+        guard case .fileVersion(let version) = try ClipboardSyncCodec.open(envelope.record, chunks: envelope.chunks,
+            account: account, control: control, key: key) else { return XCTFail("Missing authenticated late file version") }
+        XCTAssertEqual(version.descriptor.body, body.record)
+        let lateIDs = Set(late.map { $0.record.recordID })
+
+        // Drain each writer before the next phase so a queued retry or competing
+        // purge cannot be mistaken for completed deletion or late-record receipt.
         _ = try await fixture.sender.apply(.delete(fixture.entryID))
-        await fixture.sender.retrySync()
+        try await fixture.sender.setSyncEnabled(true)
+        try await fixture.sender.setSyncEnabled(false)
         try await fixture.receiver.setSyncEnabled(true)
+        try await fixture.receiver.setSyncEnabled(false)
         let deleted = try await fixture.receiver.page(.init())
         XCTAssertTrue(deleted.entries.isEmpty)
+        let beforeReplay = await fixture.cloud.visibleRecords()
+        XCTAssertTrue(beforeReplay.allSatisfy { !lateIDs.contains($0.recordID) })
 
         await fixture.cloud.replayLateRecords(late)
-        await fixture.receiver.retrySync()
+        try await fixture.receiver.setSyncEnabled(true)
 
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
         let page = try await fixture.receiver.page(.init())
         XCTAssertTrue(page.entries.isEmpty)
         let remaining = await fixture.cloud.visibleRecords()
-        XCTAssertTrue(remaining.allSatisfy { record in !late.contains { $0.record.recordID == record.recordID } },
-            "The retired object identity must still own late version envelopes and their body segments")
+        let survivors = remaining.filter { lateIDs.contains($0.recordID) }.map { "\($0.kind):\($0.recordID)" }
+        XCTAssertTrue(survivors.isEmpty,
+            "The retired object must purge late version envelopes and their bodies; remaining: \(survivors)")
     }
 
     @MainActor
