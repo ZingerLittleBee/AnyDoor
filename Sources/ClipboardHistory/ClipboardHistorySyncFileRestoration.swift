@@ -22,6 +22,14 @@ struct ClipboardSyncFileRestorationPreparation: Sendable {
     let upload: ClipboardSyncPendingUpload?
 }
 
+/// A display-only snapshot, never evidence for publication or body verification.
+struct ClipboardSyncFileRestorationSnapshot {
+    let accountID: String
+    let epoch: UUID
+    let rows: [Row]
+    let filesByJournal: [Data: [ClipboardSyncFileRestoration]]
+}
+
 extension ClipboardHistoryModule {
     static func createSyncFileRejoinSchema(in database: Database) throws {
         try database.execute(sql: """
@@ -57,12 +65,18 @@ extension ClipboardHistoryModule {
     }
 
     static func activeSyncFileRejoins(accountID: String, epoch: UUID, in database: Database) throws -> [Row] {
+        // Start with the journal's account/epoch range, including the common
+        // empty case, instead of scanning unrelated shared entries first.
         try Row.fetchAll(database, SQLRequest<Row>(literal: """
             SELECT restoration.* FROM clipboard_sync_file_rejoins AS restoration
-            JOIN clipboard_sync_withdrawals AS withdrawal USING(account_id, epoch, shared_id)
-            JOIN clipboard_sync_entries AS shared USING(account_id, epoch, shared_id)
-            JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+            CROSS JOIN clipboard_sync_withdrawals AS withdrawal
+            CROSS JOIN clipboard_sync_entries AS shared
+            CROSS JOIN clipboard_entries AS entry
             WHERE restoration.account_id = \(accountID) AND restoration.epoch = \(epoch.uuidString)
+              AND withdrawal.account_id = restoration.account_id AND withdrawal.epoch = restoration.epoch
+              AND withdrawal.shared_id = restoration.shared_id
+              AND shared.account_id = restoration.account_id AND shared.epoch = restoration.epoch
+              AND shared.shared_id = restoration.shared_id AND entry.id = shared.local_entry_id
               AND withdrawal.withdrawn = 0 AND withdrawal.operation_id = restoration.activation_id
               AND (\(syncEntryPublicationAuthority(accountID: accountID)))
             """))
@@ -266,10 +280,24 @@ extension ClipboardHistoryModule {
         publishMutation()
     }
 
+    static func syncFileRestorationSnapshot(accountID: String, epoch: UUID, in database: Database) throws -> ClipboardSyncFileRestorationSnapshot {
+        let rows = try activeSyncFileRejoins(accountID: accountID, epoch: epoch, in: database)
+        var files: [Data: [ClipboardSyncFileRestoration]] = [:]
+        for row in rows {
+            let journal: Data = row["journal"]
+            if files[journal] == nil { files[journal] = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: journal) }
+        }
+        return .init(accountID: accountID, epoch: epoch, rows: rows, filesByJournal: files)
+    }
+
     static func pendingSyncFileRestoration(_ descriptor: ClipboardSyncFileDescriptor, accountID: String,
-        epoch: UUID, in database: Database) throws -> ClipboardSyncFileRestoration? {
-        for row in try activeSyncFileRejoins(accountID: accountID, epoch: epoch, in: database) {
-            if let file = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: row["journal"])
+        epoch: UUID, in database: Database, snapshot: ClipboardSyncFileRestorationSnapshot? = nil) throws -> ClipboardSyncFileRestoration? {
+        let snapshot = snapshot.flatMap { $0.accountID == accountID && $0.epoch == epoch ? $0 : nil }
+        let rows = try snapshot?.rows ?? activeSyncFileRejoins(accountID: accountID, epoch: epoch, in: database)
+        for row in rows {
+            let journal: Data = row["journal"]
+            let files = try snapshot?.filesByJournal[journal] ?? JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: journal)
+            if let file = files
                 .first(where: { $0.descriptor == descriptor && !$0.acknowledged }),
                try syncFileRestorationHasMember(descriptor, row: row, in: database) { return file }
         }
