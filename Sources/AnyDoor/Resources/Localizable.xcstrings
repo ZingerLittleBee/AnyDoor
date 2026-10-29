@@ -4472,6 +4472,13 @@
         }
       }
     },
+    "clipboard.toast.previewChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Clipboard content changed while opening the preview. Try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "打开预览时剪贴板内容发生了变化，请重试。" } }
+      }
+    },
     "clipboard.toast.copyFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -16521,13 +16528,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The saved iCloud collection is missing or has changed. Check the Apple Account before retrying. Local history and existing cloud data are preserved."
+            "value": "The saved iCloud collection is missing or has changed. Check the Apple Account before retrying. Local history is preserved, but AnyDoor cannot confirm the previous collection's cloud contents."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已保存的 iCloud 同步集合缺失或已更改。请检查 Apple 账户后重试。本地历史和现有云端数据均被保留。"
+            "value": "已保存的 iCloud 同步集合缺失或已更改。请检查 Apple 账户后重试。本地历史会保留，但 AnyDoor 无法确认之前集合中的云端内容。"
           }
         }
       }

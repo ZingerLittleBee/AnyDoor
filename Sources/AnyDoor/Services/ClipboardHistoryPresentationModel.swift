@@ -315,6 +315,7 @@ struct ClipboardHistoryPresentationSource: Equatable, Identifiable {
 }
 
 enum ClipboardHistoryActionFailure: Equatable {
+    case previewChanged
     case operationUnavailable
     case entryNotFound
     case storeUnavailable
@@ -1381,6 +1382,18 @@ final class ClipboardHistoryPresentationModel {
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
         }
+    }
+
+    func previewMaterialization(for entryID: ClipboardHistoryEntryID) async -> ClipboardHistoryMaterialization? {
+        for _ in 0..<2 {
+            guard !Task.isCancelled else { return nil }
+            let value = await materialization(for: entryID, purpose: .fullPreview)
+            guard !Task.isCancelled else { return nil }
+            if let value { return value }
+            if actionFailure != nil { return nil }
+        }
+        actionFailure = .previewChanged
+        return nil
     }
 
     func materialization(

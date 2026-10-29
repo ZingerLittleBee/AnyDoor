@@ -246,6 +246,7 @@ enum L10n {
         case clipboardToastCaptureFailed = "clipboard.toast.captureFailed"
         case clipboardToastCaptureTooLarge = "clipboard.toast.captureTooLarge"
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
+        case clipboardToastPreviewChanged = "clipboard.toast.previewChanged"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastLegacyOwnedCount = "clipboard.toast.legacyOwnedCount"
         case clipboardToastPasteNeedsAccessibility =

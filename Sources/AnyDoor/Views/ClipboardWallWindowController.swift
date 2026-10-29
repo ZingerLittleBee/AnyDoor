@@ -1265,12 +1265,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func presentPreview(for entry: ClipboardHistoryEntry) {
         previewTask?.cancel()
         previewTask = Task {
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .fullPreview
-                ),
-                !Task.isCancelled,
+            let content = await state.presentation.previewMaterialization(for: entry.id)
+            guard !Task.isCancelled else { return }
+            guard let materialization = content,
                 state.selectedItem?.id == entry.id
             else {
                 if state.presentation.actionFailure != nil {

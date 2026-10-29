@@ -124,6 +124,8 @@ sharing retained history with a different account requires explicit authorizatio
 
 If AnyDoor confirms that a previously used cloud collection is missing, Clipboard
 Sync settings offers **Start a New Sync Collection**, including while sync is off.
+This also applies when the collection's iCloud zone has been deleted. AnyDoor
+preserves local history but cannot promise that the previous cloud contents remain.
 If the collection may return, use Retry while sync is on or a cloud clear is
 pending. When sync is off without a pending clear, turn it on to check again.
 Starting a new collection asks for

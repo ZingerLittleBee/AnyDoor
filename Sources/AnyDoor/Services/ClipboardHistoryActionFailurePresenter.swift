@@ -11,6 +11,9 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
 
     init(_ failure: ClipboardHistoryActionFailure) {
         switch failure {
+        case .previewChanged:
+            titleKey = .clipboardToastPreviewChanged
+            details = []
         case .syncFilesPending:
             titleKey = .clipboardSyncFilesPending
             details = []
