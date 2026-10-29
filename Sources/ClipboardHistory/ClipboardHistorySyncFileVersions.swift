@@ -1,6 +1,8 @@
 import Foundation
 import GRDB
 
+enum ClipboardSyncFilePublicationError: Error { case originRevoked }
+
 extension ClipboardHistoryModule {
     func syncFileSelection(objectID: UUID) throws -> ClipboardSyncFileSelection? {
         try requiredDatabase().read { database in
@@ -56,15 +58,19 @@ extension ClipboardHistoryModule {
                 epoch: context.control.epoch, in: database).first { $0.objectID == objectID && $0.identity == identity && $0.url == url }
             if origin == nil, try Bool.fetchOne(database, sql: """
                 SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations
-                  WHERE account_id = ? AND epoch = ? AND object_id = ? AND identity = ? AND path = ?)
+                  WHERE account_id = ? AND epoch = ? AND object_id = ? AND identity = ?)
                 """, arguments: [context.account.identifier, context.control.epoch.uuidString,
-                    objectID.uuidString, identity, url.path]) == true {
+                    objectID.uuidString, identity]) == true {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             return (url, identity, origin?.baseVersionID ?? parent, origin)
         }
-        _ = try await publishFileVersion(sourceURL: source.0, objectID: objectID, parents: [source.2],
-            expectedSourceIdentity: source.1, origin: source.3)
+        do {
+            _ = try await publishFileVersion(sourceURL: source.0, objectID: objectID, parents: [source.2],
+                expectedSourceIdentity: source.1, origin: source.3)
+        } catch ClipboardSyncFilePublicationError.originRevoked {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
         await retrySync()
     }
 
@@ -117,7 +123,7 @@ extension ClipboardHistoryModule {
                       current.revision == origin.revision, current.identity == origin.identity,
                       current.url == origin.url, current.baseVersionID == origin.baseVersionID,
                       current.baseDigest == origin.baseDigest, !current.hasPendingApplication else {
-                    throw POSIXError(.ESTALE)
+                    throw ClipboardSyncFilePublicationError.originRevoked
                 }
             }
             try storePreparedFileVersion(prepared, account: account, control: control, in: database)

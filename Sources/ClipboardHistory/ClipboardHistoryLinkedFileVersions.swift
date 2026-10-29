@@ -86,6 +86,8 @@ extension ClipboardHistoryModule {
                 do {
                     _ = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
                         parents: [source.baseVersionID], expectedSourceIdentity: source.identity, origin: source)
+                } catch ClipboardSyncFilePublicationError.originRevoked {
+                    continue
                 } catch {
                     guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
                     try deferSyncFileWork(work, error: error, account: account, control: control, generation: generation)
