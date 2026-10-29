@@ -50,13 +50,14 @@ extension ClipboardHistoryLinkedFileTests {
         })
         await fixture.sender.suspendSync()
         await fixture.receiver.suspendSync()
+        let unrelated = try await fixture.receiver.capture(.init(source: .unknown, content: .text("unrelated revision")))
         gate.withLock { $0.armed = true }
         let page = Task { try await fixture.receiver.page(.init()) }
         for pass in 1...3 {
             let deadline = Date().addingTimeInterval(5)
             while gate.withLock({ $0.passes }) < pass, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
             XCTAssertEqual(gate.withLock { $0.passes }, pass)
-            _ = try await fixture.receiver.apply(.setFavorite(fixture.entryID, pass.isMultiple(of: 2) == false))
+            _ = try await fixture.receiver.apply(.setFavorite(unrelated.entryID, pass.isMultiple(of: 2) == false))
             barrier.release()
         }
         do {

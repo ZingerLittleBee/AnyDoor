@@ -16,10 +16,35 @@ struct ClipboardHistoryFileDisplayFacts: Sendable {
     }
     private var availability: [Identity: Bool] = [:]
     private var applications: [String: Bool] = [:]
+    private var permitsNativeReads = true
+    private var beforeNativeRead: @Sendable () throws -> Void = {}
+    private var nativeReadError: (any Error)?
+
+    mutating func setNativeReadCheck(_ check: @escaping @Sendable () throws -> Void) {
+        beforeNativeRead = check
+    }
+
+    func checkNativeReadFailure() throws {
+        if let nativeReadError { throw nativeReadError }
+    }
+
+    private mutating func admitsNativeRead() -> Bool {
+        guard permitsNativeReads, nativeReadError == nil else { return false }
+        do { try beforeNativeRead(); return true }
+        catch { nativeReadError = error; return false }
+    }
+
+    func cacheOnly() -> Self {
+        var copy = self
+        copy.permitsNativeReads = false
+        copy.beforeNativeRead = {}
+        return copy
+    }
 
     mutating func isAvailable(path: String, identity: Data, nativeIdentity: Data?) -> Bool {
         let key = Identity(path: path, identity: identity, nativeIdentity: nativeIdentity)
         if let cached = availability[key] { return cached }
+        guard admitsNativeRead() else { return false }
         let available = ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: identity, nativeIdentity: nativeIdentity)
         availability[key] = available
         return available
@@ -27,6 +52,7 @@ struct ClipboardHistoryFileDisplayFacts: Sendable {
 
     mutating func isApplication(path: String) -> Bool {
         if let cached = applications[path] { return cached }
+        guard admitsNativeRead() else { return false }
         let application = ClipboardApplicationPackage.isApplication(URL(fileURLWithPath: path))
         applications[path] = application
         return application
@@ -36,6 +62,7 @@ struct ClipboardHistoryFileDisplayFacts: Sendable {
         guard let path, let identity else { return false }
         let key = Identity(path: path, identity: identity, nativeIdentity: nil, requiresReadable: false)
         if let cached = availability[key] { return cached }
+        guard admitsNativeRead() else { return false }
         let available = ClipboardSyncFileIO.isAvailable(path: path, identity: identity)
         availability[key] = available
         return available

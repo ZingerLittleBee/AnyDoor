@@ -6,6 +6,16 @@ extension ClipboardHistoryModule {
     struct MutationApplyResult: Sendable {
         let outcome: ClipboardHistoryMutationOutcome
         let didMutate: Bool
+        let displaySnapshot: ClipboardHistoryPageDisplaySnapshot?
+        let displayRevision: Int64
+
+        init(outcome: ClipboardHistoryMutationOutcome, didMutate: Bool,
+            displaySnapshot: ClipboardHistoryPageDisplaySnapshot? = nil, displayRevision: Int64 = 0) {
+            self.outcome = outcome
+            self.didMutate = didMutate
+            self.displaySnapshot = displaySnapshot
+            self.displayRevision = displayRevision
+        }
     }
 
     public func capture(
@@ -34,6 +44,7 @@ extension ClipboardHistoryModule {
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {
         let database = try await writableDatabase()
+        let epoch = storeEpoch
         let result: MutationApplyResult
         switch mutation {
         case .delete(let entryID):
@@ -56,7 +67,7 @@ extension ClipboardHistoryModule {
         if result.didMutate {
             publishMutation()
         }
-        return result.outcome
+        return try await resolveMutationDisplay(result, in: database, epoch: epoch)
     }
 
     public func materialize(

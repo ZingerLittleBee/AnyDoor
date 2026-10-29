@@ -9,24 +9,55 @@ struct ClipboardHistoryPageSyncContext: Sendable {
     let materializationRevisions: [String: Int64]
 }
 
-private struct ClipboardHistoryPageDisplaySnapshot: Sendable {
+struct ClipboardHistoryResolvedDisplay: Sendable {
+    let page: ClipboardHistoryPage
+    let facts: ClipboardHistoryFileDisplayFacts
+}
+
+struct ClipboardHistoryPageDisplaySnapshot: Sendable {
     let page: ClipboardHistoryPage
     var context: ClipboardHistoryPageSyncContext?
 
-    func resolve() throws -> ClipboardHistoryPage {
-        guard let context else { return page }
-        var facts = ClipboardHistoryFileDisplayFacts()
+    var hasNativeFacts: Bool {
+        guard let context else { return false }
+        return context.files.values.contains { !$0.isEmpty } || context.locations.values.contains { !$0.isEmpty }
+    }
+
+    func resolve(facts initialFacts: ClipboardHistoryFileDisplayFacts = .init(),
+        faults: ClipboardHistoryFaultInjector = .init(),
+        checkCancellation: @escaping @Sendable () throws -> Void = { try Task.checkCancellation() }) throws -> ClipboardHistoryResolvedDisplay {
+        guard let context else { return .init(page: page, facts: initialFacts) }
+        var facts = initialFacts
+        facts.setNativeReadCheck {
+            try checkCancellation()
+            try faults.check(.nativeFileDisplayProbe)
+            try checkCancellation()
+        }
         let entries = try page.entries.map { entry in
-            try Task.checkCancellation()
+            try checkCancellation()
             let id = entry.id.value.uuidString.lowercased()
+            let files = try (context.files[id] ?? []).map { plan in
+                try checkCancellation()
+                let value = plan.resolve(&facts)
+                try facts.checkNativeReadFailure()
+                return value
+            }
+            let locations = try (context.locations[id] ?? []).map { plan in
+                try checkCancellation()
+                let value = plan.resolve(&facts)
+                try facts.checkNativeReadFailure()
+                return value
+            }
             return ClipboardHistoryEntry(id: entry.id, capturedAt: entry.capturedAt,
                 previewText: entry.previewText, facets: entry.facets, isFavorite: entry.isFavorite,
                 tagIDs: entry.tagIDs, source: entry.source, materializationRevision: entry.materializationRevision,
                 hasTextConflict: entry.hasTextConflict,
-                syncFiles: context.files[id]?.map { $0.resolve(&facts) } ?? [],
-                linkedFileLocations: context.locations[id]?.map { $0.resolve(&facts) } ?? [])
+                syncFiles: files, linkedFileLocations: locations)
         }
-        return .init(entries: entries, nextCursor: page.nextCursor, cursorDisposition: page.cursorDisposition, state: page.state)
+        try checkCancellation()
+        facts.setNativeReadCheck({})
+        return .init(page: .init(entries: entries, nextCursor: page.nextCursor,
+            cursorDisposition: page.cursorDisposition, state: page.state), facts: facts)
     }
 }
 
@@ -194,17 +225,65 @@ extension ClipboardHistoryModule {
             let epoch = storeEpoch
             let sourceDatabase = try requiredDatabase()
             let (snapshot, revision) = try indexedPageSnapshot(query, after: cursor)
+            // A SQL-only result is already coherent. Do not add a suspension
+            // or invalidate text browsing for unrelated file progress.
+            guard snapshot.hasNativeFacts else { return snapshot.page }
             let faults = faultInjector
-            let resolution = Task.detached(priority: .userInitiated) {
+            let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
+                pool: sourceDatabase, epoch: epoch, revision: revision, request: .page(query, cursor), page: snapshot.page)) { checkCancellation in
+                try checkCancellation()
                 try faults.check(.pageNativeFileFacts)
-                return try snapshot.resolve()
+                return try snapshot.resolve(faults: faults, checkCancellation: checkCancellation)
             }
-            let page = try await withTaskCancellationHandler { try await resolution.value } onCancel: { resolution.cancel() }
             try Task.checkCancellation()
             guard epoch == storeEpoch, database === sourceDatabase else { throw ClipboardHistoryModuleError.storeUnavailable }
-            if try linkedRead({ try Self.historyRevision(in: $0) }) == revision { return page }
+            if try linkedRead({ try Self.historyRevision(in: $0) }) == revision {
+                // Coalescing shares only native facts. SQL-only transfer state
+                // may change without advancing the history revision.
+                return try snapshot.resolve(facts: resolved.facts.cacheOnly()).page
+            }
         }
         throw ClipboardHistoryModuleError.operationUnavailable
+    }
+
+    static func entryMutationResult(from row: Row, in database: Database, didMutate: Bool) throws -> MutationApplyResult {
+        let snapshot = try entryDisplaySnapshot(from: row, in: database)
+        return .init(outcome: .updated(snapshot.page.entries[0]), didMutate: didMutate,
+            displaySnapshot: snapshot, displayRevision: try historyRevision(in: database))
+    }
+
+    private static func entryDisplaySnapshot(from row: Row, in database: Database) throws -> ClipboardHistoryPageDisplaySnapshot {
+        let context = try pageSyncContext(entryIDs: [row["id"]], in: database)
+        let entry = try entry(from: row, in: database, syncContext: context)
+        return .init(page: .init(entries: [entry], nextCursor: nil, cursorDisposition: .initial), context: context)
+    }
+
+    func resolveMutationDisplay(_ result: MutationApplyResult, in pool: DatabasePool,
+        epoch: Int) async throws -> ClipboardHistoryMutationOutcome {
+        guard let snapshot = result.displaySnapshot, snapshot.hasNativeFacts,
+              case .updated(let entry) = result.outcome else { return result.outcome }
+        let faults = faultInjector
+        let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
+            pool: pool, epoch: epoch, revision: result.displayRevision, request: .mutation(entry.id), page: snapshot.page)) { checkCancellation in
+            try checkCancellation()
+            try faults.check(.entryNativeFileFacts)
+            return try snapshot.resolve(faults: faults, checkCancellation: checkCancellation)
+        }
+        try Task.checkCancellation()
+        guard epoch == storeEpoch, database === pool else { throw ClipboardHistoryModuleError.storeUnavailable }
+        let latest = try linkedRead { database -> ClipboardHistoryPageDisplaySnapshot? in
+            let id = entry.id.value.uuidString.lowercased()
+            guard try isLiveEntry(id, at: now(), in: database),
+                  let row = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_entries WHERE id = ?", arguments: [id]) else { return nil }
+            return try Self.entryDisplaySnapshot(from: row, in: database)
+        }
+        guard let latest else { return .notFound }
+        // The mutation already committed. Return current SQL metadata rather
+        // than failing on unrelated revisions or restoring an older favorite.
+        // Native facts are display hints: newly encountered identities remain
+        // unavailable until a fresh page inspects them; no I/O occurs here.
+        let page = try latest.resolve(facts: resolved.facts.cacheOnly()).page
+        return .updated(page.entries[0])
     }
 
     private func indexedPageSnapshot(_ query: ClipboardHistoryQuery, after cursor: ClipboardHistoryCursor?)
@@ -734,8 +813,8 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
         let context = try syncContext ?? pageSyncContext(entryIDs: [storedID], in: database)
-        // Page callers resolve these plans after releasing their SQL snapshot.
-        // Single-entry mutation results retain their existing live mapping.
+        // Page and mutation snapshots resolve these plans after releasing SQL.
+        // Callers without a prepared context retain the live mapping.
         var facts = ClipboardHistoryFileDisplayFacts()
         let files = syncContext == nil ? context.files[storedID]?.map { $0.resolve(&facts) } ?? [] : []
         let locations = syncContext == nil ? context.locations[storedID]?.map { $0.resolve(&facts) } ?? [] : []
