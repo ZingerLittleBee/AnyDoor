@@ -230,8 +230,10 @@ file downloads from independent sharing and deletion. An unresolved file keeps i
 visible failure and previous complete bytes. Automatic retries wait 30 seconds,
 including across restart; explicit Retry can retry immediately. Account, key,
 control, provider backoff, and database failures still stop the pass.
-Corrupt encrypted content records use the same persistent 30-second deadline for
-downloading, authenticating, and decoding that record, not for change discovery.
+Corrupt encrypted content records persist consecutive failures in the same retry
+journal. Their download/authentication/decode delay grows from 30 to 60, 120, 240,
+480, and at most 900 seconds; change discovery continues. Explicit Retry can
+attempt immediately, and successful import retires the counter with its receipt.
 Other verified retirement events in the page can apply, but an unreadable record
 may contain deletion or sharing authority: its cursor remains unacknowledged and
 outgoing publication stays blocked until that unknown authority is resolved.
@@ -300,8 +302,11 @@ File explicitly leaves its bytes alone and relinquishes ownership; users can
 inspect or remove it through Finder. One pending reservation per version directory
 prevents repeated failures from accumulating new partials. Existing review notices
 use cheap path/identity checks on refresh, rather than hashing their contents
-again; an incomplete candidate is replayed only by an authorized receive. A
-detected mismatch permanently leaves that candidate for review. Snapshot equality
+again; an incomplete candidate is replayed only by an authorized receive. An
+unavailable inspection can be retried by a later authorized receive using the
+original ownership proof, including older unavailable notices. Failed native
+reads do not establish modification. A detected mismatch permanently leaves that
+candidate for review, even if a later inspection cannot access it. Snapshot equality
 protects timestamp-only edits and same-inode truncation to another valid source
 prefix. Each parent directory is updated in the child's creation transaction.
 Writes between progress checkpoints, and a crash between a native metadata change
@@ -346,6 +351,10 @@ editor replacements require revision-bound reassociation, which retires the old
 journal without inferring a swap outcome or deleting either visible output.
 An unresolved journal exposes the existing Retry/Reassociate actions through
 unavailable tracking status; it does not make the saved working bytes unavailable.
+Reassociating the exact journal replacement preserves its authenticated base when
+its bytes and the current complete, single-head version graph still agree. A
+moved installed replacement therefore does not conflict with itself. An edited,
+different-identity or superseded candidate retains the old base for reconciliation.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
 Top-level vnode handles share a process-wide budget of 64, including handles
@@ -354,6 +363,13 @@ at most sixteen unobserved locations, even when provider polling is disabled.
 These inspections use local account/epoch and generation admission; only changed
 observations request automatic sync, which retains provider authority checks and
 retry deadlines. Unchanged or unavailable locations do not poll the provider.
+Overflow polling keeps a five-minute, handle-free metadata hint from the last
+content proof. An unchanged ordinary file skips its body read; directory hints
+include every descendant's native snapshot, never just the root stamp. Hints
+expire and are cleared on suspension or removal. Native events, ordinary sync
+reconciliation, explicit refresh and publication still verify complete content.
+Inventory traversal checks cancellation between members; a blocked individual
+native call still has no guaranteed cancellation deadline.
 A frozen local version and its originating location's new base commit in one
 transaction after rechecking the location revision, identity, and prior base.
 Pausing or reassociating the location during freezing therefore cannot publish
@@ -366,6 +382,18 @@ and [malformed-stream/conflict tests](../../Tests/ClipboardHistoryTests/Clipboar
 These isolated provider-boundary tests do not establish signed two-Mac delivery.
 History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
 remain independent and do not create Linked Locations.
+
+History pages first capture SQL-only display plans. Native availability and
+application checks run on one dedicated serial Dispatch queue, outside database
+transactions and Swift's cooperative executor. Identical database/page snapshots
+share in-flight work, with independent waiter cancellation; cancelled queued work
+is discarded. A blocked native call cannot be interrupted, but cannot create
+additional native workers. SQL-only pages return their coherent snapshot without
+retrying on unrelated transfer revisions. Favorite and tag mutations commit and
+notify before optional native display work; responses use current SQL metadata
+and already-resolved display hints, never new native reads inside the writer.
+A malformed stored file descriptor marks only that display item unavailable;
+file actions still validate its authoritative descriptor and live identity.
 
 Application packages use that same authenticated tree and aggregate, per-version
 download policy. Receiving a version does not replace an associated application.
@@ -524,7 +552,10 @@ records are cleared. Only a later explicit On and fresh tag selection can create
 and publish the new collection. A returning control or changed account rejects
 stale confirmation. Recovered epochs remain durably retired even when an old
 control returns after recovery or races the next creation; another device's new
-epoch with the preserved key may still win. An affected unfinished clear becomes
+epoch may still win, including a fresh device's different key. A recovered device
+loads and verifies that winning key before accepting the new control; a missing
+key remains waiting without discarding its recovery candidate. This does not
+permit replacing an established control or rejoining a retired epoch. An affected unfinished clear becomes
 superseded, never reported as successfully cleared.
 
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
@@ -1308,7 +1339,10 @@ retired before the lifecycle reports ready or resumes monitoring/sync. Its one-t
 transaction adds missing definitions while preserving current encrypted identities
 and memberships; only a successful import permits deleting the preference. An
 encrypted completion marker rejects replay after restart, and failures retain the
-source for retry. New tag mutations never refresh a mirror. The atomic legacy import runs in
+source for retry. A committed completion marker and retained recovery format are
+read before writer admission, so an already-completed import does not wait for
+an unrelated index rebuild. A first import still rechecks and writes the marker
+in its atomic transaction. New tag mutations never refresh a mirror. The atomic legacy import runs in
 a module-owned utility worker so WAL reads remain responsive; ordinary writers
 wait for its turn. Close, retry and reset cancel and drain that worker, and store
 migration joins it before replacing the pool. Store transitions reject new imports
