@@ -254,6 +254,12 @@ The additive `v32_working_output_recovery` journal owns only exact generated
 Receiving paths, with a durable reservation before creation, pinned native
 identity, and an encrypted complete-output fingerprint. A store-local advisory
 lease excludes active constructors in this and other processes from recovery.
+Its stable empty `working-output.lock` is a store artifact during legacy
+migration and relocation. Store replacement holds an exclusive lease, including
+when an older store has not created the sidecar yet, and accepts only an empty
+regular file without following links. Pending output ownership makes an
+otherwise entry-empty store nonempty for adoption and blocks legacy replacement;
+confirming a history entry count does not discard external recovery notices.
 On startup or a local recovery query, unchanged proven candidates can be removed;
 missing exact paths retire ownership without following renamed or published
 files. Recovery never deletes by filename pattern or reclaims retained

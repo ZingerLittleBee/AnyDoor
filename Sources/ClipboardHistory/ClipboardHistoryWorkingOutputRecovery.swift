@@ -34,13 +34,15 @@ struct ClipboardWorkingOutputRecoveryRequired: Error {}
 /// One empty advisory-lock file belongs to the encrypted store. A shared lease
 /// covers construction through discard, including other processes; recovery
 /// takes an exclusive lease and never waits on an active producer.
-private final class ClipboardWorkingOutputLease: Sendable {
+final class ClipboardWorkingOutputLease: Sendable {
+    static let fileName = "working-output.lock"
     private let descriptor: Int32
 
     init?(root: URL, exclusive: Bool) throws {
-        let fd = open(root.appendingPathComponent("working-output.lock").path,
+        let fd = open(root.appendingPathComponent(Self.fileName).path,
             O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
         guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        do { try Self.validate(fd) } catch { close(fd); throw error }
         if flock(fd, (exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB) != 0 {
             let failure = errno
             close(fd)
@@ -48,6 +50,52 @@ private final class ClipboardWorkingOutputLease: Sendable {
             throw ClipboardHistoryStorageError.fileOperationFailed(failure)
         }
         descriptor = fd
+    }
+
+    /// Store replacement may remove this exact empty sidecar only while no
+    /// constructor or recovery owns it. Ordinary lease release never unlinks it.
+    static func forStoreReplacement(at root: URL) throws -> ClipboardWorkingOutputLease? {
+        var status = stat()
+        if lstat(root.path, &status) != 0 {
+            if errno == ENOENT { return nil }
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(ENOTDIR)
+        }
+        // Older stores may have no sidecar yet. Creating it is part of taking
+        // the barrier, not evidence that there cannot be a concurrent producer.
+        guard let lease = try ClipboardWorkingOutputLease(root: root, exclusive: true) else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        return lease
+    }
+
+    static func validateArtifact(at root: URL) throws {
+        let fd = open(root.appendingPathComponent(fileName).path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        if fd < 0, errno == ENOENT { return }
+        guard fd >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        defer { close(fd) }
+        try validate(fd)
+    }
+
+    private static func validate(_ fd: Int32) throws {
+        var status = stat()
+        guard fstat(fd, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), status.st_size == 0, status.st_nlink == 1 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
+        }
+    }
+
+    func removeArtifact(at root: URL) throws {
+        try Self.validate(descriptor)
+        var owned = stat(), current = stat()
+        let url = root.appendingPathComponent(Self.fileName)
+        guard fstat(descriptor, &owned) == 0, lstat(url.path, &current) == 0,
+              ClipboardSyncFileSnapshot(owned) == ClipboardSyncFileSnapshot(current) else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+        }
+        guard unlink(url.path) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
     }
 
     deinit { close(descriptor) }
@@ -329,6 +377,10 @@ final class ClipboardWorkingOutputOwner: Sendable {
 }
 
 extension ClipboardHistoryModule {
+    static func hasWorkingOutputOwnership(in database: Database) throws -> Bool {
+        try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_working_outputs)") == true
+    }
+
     static func createWorkingOutputRecoverySchema(in database: Database) throws {
         try database.execute(sql: "CREATE TABLE clipboard_working_outputs(id TEXT PRIMARY KEY NOT NULL, directory TEXT UNIQUE NOT NULL, record BLOB NOT NULL)")
     }
