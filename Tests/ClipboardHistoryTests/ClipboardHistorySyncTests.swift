@@ -566,10 +566,16 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     func testPermanentProviderFailureStopsAutomaticWorkAcrossRestartUntilExplicitRetry() async throws {
-        for waitsForTransfer in [true, false] {
-            let code: CKError.Code = waitsForTransfer ? .serverRejectedRequest : .incompatibleVersion
-            let expected: ClipboardHistorySyncPhase = waitsForTransfer ? .failed(.providerRejected) : .failed(.unsupportedVersion)
-            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(code) })
+        let cases: [(Error, Bool, ClipboardHistorySyncPhase)] = [
+            (CKError(.serverRejectedRequest), true, .failed(.providerRejected)),
+            (CKError(.incompatibleVersion), false, .failed(.unsupportedVersion)),
+            (CKError(.limitExceeded), true, .failed(.providerRejected)),
+            (CKError(.constraintViolation), false, .failed(.providerRejected)),
+            (CKError(.managedAccountRestricted), true, .failed(.providerRejected)),
+            (NSError(domain: "dev.bybee.AnyDoor.native-cloud-fixture", code: 1), false, .failed(.providerRejected)),
+        ]
+        for (error, waitsForTransfer, expected) in cases {
+            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw error })
             let cloud = SyncTestCloud()
             let keys = SyncTestKeys()
             let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: .milliseconds(40))

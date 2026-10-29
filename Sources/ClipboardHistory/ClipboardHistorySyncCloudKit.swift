@@ -1125,11 +1125,19 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private nonisolated static func permanentFailure(_ error: Error) -> ClipboardSyncServiceError? {
+        guard let cloud = error as? CKError else {
+            let mapped = failure(error) as? ClipboardSyncServiceError
+            switch mapped {
+            case .providerRejected, .unsupportedVersion: return mapped
+            default: return nil
+            }
+        }
         if hasCode(error, .incompatibleVersion) { return .unsupportedVersion }
-        if hasCode(error, .internalError) || hasCode(error, .serverRejectedRequest) || hasCode(error, .invalidArguments) {
+        if [.internalError, .serverRejectedRequest, .invalidArguments, .limitExceeded,
+            .constraintViolation, .managedAccountRestricted].contains(where: { hasCode(error, $0) }) {
             return .providerRejected
         }
-        return nil
+        return cloud.partialErrorsByItemID?.values.compactMap(permanentFailure).first
     }
 
     private nonisolated static func retryAfter(_ cloud: CKError) -> TimeInterval? {
@@ -1141,7 +1149,21 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         if error is CancellationError || error is ClipboardSyncServiceError { return error }
         if ClipboardSyncFileErrors.isAccessDenied(error) { return ClipboardSyncServiceError.localFileAccessDenied }
         if case .fileOperationFailed = error as? ClipboardHistoryStorageError { return ClipboardSyncServiceError.localStorage }
-        guard let cloud = error as? CKError else { return ClipboardSyncServiceError.network(retryAfter: nil) }
+        guard let cloud = error as? CKError else {
+            if let url = error as? URLError {
+                switch url.code {
+                case .cancelled: return CancellationError()
+                case .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+                     .networkConnectionLost, .notConnectedToInternet, .resourceUnavailable,
+                     .internationalRoamingOff, .callIsActive, .dataNotAllowed:
+                    return ClipboardSyncServiceError.network(retryAfter: nil)
+                default: break
+                }
+            }
+            // An unrecognized provider failure is not evidence of a transient
+            // network outage. Pause until an explicit retry instead of looping.
+            return ClipboardSyncServiceError.providerRejected
+        }
         if let permanent = permanentFailure(error) { return permanent }
         if hasCode(error, .serverRecordChanged) { return ClipboardSyncServiceError.conflict }
         if let nested = cloud.partialErrorsByItemID?.values.first(where: {
