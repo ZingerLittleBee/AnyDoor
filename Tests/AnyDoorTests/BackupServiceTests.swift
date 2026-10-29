@@ -39,7 +39,7 @@ final class BackupServiceTests: XCTestCase {
                                     appPathResolver: { _ in nil })
         let snapshot = try service.exportSnapshot()
 
-        XCTAssertEqual(snapshot.schemaVersion, BackupSnapshot.currentSchemaVersion)
+        XCTAssertEqual(snapshot.schemaVersion, 2, "Configuration without same-name tag identities remains readable by older clients")
         XCTAssertEqual(snapshot.appShortcuts.count, 1)
         XCTAssertEqual(snapshot.appShortcuts.first?.appBundleID, "com.apple.Safari")
         XCTAssertEqual(snapshot.builtinPreferences.first?.itemKey, "darkMode")
