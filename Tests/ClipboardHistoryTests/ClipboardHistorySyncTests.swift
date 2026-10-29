@@ -4853,15 +4853,27 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let tag = try await first.createTagDefinition(named: "Authenticated", assigningTo: captured.entryID)
         try await first.setSyncTagSelected(tag.definition.id, selected: true)
         try await first.setSyncEnabled(true)
-        await cloud.damageNextDownload()
+        let uploads = await cloud.currentUploads()
+        let entry = try XCTUnwrap(uploads.first { $0.record.kind == .entry })
+        await cloud.damageContentRecord(entry.record.recordID)
         try await second.setSyncEnabled(true)
         let rejected = await second.syncStatus()
         let empty = try await second.page(.init())
         XCTAssertEqual(rejected.phase, .failed(.corruptData))
         XCTAssertTrue(empty.entries.isEmpty)
+        let damagedReads = await cloud.contentDownloadCount(entry.record.recordID)
+        XCTAssertEqual(damagedReads, 1)
+        await cloud.damageContentRecord(nil)
+        await cloud.clearObservedChangeCursors()
         await second.retrySync()
+        let retryCursors = await cloud.observedChangeCursors()
+        let retryCursor: Data? = try XCTUnwrap(retryCursors.first)
+        XCTAssertNil(retryCursor, "Rejected content must not advance the discovery cursor")
+        let repairedReads = await cloud.contentDownloadCount(entry.record.recordID)
+        XCTAssertEqual(repairedReads, damagedReads + 1)
         let recovered = try await second.page(.init())
         XCTAssertEqual(recovered.entries.count, 1)
+        XCTAssertEqual(recovered.entries.first?.previewText, "authenticated history")
         let complete = await second.syncStatus()
         XCTAssertEqual(complete.phase, .upToDate)
     }
@@ -5411,7 +5423,6 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var losesControlResponse = false
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
-    private var damagesDownload = false
     private var damagedContentRecord: String?
     private var contentDownloads: [String: Int] = [:]
     func damageContentRecord(_ recordID: String?) { damagedContentRecord = recordID }
@@ -5531,9 +5542,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if damagesDownload || (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID
+        if (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID
             || damagedContentRecord == record.recordID {
-            damagesDownload = false
             if record.kind == .fileBody { damagesFileBody = false }
             var changed = upload.chunks
             changed[0][0] ^= 1
@@ -5721,7 +5731,6 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func publishedUploads() -> [ClipboardSyncUpload] { records[currentAccount.identifier] ?? [] }
     func currentUploads() -> [ClipboardSyncUpload] { (records[currentAccount.identifier] ?? []).filter { !purgedRecords.contains($0.record.recordID) } }
     func loseNextEntryCommitResponse() { losesEntryResponse = true }
-    func damageNextDownload() { damagesDownload = true }
     func replayAllChangesInReverseOrder() { reversesAllChanges = true }
     func redeliverPurgedRecord(_ id: String) { purgedRecords.remove(id); reversesAllChanges = true }
     func redeliverPurgedContent() { purgedRecords.removeAll(); reversesAllChanges = true }
