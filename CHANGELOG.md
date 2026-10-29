@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.11] - 2026-10-29
+
 ### Changed
 
 - The command palette has a black glass surface in Dark Mode, so its text and
