@@ -63,11 +63,13 @@ extension ClipboardHistoryLinkedFileTests {
         let laterReads = await cloud.bodyReadCount()
         XCTAssertEqual(laterReads, 3)
         await cloud.damage(nil)
+        let repairTime = clock.withLock { $0 }
         await reopened.retrySync()
+        // A coalesced retry can still be queued, and polling can start again as
+        // soon as it completes. Wait for durable completion, not an idle phase.
+        try await eventually { await reopened.syncStatus().lastCompletedAt == repairTime }
         let repairedReads = await cloud.bodyReadCount()
         XCTAssertEqual(repairedReads, 4, "Explicit Retry can repair immediately despite the longer deadline")
-        let status = await reopened.syncStatus()
-        XCTAssertEqual(status.phase, .upToDate)
         let repaired = try await reopened.page(.init())
         XCTAssertEqual(Set(repaired.entries.map(\.id)), [captured.entryID, queued.entryID])
         await sender.retrySync()
