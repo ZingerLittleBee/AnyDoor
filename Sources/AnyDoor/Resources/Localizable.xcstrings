@@ -15838,6 +15838,108 @@
         }
       }
     },
+    "settings.clipboard.sync.workingOutput.changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file or its location has changed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件或其位置已发生变化。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.workingOutput.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AnyDoor cannot verify the current contents at these locations. Review them in Finder. Keep File leaves the files untouched and dismisses the notice."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AnyDoor 无法验证这些位置当前的内容。请在访达中检查。“保留文件”不会更改文件，只会移除此提示。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.workingOutput.incomplete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File creation was interrupted."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件创建已中断。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.workingOutput.keep": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep File"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留文件"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.workingOutput.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files to Review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待检查文件"
+          }
+        }
+      }
+    },
+    "settings.clipboard.sync.workingOutput.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file could not be checked."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法检查此文件。"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.workingCopies": {
       "extractionState": "manual",
       "localizations": {

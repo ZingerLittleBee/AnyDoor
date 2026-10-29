@@ -68,6 +68,20 @@ After replacing a linked file or folder, AnyDoor keeps the previous output besid
 it with an `AnyDoor update` suffix. An editor may still save through its old open
 file descriptor, so these visible copies are retained for you to review and remove.
 
+## Review interrupted working files
+
+When a working file cannot be safely recovered after an interruption, Clipboard
+Sync settings shows **Files to Review**, including while sync is off. Each item
+shows its recorded location and why it needs review. The current contents may be
+incomplete, edited, or replaced; AnyDoor cannot verify them.
+
+**Reveal in Finder** shows the exact recorded location without searching for a
+renamed or moved file. **Keep File** leaves the current files untouched and
+dismisses the notice. It does not start a download, turn on sync, or clear cloud
+data. You can inspect, move, or remove unwanted files yourself in Finder. Local
+Clipboard History remains usable while an item needs review. If Keep File cannot
+finish, the notice remains available after refreshing so you can try again.
+
 ## Conflicts and application updates
 
 Concurrent edits remain available for review. Open the text or file conflict action,
