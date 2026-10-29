@@ -12,16 +12,31 @@ import os
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
     func testEstablishedFileWatcherObservesLocallyWithoutRetryingPermanentProviderFailure() async throws {
+        try await assertEstablishedWatcherHonorsProviderAdmission(withBackoff: false)
+    }
+
+    @MainActor
+    func testEstablishedFileWatcherHonorsProviderBackoffAndManualRetryDeadline() async throws {
+        try await assertEstablishedWatcherHonorsProviderAdmission(withBackoff: true)
+    }
+
+    @MainActor
+    private func assertEstablishedWatcherHonorsProviderAdmission(withBackoff: Bool) async throws {
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
         let initial = Data("shared before provider rejection".utf8)
-        let fixture = try await fileFixture(names: ["Observed.txt"], contents: [initial])
+        let fixture = try await fileFixture(names: ["Observed.txt"], contents: [initial], clock: { clock.withLock { $0 } })
         try await fixture.receiver.setSyncEnabled(true)
         await fixture.receiver.suspendSync()
         try await Task.sleep(for: .milliseconds(400))
-        let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(.serverRejectedRequest) })
+        let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+            if withBackoff { throw CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 120.0]) }
+            throw CKError(.serverRejectedRequest)
+        })
+        let expected: ClipboardHistorySyncPhase = withBackoff ? .failed(.network) : .failed(.providerRejected)
         await fixture.cloud.failNextAccountReadWithNative(native)
         await fixture.sender.retrySync()
         let failed = await fixture.sender.syncStatus()
-        XCTAssertEqual(failed.phase, .failed(.providerRejected))
+        XCTAssertEqual(failed.phase, expected)
         let readsBefore = await fixture.cloud.accountReadCount()
         let senderEntries = try await fixture.sender.page(.init()).entries
         let entry = try XCTUnwrap(senderEntries.first)
@@ -37,10 +52,16 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let readsAfter = await fixture.cloud.accountReadCount()
         XCTAssertEqual(readsAfter, readsBefore, "An established native watcher cannot consult the provider before automatic retry admission")
         let paused = await fixture.sender.syncStatus()
-        XCTAssertEqual(paused.phase, .failed(.providerRejected))
+        XCTAssertEqual(paused.phase, expected)
         let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
         guard case .file(let oldFile) = old.items.first?.representations.first else { return XCTFail("Expected previous complete file") }
         XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), initial)
+        if withBackoff {
+            await fixture.sender.retrySync()
+            let manualReads = await fixture.cloud.accountReadCount()
+            XCTAssertEqual(manualReads, readsAfter, "Manual Retry must also wait for the provider deadline")
+            clock.withLock { $0 = $0.addingTimeInterval(120) }
+        }
         await fixture.sender.retrySync()
         await fixture.receiver.resumeSync()
         let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
@@ -2698,6 +2719,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         receiverFaults: ClipboardHistoryFaultInjector = .init(),
         receiverWorkingRoot: URL? = nil,
         exactText: String? = nil,
+        clock: (@Sendable () -> Date)? = nil,
         beforeEnable: ([URL]) throws -> Void = { _ in }
     ) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule, cloud: SyncTestCloud,
@@ -2709,9 +2731,9 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
         let senderRoot = root.appendingPathComponent("Sender")
-        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot)
+        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot, clock: clock)
         let receiverRoot = root.appendingPathComponent("Receiver")
-        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot,
+        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot, clock: clock,
             faults: receiverFaults, workingRoot: receiverWorkingRoot)
         let urls = try zip(names, contents).map { name, data in
             let url = root.appendingPathComponent(name)

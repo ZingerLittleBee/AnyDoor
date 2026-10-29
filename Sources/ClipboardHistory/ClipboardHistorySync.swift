@@ -622,7 +622,9 @@ extension ClipboardHistoryModule {
 
     func admitSyncFileObservation(_ generation: UInt64, account: ClipboardSyncAccount, epoch: UUID,
         services: ClipboardSyncServices, automatic: Bool) async throws {
-        guard automatic, try currentSyncRecovery().phase?.requiresExplicitRetry == true else {
+        let recovery = try currentSyncRecovery()
+        let waitsForProvider = recovery.retryNotBefore.map { $0 > now() } ?? false
+        guard automatic, recovery.phase?.requiresExplicitRetry == true || waitsForProvider else {
             try await admitSync(generation, account: account, services: services)
             return
         }
