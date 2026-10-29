@@ -9,6 +9,38 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testUnpublishedWithdrawalRetainsRemoteFileVersionBeforeReactivation() async throws {
+        let fixture = try await fileFixture(names: ["Retained.txt"], contents: [Data("old shared file".utf8)])
+        try await fixture.receiver.setSyncEnabled(true)
+        let entries = try await fixture.receiver.page(.init()).entries
+        let entry = try XCTUnwrap(entries.first)
+        let file = try XCTUnwrap(entry.syncFiles.first)
+        let tags = try await fixture.receiver.syncTags()
+        let tag = try XCTUnwrap(tags.first)
+        try await fixture.receiver.setSyncEnabled(false)
+        try await fixture.receiver.setSyncTagSelected(tag.id, selected: false)
+        try Data("accepted remote file edit".utf8).write(to: fixture.sourceURLs[0])
+        try await fixture.sender.refreshSyncFile(entryID: entry.id, objectID: file.id)
+        let unrelated = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: "Advance file tag clock")
+        _ = try await fixture.sender.replaceTagDefinitions(with: [.init(id: tag.id, displayName: tag.displayName), unrelated])
+        for _ in 0..<3 {
+            try await fixture.sender.setSyncTagSelected(unrelated.id, selected: true)
+            try await fixture.sender.setSyncTagSelected(unrelated.id, selected: false)
+        }
+        try await fixture.sender.setSyncTagSelected(tag.id, selected: true)
+        try await fixture.receiver.setSyncEnabled(true)
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let received) = content.items.first?.representations.first else { return XCTFail("Expected retained file") }
+        XCTAssertEqual(try Data(contentsOf: received.currentURL), Data("accepted remote file edit".utf8))
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 2_001, root: fixture.receiverRoot)
+        await reopened.resumeSync()
+        let restored = try await reopened.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let afterRestart) = restored.items.first?.representations.first else { return XCTFail("Expected reopened file") }
+        XCTAssertEqual(try Data(contentsOf: afterRestart.currentURL), Data("accepted remote file edit".utf8))
+    }
+
     func testUnpublishedWithdrawalRetainsRemoteEditBeforeLaterReactivation() async throws {
         for hasLocalEdit in [false, true] {
             let cloud = SyncTestCloud()
