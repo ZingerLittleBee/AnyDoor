@@ -9,6 +9,42 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testDeletingPendingRejoinDoesNotBlockDeletionOrUnrelatedSharing() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = makeModule(services: services, keyByte: 0xDB, time: 1_000, root: root)
+        let peer = makeModule(services: services, keyByte: 0xDC, time: 2_000)
+        let original = try await first.capture(.init(source: .unknown, content: .text("delete the pending rejoin")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: original.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await peer.setSyncEnabled(true)
+
+        try await first.setSyncEnabled(false)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        _ = try await first.apply(.delete(original.entryID))
+        let unrelated = try await first.capture(.init(source: .unknown, content: .text("independent sharing must continue")))
+        _ = try await first.apply(.setTags(unrelated.entryID, [tag.id]))
+        try await first.setSyncEnabled(true)
+        await peer.retrySync()
+
+        let status = await first.syncStatus()
+        let received = try await peer.page(.init()).entries
+        XCTAssertEqual(status.phase, .upToDate)
+        XCTAssertEqual(received.map(\.id), [unrelated.entryID])
+        XCTAssertEqual(received.first?.previewText, "independent sharing must continue")
+
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xDB, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let fresh = makeModule(services: services, keyByte: 0xDD, time: 4_000)
+        try await fresh.setSyncEnabled(true)
+        let afterRestart = try await fresh.page(.init()).entries
+        XCTAssertEqual(afterRestart.map(\.id), [unrelated.entryID])
+    }
+
     func testFreshRejoinRetainsTheOriginalRootWithoutRepeatingMigrationReplay() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
