@@ -303,6 +303,12 @@ changes across a whole-tree rename. Long proof reads run outside the module acto
 main database write transaction, and revocable mutation gate. The final gate
 admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
+An unchanged prepared replacement remains owned by that exact application journal
+and is revalidated for reuse, so repeated native exchange failures do not create
+another complete tree. A newer selected version cannot reuse an older intent.
+Application packages still require a fresh explicit Apply Update action. Unknown
+editor replacements require revision-bound reassociation, which retires the old
+journal without inferring a swap outcome or deleting either visible output.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
 Top-level vnode handles share a process-wide budget of 64, including handles
