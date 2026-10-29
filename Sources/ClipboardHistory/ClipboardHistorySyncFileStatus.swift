@@ -83,7 +83,7 @@ extension ClipboardHistoryModule {
         case .localFileAccessDenied: .localFileAccessDenied
         case .accountChanged, .accountUnavailable: .accountChanged
         case .keyLocked, .keyUnavailable: .keyUnavailable
-        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion, .corruptAuthority: .unavailable
+        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion, .providerRejected, .corruptAuthority: .unavailable
         case .localStorage, nil: .localStorage
         }
     }

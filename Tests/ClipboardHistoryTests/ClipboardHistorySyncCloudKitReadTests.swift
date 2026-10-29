@@ -6,6 +6,48 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncCloudKitReadTests: XCTestCase {
+    func testPermanentProviderFailuresAreDistinctFromRetryableCloudErrors() async throws {
+        for code: CKError.Code in [.internalError, .serverRejectedRequest, .invalidArguments, .incompatibleVersion] {
+            let expected: ClipboardSyncServiceError = code == .incompatibleVersion ? .unsupportedVersion : .providerRejected
+            for wrapped in [false, true] {
+                let mutationError = wrapped ? CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [
+                    "cause": CKError(code), "conflict": CKError(.serverRecordChanged), "batch": CKError(.batchRequestFailed),
+                ]]) : CKError(code)
+                XCTAssertEqual(ClipboardSyncCloudKit.atomicModificationFailure(saveErrors: [mutationError], deleteErrors: [])
+                    as? ClipboardSyncServiceError, expected)
+                let cloud = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+                    if wrapped {
+                        throw CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [
+                            "cause": CKError(code), "conflict": CKError(.serverRecordChanged), "batch": CKError(.batchRequestFailed),
+                        ]])
+                    }
+                    throw CKError(code)
+                })
+                do {
+                    _ = try await cloud.control(for: Self.account)
+                    XCTFail("Permanent provider rejection must fail control discovery")
+                } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, expected) }
+                do {
+                    _ = try await cloud.download(Self.remoteRecord(), for: Self.account)
+                    XCTFail("Permanent provider rejection must fail download")
+                } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, expected) }
+                do {
+                    _ = try await cloud.downloadFileSegment(Self.remoteRecord(), index: 0, for: Self.account)
+                    XCTFail("Permanent provider rejection must fail segmented download")
+                } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, expected) }
+            }
+        }
+        let delayed = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+            throw CKError(.partialFailure, userInfo: [CKErrorRetryAfterKey: 90.0,
+                CKPartialErrorsByItemIDKey: ["busy": CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 15.0]),
+                    "batch": CKError(.batchRequestFailed)]])
+        })
+        do {
+            _ = try await delayed.control(for: Self.account)
+            XCTFail("A provider delay must remain retryable")
+        } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .network(retryAfter: 90)) }
+    }
+
     func testMissingReferencedChunkIsUnavailableForBothDownloadPaths() async throws {
         let cloud = ClipboardSyncCloudKit(recordReader: { _, ids, _ in
             Dictionary(uniqueKeysWithValues: ids.map { ($0, .failure(CKError(.unknownItem))) })

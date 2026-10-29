@@ -92,6 +92,7 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     /// Account/control integrity cannot be isolated as a damaged file body.
     case corruptAuthority
     case unsupportedVersion
+    case providerRejected
 }
 
 protocol ClipboardSyncTransport: Sendable {

@@ -384,8 +384,15 @@ or old-account queue to restart publication.
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.
 Relaunch preserves that deadline, and Retry cannot bypass it. Transient connecting
-and transfer phases are not treated as completed work after restart. Account
-changes persist disabled participation and its reason; an old enabled flag or
+and transfer phases are not treated as completed work after restart. Native
+nonrecoverable provider/request errors and incompatible versions retain distinct
+failures and stop automatic admission, including polling, file observations, and
+resume after restart. Explicit user commands may retry once, including commands
+queued during a failing pass; Off revokes that intent. Provider retry deadlines
+still take precedence. A permanent rejection outranks conflict/batch siblings
+inside a partial CloudKit failure; retryable wrappers retain the longest supplied
+delay.
+Account changes persist disabled participation and its reason; an old enabled flag or
 retained key cannot bind a new account. Unresolved manual activation is only
 retained within the current runtime generation, so a restart before account
 binding may require explicit activation again rather than authorizing an

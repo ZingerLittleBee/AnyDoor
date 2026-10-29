@@ -40,6 +40,7 @@ extension ClipboardHistorySyncPhase {
             case .recoveryRequired: .settingsClipboardSyncRecoveryRequired
             case .accountChanged: .settingsClipboardSyncAccountChanged
             case .unsupportedVersion: .settingsClipboardSyncUnsupportedVersion
+            case .providerRejected: .settingsClipboardSyncProviderRejected
             }
         }
     }
