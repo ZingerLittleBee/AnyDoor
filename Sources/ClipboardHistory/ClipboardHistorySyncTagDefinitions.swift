@@ -67,6 +67,9 @@ extension ClipboardHistoryModule {
             let state = try JSONDecoder().decode(ClipboardSyncTagState.self, from: encoded)
             try await stageSyncOperation(.tagState(state), subjectID: state.id,
                 account: account, control: control, key: key, generation: generation) { database, record in
+                // Rename and selection commands update the local definition;
+                // its pending register may still describe our older snapshot.
+                try recordLocalSyncTags(accountID: account.identifier, tagID: id, in: database)
                 try database.execute(sql: """
                     UPDATE clipboard_sync_tag_states SET pending = 0
                     WHERE account_id = ? AND tag_id = ? AND pending = 1 AND state = ?

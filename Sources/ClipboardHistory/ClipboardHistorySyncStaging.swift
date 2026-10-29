@@ -8,7 +8,9 @@ extension ClipboardHistoryModule {
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, generation: UInt64,
         consume: (Database, ClipboardSyncRemoteRecord) throws -> Bool) async throws {
         try admitSync(generation)
+        let faults = faultInjector
         let preparation = Task.detached(priority: .utility) {
+            try faults.check(.syncOperationPreparation)
             try Task.checkCancellation()
             return try ClipboardSyncCodec.seal(content, account: account, control: control, key: key, operationID: operationID)
         }

@@ -20,6 +20,7 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 }
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
+    case syncOperationPreparation
     case syncFilePreservationAfterCopy
     case syncFileCleanupBeforeRemoval
     case syncFileRejoinBeforeStaging
