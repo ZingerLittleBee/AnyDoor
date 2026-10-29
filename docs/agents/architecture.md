@@ -264,6 +264,10 @@ admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
+A frozen local version and its originating location's new base commit in one
+transaction after rechecking the location revision, identity, and prior base.
+Pausing or reassociating the location during freezing therefore cannot publish
+an edit that its origin fails to adopt; explicit Refresh uses the same boundary.
 
 Real temporary-directory coverage is in
 [directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),

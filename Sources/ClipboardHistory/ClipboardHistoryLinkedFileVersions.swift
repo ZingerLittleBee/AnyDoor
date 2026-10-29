@@ -83,38 +83,14 @@ extension ClipboardHistoryModule {
             }
             if proof.digest != source.baseDigest {
                 guard canPublish else { continue }
-                let versionID: UUID
                 do {
-                    versionID = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
-                        parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
+                    _ = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
+                        parents: [source.baseVersionID], expectedSourceIdentity: source.identity, origin: source)
                 } catch {
                     guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
                     try deferSyncFileWork(work, error: error, account: account, control: control, generation: generation)
                     publishMutation()
-                    continue
                 }
-                try await admitSync(generation, account: account, services: services)
-                guard let frozen = try syncFileSelection(objectID: source.objectID)?.complete,
-                      frozen.descriptor.versionID == versionID, let digest = frozen.descriptor.contentDigest else {
-                    throw ClipboardSyncServiceError.corruptData
-                }
-                let postFreeze = Task.detached(priority: .utility) {
-                    try? ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
-                }
-                let saved = await postFreeze.value
-                try await admitSync(generation, account: account, services: services)
-                let state: ClipboardHistoryLinkedFileLocationState = saved.map { $0.digest == digest ? .pendingUpload : .localChanges } ?? .unavailable
-                try syncWrite { database in
-                    guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, id: source.id, in: database).first,
-                          current.revision == source.revision, current.identity == source.identity, current.baseVersionID == source.baseVersionID else { return }
-                    try database.execute(sql: """
-                        UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
-                          state = ?, pending_version_id = ?, observed_digest = ? WHERE id = ?
-                        """, arguments: [versionID.uuidString, digest, state.rawValue, versionID.uuidString, saved?.digest, source.id.uuidString])
-                    try completeSyncFileWork(work, account: account, control: control, in: database)
-                    try Self.bumpHistoryRevision(in: database)
-                }
-                publishMutation()
                 continue
             }
             guard let complete = selection.complete, complete.descriptor.versionID == selection.latest.versionID,

@@ -6,6 +6,86 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testPausingLinkedOriginDuringFreezeCannotPublishAnUnadoptedVersion() async throws {
+        let race = DirectoryFreezeRace()
+        defer { race.barrier.release() }
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data("original tree".utf8).write(to: root.appendingPathComponent("member"))
+        }, senderFault: .init { point in
+            if point == .syncFileTreeBeforeFreezeVerification { race.pauseIfArmed() }
+            return false
+        })
+        let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let origin = try XCTUnwrap(initial.first)
+        try await fixture.sender.setSyncEnabled(false)
+        let saved = Data("saved before pausing the origin".utf8)
+        try saved.write(to: fixture.original.appendingPathComponent("member"))
+        race.arm()
+        let freezing = Task { try await fixture.sender.setSyncEnabled(true) }
+        try await eventually { race.barrier.isWaiting }
+        let freezingLocations = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let freezingOrigin = try XCTUnwrap(freezingLocations.first { $0.id == origin.id })
+        do {
+            try await fixture.sender.setFileLocationPaused(.init(entryID: fixture.entryID,
+                locationID: origin.id, expectedRevision: freezingOrigin.revision), paused: true)
+        } catch { return XCTFail("Pausing the current origin failed: \(error)") }
+        race.barrier.release()
+        try await freezing.value
+        await fixture.receiver.retrySync()
+        let beforeResume = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let old) = beforeResume.items.first?.representations.first else { return XCTFail("Expected old complete tree") }
+        XCTAssertEqual(try Data(contentsOf: old.currentURL.appendingPathComponent("member")), Data("original tree".utf8),
+            "A paused origin must not commit a version without adopting its own base")
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+        await reopened.resumeSync()
+        let locations = try await reopened.linkedFileLocations(for: fixture.entryID)
+        let paused = try XCTUnwrap(locations.first { $0.id == origin.id })
+        XCTAssertEqual(paused.state, .paused)
+        try await reopened.setFileLocationPaused(.init(entryID: fixture.entryID,
+            locationID: paused.id, expectedRevision: paused.revision), paused: false)
+        await fixture.receiver.retrySync()
+        let current = try await reopened.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(current.first?.state, .current)
+        XCTAssertNotEqual(current.first?.baseVersionID, origin.baseVersionID)
+        let page = try await reopened.page(.init()).entries
+        XCTAssertEqual(page.first?.syncFiles.first?.hasConflict, false)
+        let content = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let received) = content.items.first?.representations.first else { return XCTFail("Expected resumed tree") }
+        XCTAssertEqual(try Data(contentsOf: received.currentURL.appendingPathComponent("member")), saved)
+    }
+
+    @MainActor
+    func testExplicitFileRefreshAdoptsTheOriginBaseBeforeReceivingLaterEdits() async throws {
+        let fixture = try await makeLinkedFixture()
+        let initial = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let origin = try XCTUnwrap(initial.first)
+        try Data("explicitly refreshed save".utf8).write(to: fixture.original)
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: origin.objectID)
+        let refreshed = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(refreshed.first?.state, .current)
+        XCTAssertNotEqual(refreshed.first?.baseVersionID, origin.baseVersionID)
+        await fixture.receiver.retrySync()
+        let remoteLocations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let remote = try XCTUnwrap(remoteLocations.first)
+        let next = Data("later edit on the receiving Mac".utf8)
+        try next.write(to: remote.url)
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        XCTAssertEqual(try Data(contentsOf: fixture.original), next)
+        let page = try await fixture.sender.page(.init())
+        XCTAssertEqual(page.entries.first?.syncFiles.first?.hasConflict, false)
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+        await reopened.resumeSync()
+        let locations = try await reopened.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(locations.first?.state, .current)
+        XCTAssertEqual(try Data(contentsOf: fixture.original), next)
+    }
+
+    @MainActor
     func testSubstitutedCandidateFIFORejectsReceiptAndAllowsOffToDrain() async throws {
         let race = DirectoryFIFORace()
         let fixture = try await makeLinkedFixture(receiverFault: .init { point in

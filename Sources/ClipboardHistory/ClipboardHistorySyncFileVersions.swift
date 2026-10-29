@@ -51,13 +51,25 @@ extension ClipboardHistoryModule {
                         entryID.value.uuidString.lowercased(), objectID.uuidString]),
                   let bookmark: Data = row["local_bookmark"], let identity: Data = row["local_identity"],
                   let parent = UUID(uuidString: row["version_id"]) else { throw ClipboardHistoryModuleError.operationUnavailable }
-            return (try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity), identity, parent)
+            let url = try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity)
+            let origin = try Self.linkedLocationSources(accountID: context.account.identifier,
+                epoch: context.control.epoch, in: database).first { $0.objectID == objectID && $0.identity == identity && $0.url == url }
+            if origin == nil, try Bool.fetchOne(database, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations
+                  WHERE account_id = ? AND epoch = ? AND object_id = ? AND identity = ? AND path = ?)
+                """, arguments: [context.account.identifier, context.control.epoch.uuidString,
+                    objectID.uuidString, identity, url.path]) == true {
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
+            return (url, identity, origin?.baseVersionID ?? parent, origin)
         }
-        _ = try await publishFileVersion(sourceURL: source.0, objectID: objectID, parents: [source.2], expectedSourceIdentity: source.1)
+        _ = try await publishFileVersion(sourceURL: source.0, objectID: objectID, parents: [source.2],
+            expectedSourceIdentity: source.1, origin: source.3)
         await retrySync()
     }
 
-    func publishFileVersion(sourceURL: URL, objectID: UUID, parents: [UUID], expectedSourceIdentity: Data) async throws -> UUID {
+    func publishFileVersion(sourceURL: URL, objectID: UUID, parents: [UUID], expectedSourceIdentity: Data,
+        origin: ClipboardLinkedLocationSource? = nil) async throws -> UUID {
         let generation = syncGeneration
         try admitSync(generation)
         guard let services = syncServices,
@@ -83,6 +95,13 @@ extension ClipboardHistoryModule {
             displayName: displayName, account: account, control: control, key: key)
         var stored = false
         defer { if !stored { try? FileManager.default.removeItem(at: prepared.uploadDirectory) } }
+        let observedDigest: Data?
+        if let origin {
+            let inspection = Task.detached(priority: .utility) {
+                try? ClipboardLinkedFileIO.inspect(origin.url, expectedIdentity: origin.identity).digest
+            }
+            observedDigest = await withTaskCancellationHandler { await inspection.value } onCancel: { inspection.cancel() }
+        } else { observedDigest = nil }
         try await admitSyncFilePublication(generation, account: account, control: control, services: services)
         guard try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents) else {
             throw ClipboardHistoryModuleError.operationUnavailable
@@ -91,7 +110,31 @@ extension ClipboardHistoryModule {
             guard try syncFileCanPublish(objectID: objectID, account: account, control: control, parents: parents, in: database) else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
+            if let origin {
+                guard parents == [origin.baseVersionID], origin.objectID == objectID,
+                      let current = try Self.linkedLocationSources(accountID: account.identifier,
+                        epoch: control.epoch, id: origin.id, in: database).first,
+                      current.revision == origin.revision, current.identity == origin.identity,
+                      current.url == origin.url, current.baseVersionID == origin.baseVersionID,
+                      current.baseDigest == origin.baseDigest, !current.hasPendingApplication else {
+                    throw POSIXError(.ESTALE)
+                }
+            }
             try storePreparedFileVersion(prepared, account: account, control: control, in: database)
+            if let origin {
+                guard let digest = prepared.descriptor.contentDigest else { throw ClipboardSyncServiceError.corruptData }
+                let state: ClipboardHistoryLinkedFileLocationState = observedDigest.map {
+                    $0 == digest ? .pendingUpload : .localChanges
+                } ?? .unavailable
+                // Publication and the origin's adopted base share one authority check.
+                // A pause or reassociation during freezing cannot publish an orphaned edit.
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
+                      state = ?, pending_version_id = ?, observed_digest = ? WHERE id = ?
+                    """, arguments: [versionID.uuidString, digest, state.rawValue, versionID.uuidString,
+                        observedDigest, origin.id.uuidString])
+                try completeSyncFileWork(.linkedLocation(origin.id), account: account, control: control, in: database)
+            }
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)
         }
