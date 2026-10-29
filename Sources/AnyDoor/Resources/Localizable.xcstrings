@@ -15868,13 +15868,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "AnyDoor cannot verify the current contents at these locations. Review them in Finder. Keep File leaves the files untouched and dismisses the notice."
+            "value": "The current contents at these locations have not been verified. Review them in Finder. Keep File leaves the files untouched and dismisses the notice."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "AnyDoor 无法验证这些位置当前的内容。请在访达中检查。“保留文件”不会更改文件，只会移除此提示。"
+            "value": "这些位置当前的内容尚未通过验证。请在访达中检查。“保留文件”不会更改文件，只会移除此提示。"
           }
         }
       }
@@ -15885,13 +15885,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "File creation was interrupted."
+            "value": "File creation was interrupted. Turning on sync or retrying can recover partial files only after verifying them."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "文件创建已中断。"
+            "value": "文件创建已中断。开启同步或重试时，只有通过验证的未完成文件才会自动恢复。"
           }
         }
       }

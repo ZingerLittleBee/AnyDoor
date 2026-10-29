@@ -73,7 +73,16 @@ file descriptor, so these visible copies are retained for you to review and remo
 When a working file cannot be safely recovered after an interruption, Clipboard
 Sync settings shows **Files to Review**, including while sync is off. Each item
 shows its recorded location and why it needs review. The current contents may be
-incomplete, edited, or replaced; AnyDoor cannot verify them.
+incomplete, edited, or replaced and have not been verified as safe to recover.
+
+While sync is off, this review stays local and does not retrieve a sync key.
+Turning on sync or choosing Retry can verify an interrupted output against its
+last durable checkpoint and authenticated download data. Only a matching output
+can be reclaimed automatically before file creation resumes. An arbitrary
+mid-write interruption is not necessarily recoverable: changes after the last
+checkpoint, unrecorded contents, or missing verification data keep the file in
+the review list. Review such files and choose Keep File before another attempt
+creates a new output.
 
 **Reveal in Finder** shows the exact recorded location without searching for a
 renamed or moved file. **Keep File** leaves the current files untouched and
