@@ -47,7 +47,7 @@ struct CommandPalettePicker: View {
                 // the search field, its placeholder/caret, and the root list can
                 // neither show through nor accept stray input.
                 backHeader
-                Divider()
+                CommandPaletteDivider()
                 detailView
             } else {
                 // Argument-input mode carries its own search-field badge (Raycast
@@ -56,7 +56,7 @@ struct CommandPalettePicker: View {
 
                 searchField
 
-                Divider()
+                CommandPaletteDivider()
 
                 if state.flatEntries.isEmpty {
                     if let scope = state.activeDevToolScope {
@@ -71,7 +71,7 @@ struct CommandPalettePicker: View {
                 }
 
                 if state.isCurrencyContext {
-                    Divider()
+                    CommandPaletteDivider()
                     footerBar
                 }
             }
@@ -391,7 +391,7 @@ struct CommandPalettePicker: View {
             VStack(spacing: 0) {
                 loadedDetailScroll(markdown: markdown)
                 if !state.detailActions.isEmpty {
-                    Divider()
+                    CommandPaletteDivider()
                     HStack(spacing: 8) {
                         Spacer()
                         ForEach(state.detailActions, id: \.id) { action in
@@ -688,11 +688,12 @@ struct CommandPalettePicker: View {
     }
 }
 
-/// The palette's panel surface. In Dark Mode a near-black wash sits between
-/// the glass and the content: bare dark glass lifts to mid gray over bright
-/// windows, which washes out the dividers and secondary text. Light Mode keeps
-/// the plain glass and must not get even a clear background: any layer under
-/// the content turns light Liquid Glass dark behind the black text.
+/// The palette's panel surface. In Dark Mode a black wash sits between the
+/// glass and the content: bare dark glass lifts to mid gray over bright
+/// windows, which washes out the dividers and secondary text. The wash stays
+/// translucent enough for colors behind the palette to show through. Light Mode
+/// keeps the plain glass and must not get even a clear background: any layer
+/// under the content turns light Liquid Glass dark behind the black text.
 private struct CommandPaletteSurface: ViewModifier {
     let cornerRadius: CGFloat
     @Environment(\.colorScheme) private var colorScheme
@@ -702,12 +703,28 @@ private struct CommandPaletteSurface: ViewModifier {
         if colorScheme == .dark {
             content
                 .background(
-                    Color.black.opacity(0.9),
+                    Color.black.opacity(0.75),
                     in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 )
                 .adaptivePanelSurface(cornerRadius: cornerRadius)
         } else {
             content.adaptivePanelSurface(cornerRadius: cornerRadius)
+        }
+    }
+}
+
+/// The palette's hairline. The system separator is too faint on the Dark Mode
+/// black surface, so Dark Mode draws a brighter line of the same thickness.
+private struct CommandPaletteDivider: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if colorScheme == .dark {
+            Rectangle()
+                .fill(Color.white.opacity(0.2))
+                .frame(height: 1)
+        } else {
+            Divider().opacity(0.4)
         }
     }
 }
@@ -966,7 +983,7 @@ private struct MarkdownBlocksView: View {
                         .fill(Color.primary.opacity(0.06))
                 )
         case .thematicBreak:
-            Divider().padding(.vertical, 2)
+            CommandPaletteDivider().padding(.vertical, 2)
         case .blockquote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
