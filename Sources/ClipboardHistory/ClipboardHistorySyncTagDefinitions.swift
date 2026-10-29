@@ -19,12 +19,18 @@ struct ClipboardSyncTagState: Codable, Equatable, Sendable {
 }
 
 extension ClipboardHistoryModule {
-    func recordLocalSyncTags(accountID: String, in database: Database) throws {
-        let rows = try Row.fetchAll(database, sql: """
+    func recordLocalSyncTags(accountID: String, tagID: String? = nil, in database: Database) throws {
+        let selection = """
             SELECT tag.tag_id, tag.selected, definition.display_name FROM clipboard_sync_tags AS tag
             LEFT JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
             WHERE tag.account_id = ?
-            """, arguments: [accountID])
+            """
+        let rows: [Row]
+        if let tagID {
+            rows = try Row.fetchAll(database, sql: selection + " AND tag.tag_id = ?", arguments: [accountID, tagID])
+        } else {
+            rows = try Row.fetchAll(database, sql: selection, arguments: [accountID])
+        }
         for row in rows {
             let id: String = row["tag_id"]
             guard try canonicalSyncTagID(id, accountID: accountID, in: database) == id else { continue }
@@ -48,20 +54,31 @@ extension ClipboardHistoryModule {
         return revision
     }
 
-    func stageSyncTagDefinitions(account: ClipboardSyncAccount, control: ClipboardSyncControl,
-                                 key: Data, in database: Database) throws {
-        try recordLocalSyncTags(accountID: account.identifier, in: database)
-        let rows = try Row.fetchAll(database,
-            sql: "SELECT tag_id, state FROM clipboard_sync_tag_states WHERE account_id = ? AND pending = 1",
-            arguments: [account.identifier])
-        for row in rows {
-            let state = try JSONDecoder().decode(ClipboardSyncTagState.self, from: row["state"])
-            let upload = try ClipboardSyncCodec.seal(.tagState(state), account: account, control: control, key: key)
-            try storeSyncUpload(upload, subjectID: state.id, account: account, in: database)
-            try database.execute(sql: "UPDATE clipboard_sync_tag_states SET pending = 0 WHERE account_id = ? AND tag_id = ?",
-                arguments: [account.identifier, state.id])
-            try database.execute(sql: "UPDATE clipboard_sync_tags SET record_id = ? WHERE account_id = ? AND tag_id = ?",
-                arguments: [upload.record.recordID, account.identifier, state.id])
+    func stageSyncTagDefinitions(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterID = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, sql: """
+            SELECT tag_id, state FROM clipboard_sync_tag_states WHERE account_id = ? AND pending = 1 AND tag_id > ?
+            ORDER BY tag_id LIMIT 1
+            """, arguments: [account.identifier, afterID]) }) {
+            let id: String = row["tag_id"]
+            let encoded: Data = row["state"]
+            afterID = id
+            let state = try JSONDecoder().decode(ClipboardSyncTagState.self, from: encoded)
+            try await stageSyncOperation(.tagState(state), subjectID: state.id,
+                account: account, control: control, key: key, generation: generation) { database, record in
+                // Rename and selection commands update the local definition;
+                // its pending register may still describe our older snapshot.
+                try recordLocalSyncTags(accountID: account.identifier, tagID: id, in: database)
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_tag_states SET pending = 0
+                    WHERE account_id = ? AND tag_id = ? AND pending = 1 AND state = ?
+                    """, arguments: [account.identifier, id, encoded])
+                guard database.changesCount == 1 else { return false }
+                try database.execute(sql: "UPDATE clipboard_sync_tags SET record_id = ? WHERE account_id = ? AND tag_id = ?",
+                    arguments: [record.recordID, account.identifier, id])
+                return true
+            }
         }
     }
 
