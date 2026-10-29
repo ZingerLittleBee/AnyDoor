@@ -11,6 +11,74 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testPreparedMembershipRespectsNewAssignmentsAndSelectionAcrossRestart() async throws {
+        for deselect in [false, true] {
+            let armed = OSAllocatedUnfairLock(initialState: false)
+            let preparation = LinkedReplacementBarrier()
+            defer { preparation.release() }
+            let faults = ClipboardHistoryFaultInjector { point in
+                guard point == .syncOperationPreparation else { return false }
+                let shouldPause = armed.withLock { value in
+                    guard value else { return false }; value = false; return true
+                }
+                if shouldPause { preparation.pause() }
+                return false
+            }
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-membership-preparation-\(UUID())")
+            let module = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root, faults: faults)
+            let entry = try await module.capture(.init(source: .unknown, content: .text("latest membership intent")))
+            let shared = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+            let extra = try await module.createTagDefinition(named: "Extra", assigningTo: entry.entryID).definition
+            let local = try await module.createTagDefinition(named: "Private", assigningTo: entry.entryID).definition
+            try await module.setSyncTagSelected(shared.id, selected: true)
+            try await module.setSyncTagSelected(extra.id, selected: true)
+            _ = try await module.apply(.setTags(entry.entryID, [shared.id, local.id]))
+            try await module.setSyncEnabled(true)
+            await module.suspendSync()
+            let before = Set(await cloud.currentUploads().map { $0.record.recordID })
+            _ = try await module.apply(.setTags(entry.entryID, [shared.id, extra.id, local.id]))
+            armed.withLock { $0 = true }
+            let syncing = Task { await module.resumeSync() }
+            addTeardownBlock { preparation.release(); await syncing.value }
+            for _ in 0..<400 {
+                if preparation.isWaiting { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            XCTAssertTrue(preparation.isWaiting)
+            if deselect { try await module.setSyncTagSelected(extra.id, selected: false, waitForSync: false) }
+            else { _ = try await module.apply(.setTags(entry.entryID, [shared.id, local.id])) }
+            preparation.release()
+            await syncing.value
+            let account = try await cloud.account()
+            let descriptor = try await cloud.control(for: account)
+            let control = try XCTUnwrap(descriptor)
+            let loaded = await keys.load(account: account, keyID: control.keyID)
+            let key = try XCTUnwrap(loaded)
+            for upload in await cloud.currentUploads() where !before.contains(upload.record.recordID) {
+                if case .tagMembership(let value) = try ClipboardSyncCodec.open(upload.record, chunks: upload.chunks,
+                    account: account, control: control, key: key), value.tagID == extra.id {
+                    XCTAssertFalse(value.present, "A prepared addition must not publish after assignment or sharing consent is removed")
+                }
+            }
+            try await module.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xE6, time: 2_000, root: root)
+            await reopened.resumeSync()
+            let entries = try await reopened.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(entries.first).tagIDs, deselect ? [shared.id, extra.id, local.id] : [shared.id, local.id])
+            let choices = try await reopened.syncTags()
+            XCTAssertEqual(choices.first { $0.id == extra.id }?.isSelected, !deselect)
+            XCTAssertEqual(choices.first { $0.id == local.id }?.isSelected, false)
+            let peer = makeModule(services: services, keyByte: 0xE7, time: 3_000)
+            try await peer.setSyncEnabled(true)
+            let peerEntries = try await peer.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(peerEntries.first).tagIDs, [shared.id])
+        }
+    }
+
+    @MainActor
     func testPreparedTagStateUsesCurrentNameAndSelectionAcrossRestart() async throws {
         for deselect in [false, true] {
             let armed = OSAllocatedUnfairLock(initialState: false)

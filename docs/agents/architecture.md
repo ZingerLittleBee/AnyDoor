@@ -132,6 +132,17 @@ failed publication cannot leave a shorter mixed entry. Legacy text envelopes use
 the same writer. Search fields are rebuilt locally, and receiving an entry neither
 starts image recognition nor changes capture preferences or recent-use order.
 
+Outgoing preparation uses stable-key continuation and one entry or immutable
+operation per commit. Payload reads, thumbnail derivation, encoding, and sealing
+run outside the module actor and database writer. Each commit renews its write
+turn and validates the current account, epoch, key, publication authority, and
+pending revision. Tag definitions and memberships recheck only the affected tag
+or entry/tag pair after preparation. Entry and rejoin snapshots use the history
+revision conservatively, so unrelated mutations can require preparing them again.
+Off revokes admission and drains the owned preparation task before returning.
+Revision-only comparisons use readers, including stale-preparation continuations
+during a search-index rebuild; this retains the existing write-turn contract.
+
 The additive `v17_clipboard_sync_content` migration owns independent favorite,
 OCR, and QR registers. Local changes persist their intent in the same transaction
 as the history mutation. Lamport counters with immutable operation IDs converge
