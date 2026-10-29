@@ -2,7 +2,23 @@ import CryptoKit
 import Foundation
 import GRDB
 
+struct ClipboardHistoryPageSyncContext {
+    let textConflicts: Set<String>
+    let files: [String: [ClipboardHistorySyncFileSummary]]
+    let locations: [String: [ClipboardHistoryLinkedFileLocation]]
+}
+
 extension ClipboardHistoryModule {
+    private static func pageSyncContext(entryIDs: [String], in database: Database) throws -> ClipboardHistoryPageSyncContext {
+        guard !entryIDs.isEmpty else { return .init(textConflicts: [], files: [:], locations: [:]) }
+        let accountID = try String.fetchOne(database, sql: "SELECT account_id FROM clipboard_sync_settings WHERE id = 1")
+        let conflicts = try syncTextConflicts(entryIDs: entryIDs, accountID: accountID, in: database)
+        var facts = ClipboardHistoryFileDisplayFacts()
+        let files = try syncFileSummaries(entryIDs: entryIDs, facts: &facts, in: database)
+        let locations = try linkedFileLocations(entryIDs: entryIDs, facts: &facts, in: database)
+        return .init(textConflicts: conflicts, files: files, locations: locations)
+    }
+
     func indexedSourceSummaries() throws
         -> [ClipboardHistorySourceSummary]
     {
@@ -280,8 +296,9 @@ extension ClipboardHistoryModule {
         )
         let hasMore = rows.count > 100
         let pageRows = Array(rows.prefix(100))
+        let context = try pageSyncContext(entryIDs: pageRows.map { $0["id"] as String }, in: database)
         let entries = try pageRows.map {
-            try entry(from: $0, in: database)
+            try entry(from: $0, in: database, syncContext: context)
         }
         let nextCursor = hasMore
             ? try pageRows.last.map {
@@ -399,7 +416,8 @@ extension ClipboardHistoryModule {
 
         let hasMore = rows.count > 100
         let pageRows = Array(rows.prefix(100))
-        let entries = try pageRows.map { try entry(from: $0, in: database) }
+        let context = try pageSyncContext(entryIDs: pageRows.map { $0["id"] as String }, in: database)
+        let entries = try pageRows.map { try entry(from: $0, in: database, syncContext: context) }
         let nextCursor = hasMore
             ? try pageRows.last.map {
                 try makeCursor(
@@ -655,12 +673,14 @@ extension ClipboardHistoryModule {
 
     static func entry(
         from row: Row,
-        in database: Database
+        in database: Database,
+        syncContext: ClipboardHistoryPageSyncContext? = nil
     ) throws -> ClipboardHistoryEntry {
         let storedID: String = row["id"]
         guard let value = UUID(uuidString: storedID) else {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
+        let context = try syncContext ?? pageSyncContext(entryIDs: [storedID], in: database)
         let facets = try String.fetchAll(
             database,
             sql: """
@@ -696,9 +716,9 @@ extension ClipboardHistoryModule {
                     rawValue: row["source_provenance"]
                 ) ?? .unknown
             ),
-            hasTextConflict: try hasSyncTextConflict(entryID: .init(value), in: database),
-            syncFiles: try syncFileSummaries(entryID: storedID, in: database),
-            linkedFileLocations: try Self.linkedFileLocations(entryID: storedID, in: database)
+            hasTextConflict: context.textConflicts.contains(storedID),
+            syncFiles: context.files[storedID] ?? [],
+            linkedFileLocations: context.locations[storedID] ?? []
         )
     }
 

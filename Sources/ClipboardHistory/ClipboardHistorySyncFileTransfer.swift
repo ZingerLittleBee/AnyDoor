@@ -23,7 +23,8 @@ enum ClipboardSyncFileTransfer {
 
     @concurrent
     static func verify(_ descriptor: ClipboardSyncFileDescriptor, directory: URL,
-        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) async throws {
+        account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        faults: ClipboardHistoryFaultInjector = .init()) async throws {
         guard let body = descriptor.body else { throw ClipboardSyncServiceError.corruptData }
         var plain = SHA256(), encrypted = SHA256()
         var count: Int64 = 0, cipherCount: Int64 = 0
@@ -32,6 +33,7 @@ enum ClipboardSyncFileTransfer {
             let bytes = try readSegment(in: directory, index: index)
             let data = try ClipboardSyncCodec.openFileSegment(bytes, descriptor: descriptor,
                 account: account, control: control, key: key, index: index)
+            try faults.check(.syncFileVerificationSegment)
             plain.update(data: data); encrypted.update(data: bytes)
             count += Int64(data.count); cipherCount += Int64(bytes.count)
         }

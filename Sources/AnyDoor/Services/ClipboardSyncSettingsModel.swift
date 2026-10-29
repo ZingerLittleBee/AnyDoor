@@ -10,9 +10,12 @@ final class ClipboardSyncSettingsModel {
     @ObservationIgnored private var actionGeneration = 0
 
     private(set) var resetConfirmation: ClipboardHistoryCloudResetConfirmation?
+    private(set) var missingCollectionConfirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation?
+    private(set) var didRecoverMissingCollection = false
 
     private(set) var status = ClipboardHistorySyncStatus()
     private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
+    private(set) var workingOutputRecoveries: [ClipboardHistoryWorkingOutputRecovery] = []
     private(set) var tags: [ClipboardHistorySyncTag] = []
     private(set) var operationFailed = false
     private(set) var isPerformingAction = false
@@ -25,6 +28,8 @@ final class ClipboardSyncSettingsModel {
     var recoveryHelpURL: URL? {
         guard status.isEnabled else { return nil }
         switch status.phase {
+        case .failed(.recoveryRequired) where status.canRecoverMissingCloudCollection:
+            return nil
         case .waitingForKey, .keyLocked, .accessDenied, .failed(.corruptData), .failed(.recoveryRequired):
             return URL(string: "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
         default:
@@ -85,6 +90,20 @@ final class ClipboardSyncSettingsModel {
         }
     }
 
+    var offersRetry: Bool {
+        if isResetPending { return operationFailed || status.cloudReset?.failure != nil }
+        guard status.isEnabled else { return false }
+        if operationFailed { return true }
+        switch status.phase {
+        case .disabled, .connecting, .transferring, .upToDate: return false
+        default: return true
+        }
+    }
+
+    var missingCollectionHelpKey: L10n.Key {
+        status.isEnabled || isResetPending ? .settingsClipboardSyncMissingCollection : .settingsClipboardSyncMissingCollectionOff
+    }
+
     var isResetPending: Bool {
         status.cloudReset?.isPending ?? false
     }
@@ -95,6 +114,27 @@ final class ClipboardSyncSettingsModel {
     }
 
     func cancelResetConfirmation() { resetConfirmation = nil }
+
+    func prepareMissingCollectionRecovery() async {
+        guard !isPerformingAction, status.canRecoverMissingCloudCollection else { return }
+        missingCollectionConfirmation = nil
+        didRecoverMissingCollection = false
+        await performAction {
+            missingCollectionConfirmation = try await module.prepareMissingCloudCollectionRecovery()
+        }
+    }
+
+    func cancelMissingCollectionRecovery() { missingCollectionConfirmation = nil }
+
+    func confirmMissingCollectionRecovery(_ confirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation) async {
+        guard !isPerformingAction else { return }
+        missingCollectionConfirmation = nil
+        didRecoverMissingCollection = false
+        await performAction {
+            try await module.recoverMissingCloudCollection(confirmation)
+            didRecoverMissingCollection = true
+        }
+    }
 
     func confirmReset(_ confirmation: ClipboardHistoryCloudResetConfirmation) async {
         guard !isPerformingAction else { return }
@@ -109,12 +149,15 @@ final class ClipboardSyncSettingsModel {
         do {
             let currentTags = try await module.syncTags()
             let currentPreservedEdits = try await module.preservedSyncEdits()
+            let currentWorkingOutputRecoveries = try await module.workingOutputRecoveries()
             guard generation == refreshGeneration, !Task.isCancelled else {
                 return
             }
             status = currentStatus
+            if status.isEnabled { didRecoverMissingCollection = false }
             tags = currentTags
             preservedEdits = currentPreservedEdits
+            workingOutputRecoveries = currentWorkingOutputRecoveries
             operationFailed = false
         } catch {
             guard generation == refreshGeneration, !Task.isCancelled else {
@@ -129,6 +172,11 @@ final class ClipboardSyncSettingsModel {
         guard !isPerformingAction else { return }
         let ids = preservedEdits.map(\.id)
         await performAction { try await module.dismissPreservedSyncEdits(ids) }
+    }
+
+    func keepWorkingOutput(_ id: UUID) async {
+        guard !isPerformingAction else { return }
+        await performAction { try await module.keepWorkingOutput(id) }
     }
 
     private func performAction(_ action: () async throws -> Void) async {

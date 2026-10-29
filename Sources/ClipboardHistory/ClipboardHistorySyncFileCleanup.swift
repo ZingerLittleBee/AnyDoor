@@ -90,6 +90,9 @@ extension ClipboardHistoryModule {
                     arguments: [account, epoch, object])
             }
         }
+        try await waitForWriteTurn()
+        guard store == storeEpoch else { throw ClipboardHistoryModuleError.operationUnavailable }
+        try syncWrite { try reclaimUnownedFileConflictPlans(in: $0) }
     }
 
     nonisolated private static func removeOwnedSyncTransfer(_ url: URL, root: URL, faults: ClipboardHistoryFaultInjector) throws {

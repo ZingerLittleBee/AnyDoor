@@ -19,10 +19,10 @@ extension ClipboardHistoryModule {
     }
 
     static func syncFileTransferSummary(_ descriptor: ClipboardSyncFileDescriptor, accountID: String, epoch: String,
-        in database: Database) throws -> (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool) {
+        in database: Database, restorations: ClipboardSyncFileRestorationSnapshot? = nil) throws -> (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool) {
         let linkedFailure = try linkedSyncFileFailure(objectID: descriptor.objectID, accountID: accountID, epoch: epoch, in: database)
         if let epochID = UUID(uuidString: epoch),
-           let restoring = try pendingSyncFileRestoration(descriptor, accountID: accountID, epoch: epochID, in: database) {
+           let restoring = try pendingSyncFileRestoration(descriptor, accountID: accountID, epoch: epochID, in: database, snapshot: restorations) {
             let units = (restoring.completedBytes + Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes) - 1)
                 / Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes)
             return (max(0, restoring.completedBytes - units * 28), linkedFailure, false, true)
@@ -83,7 +83,7 @@ extension ClipboardHistoryModule {
         case .localFileAccessDenied: .localFileAccessDenied
         case .accountChanged, .accountUnavailable: .accountChanged
         case .keyLocked, .keyUnavailable: .keyUnavailable
-        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion, .corruptAuthority: .unavailable
+        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion, .providerRejected, .corruptAuthority: .unavailable
         case .localStorage, nil: .localStorage
         }
     }

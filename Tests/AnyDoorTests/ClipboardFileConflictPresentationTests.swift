@@ -56,12 +56,14 @@ final class ClipboardFileConflictPresentationTests: XCTestCase {
         XCTAssertEqual(inspected, before)
         await model.resolveFileConflict(choosing: candidate.id)
         XCTAssertNil(model.fileConflictNotice)
+        let beforeRequest = await fixture.cloud.downloadCount()
+        XCTAssertEqual(beforeRequest, before)
 
         await model.downloadFileConflictVersion(versionID)
 
         let refreshed = try XCTUnwrap(model.fileConflictPlan)
         let available = try XCTUnwrap(refreshed.candidates.first { $0.id == candidate.id })
-        XCTAssertNotEqual(refreshed.id, plan.id)
+        XCTAssertEqual(refreshed.id, plan.id, "Download availability changes without changing the persisted account/version/file basis")
         XCTAssertEqual(available.availability, .available)
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(available.localURL)), remote)
         XCTAssertEqual(try Data(contentsOf: fixture.location.url), Data("local edited contents".utf8))

@@ -57,30 +57,33 @@ extension ClipboardHistoryModule {
             account: basis.account, control: basis.control, key: key)
         let root = syncWorkingRoot.appendingPathComponent("Conflict Versions", isDirectory: true)
         let output = try await ClipboardSyncFilePublication.construct(descriptor: prepared.descriptor,
-            encryptedDirectory: prepared.uploadDirectory, root: root, account: basis.account, control: basis.control, key: key, faults: faultInjector)
-        defer { ClipboardSyncFilePublication.discard(output) }
-        try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
-        try linkedRead { database in
-            try Self.validateConflictBasis(fileConflictBasis(entryID: .init(snapshot.entryID), objectID: snapshot.objectID, in: database), snapshot: snapshot)
-        }
-        let published = try ClipboardSyncFilePublication.publish(output, descriptor: prepared.descriptor,
-            root: root, accountID: basis.account.identifier, faults: faultInjector)
-        try await ClipboardSyncFilePublication.verifyPublished(published, candidate: output, faults: faultInjector)
-        try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
-        try syncWrite { database in
-            try Self.validateConflictBasis(fileConflictBasis(entryID: .init(snapshot.entryID), objectID: snapshot.objectID, in: database), snapshot: snapshot)
-            guard let data = try Data.fetchOne(database, sql: "SELECT journal FROM clipboard_sync_file_resolutions WHERE plan_id = ? AND phase = 'needsReview'", arguments: [owner.uuidString]) else {
-                throw ClipboardHistoryFileConflictError.stalePlan
+            encryptedDirectory: prepared.uploadDirectory, root: root, account: basis.account, control: basis.control, key: key,
+            ownership: workingOutputJournal(), faults: faultInjector)
+        do {
+            try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
+            try linkedRead { database in
+                try Self.validateConflictBasis(fileConflictBasis(entryID: .init(snapshot.entryID), objectID: snapshot.objectID, in: database), snapshot: snapshot)
             }
-            var journal = try JSONDecoder().decode(ClipboardSyncFileResolutionJournal.self, from: data)
-            guard let index = journal.prepared.firstIndex(where: { $0.descriptor.versionID == prepared.descriptor.versionID }) else { throw ClipboardSyncServiceError.corruptData }
-            journal.prepared[index] = .init(descriptor: prepared.descriptor, parents: prepared.parents,
-                uploadDirectory: prepared.uploadDirectory, sourceURL: published.url, bookmark: published.bookmark,
-                identity: published.identity, publication: prepared.publication)
-            try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET journal = ? WHERE plan_id = ?",
-                arguments: [try JSONEncoder().encode(journal), owner.uuidString])
-        }
-        publishMutation()
+            let published = try ClipboardSyncFilePublication.publish(output, descriptor: prepared.descriptor,
+                root: root, accountID: basis.account.identifier, faults: faultInjector)
+            try await ClipboardSyncFilePublication.verifyPublished(published, candidate: output, faults: faultInjector)
+            try await admitSyncFilePublication(generation, account: basis.account, control: basis.control, services: services)
+            try syncWrite { database in
+                try Self.validateConflictBasis(fileConflictBasis(entryID: .init(snapshot.entryID), objectID: snapshot.objectID, in: database), snapshot: snapshot)
+                guard let data = try Data.fetchOne(database, sql: "SELECT journal FROM clipboard_sync_file_resolutions WHERE plan_id = ? AND phase = 'needsReview'", arguments: [owner.uuidString]) else {
+                    throw ClipboardHistoryFileConflictError.stalePlan
+                }
+                var journal = try JSONDecoder().decode(ClipboardSyncFileResolutionJournal.self, from: data)
+                guard let index = journal.prepared.firstIndex(where: { $0.descriptor.versionID == prepared.descriptor.versionID }) else { throw ClipboardSyncServiceError.corruptData }
+                journal.prepared[index] = .init(descriptor: prepared.descriptor, parents: prepared.parents,
+                    uploadDirectory: prepared.uploadDirectory, sourceURL: published.url, bookmark: published.bookmark,
+                    identity: published.identity, publication: prepared.publication)
+                try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET journal = ? WHERE plan_id = ?",
+                    arguments: [try JSONEncoder().encode(journal), owner.uuidString])
+            }
+            publishMutation()
+            await ClipboardSyncFilePublication.discard(output)
+        } catch { await ClipboardSyncFilePublication.discard(output); throw error }
     }
 
     static let pinnedFileConflictDownload = """

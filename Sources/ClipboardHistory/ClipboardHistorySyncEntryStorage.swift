@@ -3,6 +3,39 @@ import GRDB
 import ImageIO
 import UniformTypeIdentifiers
 
+/// One entry's database snapshot. Payload bytes are opened only after the read
+/// transaction has ended; callers validate the captured revision before staging.
+struct ClipboardSyncEntrySnapshot: Sendable {
+    enum Representation: Sendable {
+        case inline(ClipboardSyncRepresentationContent)
+        case bitmap(path: String, thumbnailPath: String?)
+    }
+
+    let metadata: ClipboardSyncEntryContent
+    let items: [[Representation]]
+
+    func materialize(using store: ClipboardHistoryPayloadStore) throws -> ClipboardSyncEntryContent {
+        let materialized = try items.map { representations in
+            ClipboardSyncItemContent(representations: try representations.map { representation in
+                try Task.checkCancellation()
+                switch representation {
+                case .inline(let value): return value
+                case .bitmap(let path, let thumbnailPath):
+                    let png = try store.materialize(relativePath: path, expectedKind: .bitmap)
+                    try Task.checkCancellation()
+                    let thumbnail = try thumbnailPath.map { try store.materialize(relativePath: $0, expectedKind: .thumbnail) }
+                        ?? ClipboardHistoryModule.canonicalBitmap(from: png).thumbnail
+                    return .bitmap(png: png, thumbnail: thumbnail)
+                }
+            })
+        }
+        return .init(id: metadata.id, capturedAt: metadata.capturedAt, sourceBundleID: metadata.sourceBundleID,
+            sourceDisplayName: metadata.sourceDisplayName, sourceProvenance: metadata.sourceProvenance,
+            favorite: metadata.favorite, tags: metadata.tags, items: materialized,
+            facets: metadata.facets, recognition: metadata.recognition)
+    }
+}
+
 extension ClipboardHistoryModule {
     struct ClipboardSyncPublishedBitmap {
         let bitmap: ClipboardHistoryPublishedPayload
@@ -35,8 +68,8 @@ extension ClipboardHistoryModule {
         return .init(identity: identity, bitmaps: bitmaps, thumbnailID: thumbnailID)
     }
 
-    func syncEntryContent(id: UUID, sharedID: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
-                          control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntryContent {
+    func syncEntrySnapshot(id: UUID, sharedID: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
+                          control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntrySnapshot {
         let storedID = id.uuidString.lowercased()
         guard let entry = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_entries WHERE id = ?", arguments: [storedID]) else {
             throw ClipboardSyncServiceError.localStorage
@@ -49,14 +82,14 @@ extension ClipboardHistoryModule {
                 SELECT kind, type_identifier, text_value, data_value, payload_id, representation_index FROM clipboard_representations
                 WHERE entry_id = ? AND item_index = ? ORDER BY representation_index
                 """, arguments: [storedID, itemIndex])
-            return ClipboardSyncItemContent(representations: try rows.map { row in
+            return try rows.map { row -> ClipboardSyncEntrySnapshot.Representation in
                 switch row["kind"] as String {
-                case "text": return .text(typeIdentifier: row["type_identifier"], value: row["text_value"])
-                case "richText": return .richText(typeIdentifier: row["type_identifier"], data: row["data_value"])
+                case "text": return .inline(.text(typeIdentifier: row["type_identifier"], value: row["text_value"]))
+                case "richText": return .inline(.richText(typeIdentifier: row["type_identifier"], data: row["data_value"]))
                 case "color":
                     let data: Data = row["data_value"]
                     guard let value = Self.normalizedColor(from: data) else { throw ClipboardSyncServiceError.corruptData }
-                    return .color(data: data, normalizedValue: value)
+                    return .inline(.color(data: data, normalizedValue: value))
                 case "bitmap":
                     guard let path = try String.fetchOne(database,
                         sql: "SELECT relative_path FROM clipboard_payloads WHERE id = ?", arguments: [row["payload_id"] as String]),
@@ -66,26 +99,23 @@ extension ClipboardHistoryModule {
                             """, arguments: [entry["thumbnail_payload_id"] as String?]) else {
                         throw ClipboardSyncServiceError.localStorage
                     }
-                    let store = try requiredPayloadStore()
-                    let png = try store.materialize(relativePath: path, expectedKind: .bitmap)
-                    let thumbnail = isFirstBitmap
-                        ? try store.materialize(relativePath: thumbnailPath, expectedKind: .thumbnail)
-                        : try Self.canonicalBitmap(from: png).thumbnail
+                    let preview = isFirstBitmap ? thumbnailPath : nil
                     isFirstBitmap = false
-                    return .bitmap(png: png, thumbnail: thumbnail)
+                    return .bitmap(path: path, thumbnailPath: preview)
                 case "fileReference":
-                    return .file(try syncFileDescriptor(entryID: storedID, itemIndex: itemIndex,
-                        representationIndex: row["representation_index"], account: account, control: control, key: key, in: database))
+                    return .inline(.file(try syncFileDescriptor(entryID: storedID, itemIndex: itemIndex,
+                        representationIndex: row["representation_index"], account: account, control: control, key: key, in: database)))
                 default: throw ClipboardSyncServiceError.unsupportedVersion
                 }
-            })
+            }
         }
-        return ClipboardSyncEntryContent(id: sharedID, capturedAt: Date(timeIntervalSince1970: entry["captured_at"]),
+        let metadata = ClipboardSyncEntryContent(id: sharedID, capturedAt: Date(timeIntervalSince1970: entry["captured_at"]),
             sourceBundleID: entry["source_bundle_id"], sourceDisplayName: entry["source_display_name"],
             sourceProvenance: entry["source_provenance"], favorite: entry["is_favorite"], tags: tags,
-            items: items, facets: try String.fetchAll(database,
+            items: [], facets: try String.fetchAll(database,
                 sql: "SELECT facet FROM clipboard_entry_facets WHERE entry_id = ? ORDER BY facet", arguments: [storedID]),
             recognition: try syncEntryRecognition(entryID: storedID, in: database))
+        return .init(metadata: metadata, items: items)
     }
 
     func importSyncEntryContent(_ content: ClipboardSyncEntryContent, account: ClipboardSyncAccount,

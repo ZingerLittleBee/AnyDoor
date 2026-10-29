@@ -4,7 +4,7 @@ import Foundation
 extension ClipboardSyncFilePublication {
     static func constructTree(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
         root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        faults: ClipboardHistoryFaultInjector) throws -> ClipboardSyncFileCandidate {
+        ownership: ClipboardWorkingOutputJournal, faults: ClipboardHistoryFaultInjector) throws -> ClipboardSyncFileCandidate {
         try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
             account: account, control: control, key: key, destination: nil)
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
@@ -21,22 +21,27 @@ extension ClipboardSyncFilePublication {
                 parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(status), treeWitness: tree)
         }
         guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        let name = "Receiving-\(UUID().uuidString).partial"
+        let owner = try ownership.reserve(directory: directory, url: url)
+        let name = owner.name
         let pending = url.appendingPathComponent(name)
-        var succeeded = false
-        defer { if !succeeded { try? FileManager.default.removeItem(at: pending) } }
-        let created = try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
-            account: account, control: control, key: key, destination: pending, faults: faults, destinationParent: directory)
-        let tree = try ClipboardFileTree(pending)
-        let measurement = try tree.stream { _ in }
-        guard fstatat(directory, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
-              fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
-              measurement.encoded == descriptor.encodedByteCount,
-              status.st_dev == created?.device, status.st_ino == created?.inode else { throw ClipboardSyncServiceError.localStorage }
-        succeeded = true
-        return .init(directory: url, name: descriptor.displayName, pendingName: name,
-            parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(status), treeWitness: tree)
+        do {
+            let created = try ClipboardFileTreeDecoding.decode(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
+                account: account, control: control, key: key, destination: pending, faults: faults, destinationParent: directory,
+                rootCreated: { fd in
+                    try owner.created(fd)
+                    try faults.check(.syncWorkingOutputAfterOwnership)
+                })
+            let tree = try ClipboardFileTree(pending)
+            let measurement = try tree.stream { _ in }
+            guard fstatat(directory, name, &status, AT_SYMLINK_NOFOLLOW) == 0,
+                  fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount,
+                  measurement.encoded == descriptor.encodedByteCount,
+                  status.st_dev == created?.device, status.st_ino == created?.inode else { throw ClipboardSyncServiceError.localStorage }
+            try owner.checkpoint(snapshot: .init(status), tree: tree, descriptor: descriptor)
+            return .init(directory: url, name: descriptor.displayName, pendingName: name,
+                parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(status), treeWitness: tree, ownership: owner)
+        } catch { try? owner.recover(); throw error }
     }
 
     /// Completion is still unpublished in the store. The recursive proof runs

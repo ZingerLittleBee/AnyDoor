@@ -9,6 +9,45 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testMissingCollectionRecoveryPreservesFrozenAndLaterSavedFiles() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let frozen = Data("frozen but unpublished before collection loss".utf8)
+        try frozen.write(to: fixture.original)
+        try await eventually { !(await fixture.cloud.partialFileRecordIDs()).isEmpty }
+        try await fixture.sender.setSyncEnabled(false)
+        let newer = Data("saved after freezing before collection loss".utf8)
+        try newer.write(to: fixture.original)
+        let cloudBefore = await fixture.cloud.visibleRecords()
+        let partialBefore = await fixture.cloud.partialFileRecordIDs()
+        await fixture.cloud.removeControl()
+        try await fixture.sender.setSyncEnabled(true)
+        let confirmation = try await fixture.sender.prepareMissingCloudCollectionRecovery()
+        try await fixture.sender.recoverMissingCloudCollection(confirmation)
+        let notices = try await fixture.sender.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let content = try await fixture.sender.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Missing preserved file") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        XCTAssertEqual(try Data(contentsOf: fixture.original), newer)
+        let cloudAfter = await fixture.cloud.visibleRecords()
+        let partialAfter = await fixture.cloud.partialFileRecordIDs()
+        XCTAssertEqual(cloudAfter, cloudBefore)
+        XCTAssertEqual(partialAfter, partialBefore, "Recovery cannot claim to delete absent collection data")
+        let status = await fixture.sender.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+        await reopened.resumeSync()
+        let restored = try await reopened.preservedSyncEdits()
+        XCTAssertEqual(Set(restored.map(\.id)), Set(notices.map(\.id)))
+    }
+
+    @MainActor
     func testUnreadableInstalledReplacementRetainsJournalUntilRecoveryIsProven() async throws {
         guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
         let target = OSAllocatedUnfairLock(initialState: Optional<URL>.none)
@@ -620,6 +659,7 @@ actor LinkedFileCloud: ClipboardSyncTransport {
         identity = account
     }
     private var currentControl: ClipboardSyncControl?
+    func removeControl() { currentControl = nil }
     private var uploads: [ClipboardSyncUpload] = []
     private var purgedRecords: Set<String> = []
     private var commitsFail = false
