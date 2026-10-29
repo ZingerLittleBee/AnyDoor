@@ -49,7 +49,12 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let pendingB = await cloud.currentPhase()
         XCTAssertEqual(pendingB, "resetting")
         await model.retry()
-        try await waitForStatus(model) { model.status.cloudReset?.stage == .completed }
+        try await waitForStatus(model) {
+            let phase = await cloud.currentPhase()
+            return phase == "stopped" && model.status.cloudReset?.stage == .completed
+        }
+        let clearedB = await cloud.currentPhase()
+        XCTAssertEqual(clearedB, "stopped")
         XCTAssertEqual(model.status.cloudReset?.stage, .completed)
         XCTAssertFalse(model.status.isEnabled)
     }
@@ -363,11 +368,11 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
 
     /// Settings commands finish after admission. Observe the later public state
     /// without issuing another retry, which would change reset/failure behavior.
-    private func waitForStatus(_ model: ClipboardSyncSettingsModel, until predicate: () -> Bool,
+    private func waitForStatus(_ model: ClipboardSyncSettingsModel, until predicate: () async -> Bool,
                                file: StaticString = #filePath, line: UInt = #line) async throws {
         for _ in 0..<1_000 {
             await model.refresh()
-            if predicate() { return }
+            if await predicate() { return }
             try await Task.sleep(for: .milliseconds(5))
         }
         XCTFail("Queued sync did not publish the expected Settings state", file: file, line: line)
