@@ -118,10 +118,10 @@ extension ClipboardHistoryModule {
                 try await Task.sleep(for: .milliseconds(300))
                 guard let self else { return }
                 let changed = try await self.observeLinkedLocation(id, account: account, epoch: epoch, generation: generation)
-                if changed { await self.retrySync() }
+                if changed { await self.retrySyncAutomatically() }
                 await self.finishLinkedFileObservation(id, revision: revision)
             } catch ClipboardSyncServiceError.accountChanged {
-                await self?.retrySync()
+                await self?.retrySyncAutomatically()
                 await self?.finishLinkedFileObservation(id, revision: revision)
             } catch {
                 await self?.finishLinkedFileObservation(id, revision: revision)

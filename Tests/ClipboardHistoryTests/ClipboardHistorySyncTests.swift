@@ -9,6 +9,47 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testPersistentFileFailureAllowsIndependentSharingAndBacksOffAcrossRestart() async throws {
+        let fixture = try await fileFixture(names: ["Damaged.txt", "Healthy.txt"],
+            contents: [Data("damaged body".utf8), Data("healthy body".utf8)])
+        let tags = try await fixture.sender.syncTags()
+        let tag = try XCTUnwrap(tags.first)
+        let removed = try await fixture.sender.capture(.init(source: .unknown, content: .text("delete independently")))
+        _ = try await fixture.sender.apply(.setTags(removed.entryID, [tag.id]))
+        await fixture.sender.retrySync()
+        await fixture.cloud.persistentlyDamageNextFileBody()
+        try await fixture.receiver.setSyncEnabled(true)
+
+        _ = try await fixture.receiver.apply(.delete(removed.entryID))
+        let added = try await fixture.receiver.capture(.init(source: .unknown, content: .text("share despite unavailable file")))
+        _ = try await fixture.receiver.apply(.setTags(added.entryID, [tag.id]))
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let sent = try await fixture.sender.page(.init()).entries
+        XCTAssertFalse(sent.contains { $0.id == removed.entryID })
+        XCTAssertTrue(sent.contains { $0.id == added.entryID })
+        let received = try await fixture.receiver.page(.init()).entries
+        let fileEntry = try XCTUnwrap(received.first { !$0.syncFiles.isEmpty })
+        XCTAssertEqual(fileEntry.syncFiles.filter { $0.state == .complete }.count, 1)
+        let failed = try XCTUnwrap(fileEntry.syncFiles.first { $0.transferFailure == .corruptData })
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: fileEntry.id, purpose: .normalPaste))
+            XCTFail("A failed member must never be omitted from materialization")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+
+        let attempts = await fixture.cloud.fileBodyDownloadCount()
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 2_000, root: fixture.receiverRoot)
+        await reopened.resumeSync()
+        let afterResume = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(afterResume, attempts, "Restart must retain the failed object's automatic retry deadline")
+        await fixture.cloud.repairFileBodies()
+        try await reopened.requestSyncFileDownload(entryID: fileEntry.id, objectID: failed.id, versionID: failed.versionID)
+        let repaired = try await reopened.page(.init()).entries
+        XCTAssertEqual(repaired.first { $0.id == fileEntry.id }?.syncFiles.map(\.state), [.complete, .complete])
+    }
+
     func testDeletingPendingRejoinDoesNotBlockDeletionOrUnrelatedSharing() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -3784,8 +3825,12 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
     private var damagesFileBody = false
+    private var persistentDamagedBody: String?
+    private var damagesNextBodyPersistently = false
     private var fileBodyDownloads = 0
     func damageNextFileBodyDownload() { damagesFileBody = true }
+    func persistentlyDamageNextFileBody() { damagesNextBodyPersistently = true }
+    func repairFileBodies() { persistentDamagedBody = nil; damagesNextBodyPersistently = false }
     func fileBodyDownloadCount() -> Int { fileBodyDownloads }
     private var reversesAllChanges = false
     private var reversesDelivery = false
@@ -3853,10 +3898,14 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
+        if record.kind == .fileBody, damagesNextBodyPersistently {
+            damagesNextBodyPersistently = false
+            persistentDamagedBody = record.recordID
+        }
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if damagesDownload || (damagesFileBody && record.kind == .fileBody) {
+        if damagesDownload || (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID {
             damagesDownload = false
             if record.kind == .fileBody { damagesFileBody = false }
             var changed = upload.chunks

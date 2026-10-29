@@ -1162,6 +1162,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v27_clipboard_sync_directory_versions",
                 "v28_clipboard_sync_application_updates",
                 "v29_clipboard_sync_file_lifecycle",
+                "v30_clipboard_sync_file_retries",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -1258,6 +1259,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v27_clipboard_sync_directory_versions",
                 "v28_clipboard_sync_application_updates",
                 "v29_clipboard_sync_file_lifecycle",
+                "v30_clipboard_sync_file_retries",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

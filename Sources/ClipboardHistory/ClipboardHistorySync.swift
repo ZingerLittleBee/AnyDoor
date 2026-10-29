@@ -99,7 +99,7 @@ extension ClipboardHistoryModule {
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard syncStatus().isEnabled || pendingReset else { return }
         syncSuspended = false
-        await retrySync()
+        await retrySyncAutomatically()
     }
 
     /// Process shutdown/store replacement does not revoke persisted participation.
@@ -124,7 +124,23 @@ extension ClipboardHistoryModule {
         return generation
     }
 
-    public func retrySync() async { await runSync(allowAccountBinding: false) }
+    public func retrySync() async {
+        guard !syncSuspended else { return }
+        do {
+            try syncWrite { database in
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_retries SET retry_not_before = 0
+                    WHERE account_id = (SELECT account_id FROM clipboard_sync_settings WHERE id = 1)
+                    """)
+            }
+        } catch {
+            setSyncPhase(.failed(.localStorage))
+            return
+        }
+        await runSync(allowAccountBinding: false)
+    }
+
+    func retrySyncAutomatically() async { await runSync(allowAccountBinding: false) }
 
     private func runSync(allowAccountBinding: Bool) async {
         guard !syncSuspended else { return }
@@ -172,7 +188,7 @@ extension ClipboardHistoryModule {
 
     private func syncPollingFired() async {
         syncPollTask = nil
-        await retrySync()
+        await retrySyncAutomatically()
     }
 
     func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
@@ -327,6 +343,7 @@ extension ClipboardHistoryModule {
                 throw ClipboardSyncServiceError.corruptData
             }
             setSyncPhase(.transferring)
+            deferredSyncFileFailure = nil
             if try needsSyncTextRootReplay(account: account, control: control) {
                 state.cursor = nil
             }
@@ -473,7 +490,7 @@ extension ClipboardHistoryModule {
             try acknowledgeLinkedFileVersions(account: account, control: control)
             try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
-            await finishSync(.upToDate, generation: generation)
+            await finishSync(deferredSyncFileFailure ?? .upToDate, generation: generation)
         } catch is CancellationError {
             return
         } catch {

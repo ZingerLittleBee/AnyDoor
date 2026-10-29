@@ -101,6 +101,7 @@ public actor ClipboardHistoryModule {
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
     var syncServices: ClipboardSyncServices?
     var syncPhase: ClipboardHistorySyncPhase = .disabled
+    var deferredSyncFileFailure: ClipboardHistorySyncPhase?
     var syncGeneration: UInt64 = 0
     var activeFileConflictResolutions: Set<UUID> = []
     var syncTask: Task<Void, Never>?
