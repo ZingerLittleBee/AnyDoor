@@ -9,6 +9,75 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testChangingInitialFileSourceDoesNotStarveSharingOrBypassRetryDeadline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("changing-source-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let tree = root.appendingPathComponent("Source/deep")
+        try FileManager.default.createDirectory(at: tree, withIntermediateDirectories: true)
+        let member = tree.appendingPathComponent("member")
+        try Data("original".utf8).write(to: member)
+        let changes = OSAllocatedUnfairLock(initialState: (enabled: true, attempts: 0))
+        let faults = ClipboardHistoryFaultInjector { point in
+            guard point == .syncFileTreeBeforeFreezeVerification else { return false }
+            changes.withLock { state in
+                state.attempts += 1
+                if state.enabled { try? Data("save during freeze \(state.attempts)".utf8).write(to: member) }
+            }
+            return false
+        }
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let senderRoot = root.appendingPathComponent("Sender")
+        let sender = makeModule(services: services, keyByte: 0xE4, time: 1_000, root: senderRoot, faults: faults)
+        let receiver = makeModule(services: services, keyByte: 0xE5, time: 2_000)
+        let removed = try await sender.capture(.init(source: .unknown, content: .text("remove independently")))
+        let tag = try await sender.createTagDefinition(named: "Shared", assigningTo: removed.entryID).definition
+        try await sender.setSyncTagSelected(tag.id, selected: true)
+        try await sender.setSyncEnabled(true)
+        try await receiver.setSyncEnabled(true)
+        try await sender.setSyncEnabled(false)
+        _ = try await sender.apply(.delete(removed.entryID))
+        let added = try await sender.capture(.init(source: .unknown, content: .text("share despite a changing directory")))
+        _ = try await sender.apply(.setTags(added.entryID, [tag.id]))
+        let board = NSPasteboard(name: .init("dev.bybee.AnyDoor.changing-source.\(UUID())"))
+        defer { board.releaseGlobally() }
+        let item = NSPasteboardItem()
+        item.setString(tree.deletingLastPathComponent().absoluteString, forType: .fileURL)
+        XCTAssertTrue(board.writeObjects([item]))
+        guard case .captured(let captured) = try await sender.capture(.init(pasteboard: board), source: .unknown) else {
+            return XCTFail("Expected a directory capture")
+        }
+        _ = try await sender.apply(.setTags(captured.entryID, [tag.id]))
+        try await sender.setSyncEnabled(true)
+        await receiver.retrySync()
+        let received = try await receiver.page(.init()).entries
+        XCTAssertFalse(received.contains { $0.id == removed.entryID })
+        XCTAssertTrue(received.contains { $0.id == added.entryID })
+        let unavailable = try await sender.page(.init()).entries.first { $0.id == captured.entryID }?.syncFiles.first
+        XCTAssertEqual(unavailable?.transferFailure, .sourceChanged)
+        XCTAssertEqual(changes.withLock { $0.attempts }, 1)
+
+        for index in 0..<3 {
+            try Data("ongoing save \(index)".utf8).write(to: member)
+            await sender.resumeSync()
+        }
+        XCTAssertEqual(changes.withLock { $0.attempts }, 1, "Changing source revisions must not reset the automatic freeze deadline")
+        try await sender.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xE4, time: 1_001, root: senderRoot, faults: faults)
+        await reopened.resumeSync()
+        XCTAssertEqual(changes.withLock { $0.attempts }, 1, "Restart must retain the same source deadline")
+        changes.withLock { $0.enabled = false }
+        await reopened.retrySync()
+        await receiver.retrySync()
+        let recovered = try await receiver.page(.init()).entries
+        let fileEntry = try XCTUnwrap(recovered.first { $0.id == captured.entryID })
+        XCTAssertEqual(fileEntry.syncFiles.first?.state, .complete)
+        let content = try await receiver.materialize(.init(entryID: fileEntry.id, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Expected recovered directory") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("deep/member")), Data("ongoing save 2".utf8))
+    }
+
     func testSyncCommandsCanReturnAfterDurableIntentWhileTransferIsHeld() async throws {
         for command in ["enable", "retry", "tag"] {
             let cloud = SyncTestCloud()
