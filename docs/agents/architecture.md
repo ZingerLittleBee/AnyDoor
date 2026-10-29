@@ -264,6 +264,10 @@ admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
+A frozen local version and its originating location's new base commit in one
+transaction after rechecking the location revision, identity, and prior base.
+Pausing or reassociating the location during freezing therefore cannot publish
+an edit that its origin fails to adopt; explicit Refresh uses the same boundary.
 
 Real temporary-directory coverage is in
 [directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),
@@ -396,6 +400,20 @@ confirmed, unfinished cloud clear resumes its account-scoped cleanup; active run
 responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
+
+A previously observed collection whose control read confirms absence exposes
+`canRecoverMissingCloudCollection`, including while Off and after relaunch.
+[Missing collection recovery](../../Sources/ClipboardHistory/ClipboardHistoryMissingCloudCollectionRecovery.swift)
+uses a separate opaque account/control confirmation and rechecks absence before
+retiring local publication authority. It preserves the shared key, local history,
+unpublished frozen versions and later saved files, then stores a fresh-epoch
+candidate with participation Off and all Sync Tags deselected. No unknown remote
+records are cleared. Only a later explicit On and fresh tag selection can create
+and publish the new collection. A returning control or changed account rejects
+stale confirmation. Recovered epochs remain durably retired even when an old
+control returns after recovery or races the next creation; another device's new
+epoch with the preserved key may still win. An affected unfinished clear becomes
+superseded, never reported as successfully cleared.
 
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
 An interrupted clear for account A does not prevent explicit participation or
