@@ -3407,13 +3407,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Select this text version"
+            "value": "Select version %lld"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "选择此文本版本"
+            "value": "选择版本 %lld"
           }
         }
       }
