@@ -35,7 +35,9 @@ extension ClipboardHistoryModule {
         }
     }
 
-    public func setSyncEnabled(_ enabled: Bool) async throws {
+    /// Passing false returns after durable intent and queues owned sync work.
+    /// Disabling always revokes and drains active work before returning.
+    public func setSyncEnabled(_ enabled: Bool, waitForSync: Bool = true) async throws {
         let generation = await stopSyncTasks()
         guard generation == syncGeneration else { return }
         _ = try await writableDatabase()
@@ -47,7 +49,7 @@ extension ClipboardHistoryModule {
             guard generation == syncGeneration else { return }
             if account == reset.account {
                 syncSuspended = false
-                await retrySync()
+                await retrySync(waitForSync: waitForSync)
                 return
             }
         }
@@ -60,10 +62,12 @@ extension ClipboardHistoryModule {
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard enabled || pendingReset else { return }
         syncSuspended = false
-        await runSync(allowAccountBinding: enabled)
+        if waitForSync { await runSync(allowAccountBinding: enabled) }
+        else { scheduleImmediateSync(allowAccountBinding: enabled) }
     }
 
-    public func setSyncTagSelected(_ tagID: String, selected: Bool) async throws {
+    /// Passing false returns after the selection is durable, before transfer.
+    public func setSyncTagSelected(_ tagID: String, selected: Bool, waitForSync: Bool = true) async throws {
         _ = try await writableDatabase()
         try syncWrite { database in
             guard try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_tag_definitions WHERE id = ?)",
@@ -90,7 +94,7 @@ extension ClipboardHistoryModule {
             try Self.bumpHistoryRevision(in: database)
         }
         publishSyncStatus()
-        if !syncSuspended { await retrySync() }
+        if !syncSuspended { await retrySync(waitForSync: waitForSync) }
     }
 
     /// Resumes only stored local consent, after the host has completed migration.
@@ -112,6 +116,7 @@ extension ClipboardHistoryModule {
         stopLinkedFileObservers()
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
+        syncRerunRequested = false
         let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
@@ -124,7 +129,8 @@ extension ClipboardHistoryModule {
         return generation
     }
 
-    public func retrySync() async {
+    /// Passing false schedules the retry without awaiting provider transfer.
+    public func retrySync(waitForSync: Bool = true) async {
         guard !syncSuspended else { return }
         do {
             try syncWrite { database in
@@ -137,14 +143,19 @@ extension ClipboardHistoryModule {
             setSyncPhase(.failed(.localStorage))
             return
         }
-        await runSync(allowAccountBinding: false)
+        if waitForSync { await runSync(allowAccountBinding: false) }
+        else { scheduleImmediateSync(allowAccountBinding: false) }
     }
 
     func retrySyncAutomatically() async { await runSync(allowAccountBinding: false) }
 
     private func runSync(allowAccountBinding: Bool) async {
         guard !syncSuspended else { return }
-        if let syncTask { await syncTask.value; return }
+        if let syncTask {
+            syncRerunRequested = true
+            await syncTask.value
+            return
+        }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         do {
             let recovery = try currentSyncRecovery()
@@ -168,7 +179,27 @@ extension ClipboardHistoryModule {
         await task.value
         guard generation == syncGeneration else { return }
         syncTask = nil
-        scheduleSync()
+        if syncRerunRequested {
+            syncRerunRequested = false
+            scheduleImmediateSync(allowAccountBinding: false)
+        } else { scheduleSync() }
+    }
+
+    /// Intent-only commands use the same owned task slots as polling. A mutation
+    /// admitted during a pass requests another pass instead of losing its wakeup.
+    private func scheduleImmediateSync(allowAccountBinding: Bool) {
+        guard !syncSuspended else { return }
+        if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
+        syncPollTask?.cancel()
+        syncPollTask = nil
+        if syncTask != nil {
+            syncRerunRequested = true
+            return
+        }
+        let generation = syncGeneration
+        syncPollTask = Task { [weak self] in
+            await self?.syncPollingFired(generation: generation)
+        }
     }
 
     func scheduleSync() {
@@ -179,14 +210,16 @@ extension ClipboardHistoryModule {
         catch { setSyncPhase(.failed(.localStorage)); return }
         let remainingDelay = retryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
         let interval = max(pollingInterval, .seconds(remainingDelay))
+        let generation = syncGeneration
         syncPollTask = Task { [weak self] in
             do { try await Task.sleep(for: interval) } catch { return }
             guard let self else { return }
-            await self.syncPollingFired()
+            await self.syncPollingFired(generation: generation)
         }
     }
 
-    private func syncPollingFired() async {
+    private func syncPollingFired(generation: UInt64) async {
+        guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return }
         syncPollTask = nil
         await retrySyncAutomatically()
     }

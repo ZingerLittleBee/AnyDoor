@@ -9,6 +9,84 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testSyncCommandsCanReturnAfterDurableIntentWhileTransferIsHeld() async throws {
+        for command in ["enable", "retry", "tag"] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let module = makeModule(services: services, keyByte: 0xE0, time: 1_000)
+            let entry = try await module.capture(.init(source: .unknown, content: .text("queued by \(command)")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+            if command != "tag" { try await module.setSyncTagSelected(tag.id, selected: true) }
+            if command != "enable" { try await module.setSyncEnabled(true) }
+            if command == "retry" {
+                let next = try await module.capture(.init(source: .unknown, content: .text("explicit retry")))
+                _ = try await module.apply(.setTags(next.entryID, [tag.id]))
+            }
+            await cloud.holdNextEntryCommit()
+            let admitted = expectation(description: "\(command) returned after durable intent")
+            let requested = Task {
+                switch command {
+                case "enable": try await module.setSyncEnabled(true, waitForSync: false)
+                case "tag": try await module.setSyncTagSelected(tag.id, selected: true, waitForSync: false)
+                default: await module.retrySync(waitForSync: false)
+                }
+                admitted.fulfill()
+            }
+            addTeardownBlock { await cloud.releaseEntryCommit(); _ = try? await requested.value }
+            await cloud.waitForHeldEntryCommit()
+            await fulfillment(of: [admitted], timeout: 2)
+            let status = await module.syncStatus()
+            XCTAssertTrue(status.isEnabled)
+            let tags = try await module.syncTags()
+            XCTAssertTrue(try XCTUnwrap(tags.first { $0.id == tag.id }).isSelected)
+
+            let later = try await module.capture(.init(source: .unknown, content: .text("intent during held transfer")))
+            _ = try await module.apply(.setTags(later.entryID, [tag.id]))
+            let readmitted = expectation(description: "later intent returned during active transfer")
+            let queued = Task { await module.retrySync(waitForSync: false); readmitted.fulfill() }
+            await fulfillment(of: [readmitted], timeout: 2)
+            await cloud.releaseEntryCommit()
+            try await requested.value
+            await queued.value
+            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+            while await module.syncStatus().phase != .upToDate, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let peer = makeModule(services: services, keyByte: 0xE1, time: 2_000)
+            try await peer.setSyncEnabled(true)
+            let received = try await peer.page(.init()).entries
+            XCTAssertTrue(received.contains { $0.id == later.entryID }, "Later admitted intent must not be lost")
+        }
+    }
+
+    func testConfirmedMergeCanReturnWhileItsNewlySharedEntryIsUploading() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0xE2, time: 1_000)
+        let entry = try await module.capture(.init(source: .unknown, content: .text("authorized by merge")))
+        let source = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+        let target = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: source.displayName)
+        _ = try await module.replaceTagDefinitions(with: [source, target])
+        try await module.setSyncTagSelected(target.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let preview = try await module.prepareSyncTagMerge(sourceID: source.id, targetID: target.id)
+        await cloud.holdNextEntryCommit()
+        let admitted = expectation(description: "confirmed merge returned after durable intent")
+        let merged = Task { try await module.mergeSyncTags(preview, waitForSync: false); admitted.fulfill() }
+        addTeardownBlock { await cloud.releaseEntryCommit(); _ = try? await merged.value }
+        await cloud.waitForHeldEntryCommit()
+        await fulfillment(of: [admitted], timeout: 2)
+        let local = try await module.page(.init()).entries
+        XCTAssertEqual(local.first?.tagIDs, [preview.canonicalTagID])
+        await cloud.releaseEntryCommit()
+        try await merged.value
+        await module.retrySync()
+        let peer = makeModule(services: services, keyByte: 0xE3, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let received = try await peer.page(.init()).entries
+        XCTAssertEqual(received.map(\.id), [entry.entryID])
+    }
+
     @MainActor
     func testCorruptControlDuringFilePublicationStopsIndependentUploads() async throws {
         for byteCount in [12, 5_000_001] {
@@ -1955,7 +2033,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await fixture.cloud.holdNextFileSegment()
         let request = Task { try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID) }
         await fixture.cloud.waitForHeldFileSegment()
-        try await fixture.receiver.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false, waitForSync: false)
         try await request.value
         let disabled = try await fixture.receiver.page(.init())
         XCTAssertEqual(disabled.entries.first?.syncFiles.first?.state, .waitingForDownload)
