@@ -51,18 +51,20 @@ enum ClipboardSyncVersionGraph {
     }
 
     static func isComplete(_ id: UUID, nodes: [ClipboardSyncVersionNode]) -> Bool {
+        guard Set(nodes.map(\.id)).count == nodes.count else { return false }
         let graph = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.parents) })
-        var visiting: Set<UUID> = []
-        var complete: Set<UUID> = []
-        func visit(_ candidate: UUID) -> Bool {
-            if complete.contains(candidate) { return true }
-            guard let parents = graph[candidate], visiting.insert(candidate).inserted else { return false }
-            guard parents.allSatisfy({ visit($0) }) else { return false }
-            visiting.remove(candidate)
-            complete.insert(candidate)
-            return true
+        var pending = [id]
+        var visited: Set<UUID> = []
+        var reachable: [ClipboardSyncVersionNode] = []
+        while let candidate = pending.popLast() {
+            guard visited.insert(candidate).inserted else { continue }
+            guard let parents = graph[candidate] else { return false }
+            reachable.append(.init(id: candidate, parents: parents))
+            pending.append(contentsOf: parents)
         }
-        return visit(id)
+        // Head-local completeness excludes unrelated disconnected components,
+        // but still rejects missing ancestors and cycles without stack growth.
+        return isAcyclic(reachable, requireAllParents: true)
     }
 }
 

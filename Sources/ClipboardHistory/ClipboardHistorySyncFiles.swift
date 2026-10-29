@@ -21,25 +21,52 @@ extension ClipboardHistoryModule {
         let objectID: String
     }
 
-    private struct FileSummaryFacts {
+    private struct LinkedDisplayReference: Sendable {
+        let path: String
+        let bookmark: Data
+        let identity: Data
+        let nativeIdentity: Data?
+        let state: String
+        let versionID: UUID?
+    }
+
+    private struct FileSummaryFacts: Sendable {
         let descriptor: ClipboardSyncFileDescriptor
-        let state: ClipboardHistorySyncFileState
-        let availableVersionID: UUID?
+        let completeVersion: UUID?
+        let transferComplete: Bool
+        let localPath: String?
+        let localIdentity: Data?
+        let linkedReferences: [LinkedDisplayReference]
         let transfer: (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool)
         let conflict: Bool
 
-        func summary(hasRetrySource: Bool) -> ClipboardHistorySyncFileSummary {
-            .init(id: descriptor.objectID, versionID: descriptor.versionID,
+        func summary(hasRetrySource: Bool, facts: inout ClipboardHistoryFileDisplayFacts) -> ClipboardHistorySyncFileSummary {
+            let linked = usableLinkedFileReference(linkedReferences, facts: &facts)
+            let available = transferComplete && (linked.exists ? linked.reference != nil
+                : facts.isStoredFileAvailable(path: localPath, identity: localIdentity))
+            let availableVersion = linked.reference?.versionID ?? completeVersion
+            let state: ClipboardHistorySyncFileState
+            if available { state = availableVersion == descriptor.versionID ? .complete : .updateAvailable }
+            else if completeVersion != nil { state = .localUnavailable }
+            else {
+                state = switch descriptor.state {
+                case .available: .waitingForDownload
+                case .sourceUnavailable: .sourceUnavailable
+                case .pendingUpload: .waitingForUpload
+                case .unsupportedKind: .unsupportedKind
+                }
+            }
+            return .init(id: descriptor.objectID, versionID: descriptor.versionID,
                 displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
-                availableVersionID: availableVersionID, transferredByteCount: transfer.bytes,
+                availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
                 transferFailure: transfer.failure, downloadRequested: transfer.requested,
                 uploadPending: transfer.uploadPending || (descriptor.state == .sourceUnavailable && hasRetrySource),
                 hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
         }
     }
 
-    static func syncFileSummaries(entryIDs: [String], facts: inout ClipboardHistoryFileDisplayFacts,
-        in database: Database) throws -> [String: [ClipboardHistorySyncFileSummary]] {
+    static func syncFileSummaryPlans(entryIDs: [String],
+        in database: Database) throws -> [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistorySyncFileSummary>]] {
         guard !entryIDs.isEmpty else { return [:] }
         let placeholders = Array(repeating: "?", count: entryIDs.count).joined(separator: ",")
         let rows = try Row.fetchAll(database, sql: """
@@ -59,7 +86,7 @@ extension ClipboardHistoryModule {
             WHERE member.entry_id IN (\(placeholders)) AND \(liveSyncFileMember)
             ORDER BY member.entry_id, member.item_index, member.representation_index
             """, arguments: StatementArguments(entryIDs))
-        var result: [String: [ClipboardHistorySyncFileSummary]] = [:]
+        var result: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistorySyncFileSummary>]] = [:]
         var objects: [FileSummaryObject: FileSummaryFacts] = [:]
         var journals: [FileSummaryScope: ClipboardSyncFileRestorationSnapshot] = [:]
         for row in rows {
@@ -71,42 +98,29 @@ extension ClipboardHistoryModule {
                 if journals[scope] == nil, let epoch = UUID(uuidString: scope.epoch) {
                     journals[scope] = try syncFileRestorationSnapshot(accountID: scope.accountID, epoch: epoch, in: database)
                 }
-                summary = try syncFileSummaryFacts(row, facts: &facts, restorations: journals[scope], in: database)
+                summary = try syncFileSummaryFacts(row, restorations: journals[scope], in: database)
                 objects[object] = summary
             }
-            result[row["entry_id"], default: []].append(summary.summary(hasRetrySource: row["has_retry_source"]))
+            let hasRetrySource: Bool = row["has_retry_source"]
+            result[row["entry_id"], default: []].append(.init { facts in
+                summary.summary(hasRetrySource: hasRetrySource, facts: &facts)
+            })
         }
         return result
     }
 
-    private static func syncFileSummaryFacts(_ row: Row, facts: inout ClipboardHistoryFileDisplayFacts,
+    private static func syncFileSummaryFacts(_ row: Row,
         restorations: ClipboardSyncFileRestorationSnapshot?, in database: Database) throws -> FileSummaryFacts {
         let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
-        let state: ClipboardHistorySyncFileState
         let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
-        let linked = try usableLinkedFileReference(objectID: descriptor.objectID,
-            accountID: row["account_id"], epoch: row["epoch"], facts: &facts, in: database)
-        let available = (row["transfer_state"] as String?) == "complete"
-            && (linked.exists ? linked.reference != nil
-                : ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"]))
-        let availableVersion = linked.reference?.versionID ?? completeVersion
-        if available {
-            state = availableVersion == descriptor.versionID ? .complete : .updateAvailable
-        } else if completeVersion != nil {
-            state = .localUnavailable
-        } else {
-            state = switch descriptor.state {
-            case .available: .waitingForDownload
-            case .sourceUnavailable: .sourceUnavailable
-            case .pendingUpload: .waitingForUpload
-            case .unsupportedKind: .unsupportedKind
-            }
-        }
+        let linked = try linkedDisplayReferences(objectID: descriptor.objectID,
+            accountID: row["account_id"], epoch: row["epoch"], in: database)
         let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"],
             in: database, restorations: restorations)
         let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
-        return .init(descriptor: descriptor, state: state, availableVersionID: available ? availableVersion : nil,
-            transfer: transfer, conflict: conflict)
+        return .init(descriptor: descriptor, completeVersion: completeVersion,
+            transferComplete: (row["transfer_state"] as String?) == "complete",
+            localPath: row["local_path"], localIdentity: row["local_identity"], linkedReferences: linked, transfer: transfer, conflict: conflict)
     }
 
     func materializeSyncFileReferences(
@@ -157,25 +171,31 @@ extension ClipboardHistoryModule {
     private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
         in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
         var facts = ClipboardHistoryFileDisplayFacts()
-        return try usableLinkedFileReference(objectID: objectID, accountID: accountID, epoch: epoch, facts: &facts, in: database)
+        return try usableLinkedFileReference(linkedDisplayReferences(objectID: objectID, accountID: accountID, epoch: epoch,
+            in: database), facts: &facts)
     }
 
-    private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
-        facts: inout ClipboardHistoryFileDisplayFacts, in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
-        let rows = try Row.fetchAll(database, sql: """
+    private static func linkedDisplayReferences(objectID: UUID, accountID: String, epoch: String,
+        in database: Database) throws -> [LinkedDisplayReference] {
+        try Row.fetchAll(database, sql: """
             SELECT path, bookmark, identity, native_identity, state, base_version_id FROM clipboard_sync_linked_locations
             WHERE account_id = ? AND epoch = ? AND object_id = ?
             ORDER BY CASE kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, id
-            """, arguments: [accountID, epoch, objectID.uuidString])
-        for row in rows where !["unavailable", "detached", "identityUncertain"].contains(row["state"] as String) {
-            let path: String = row["path"]
-            let identity: Data = row["identity"]
-            if facts.isAvailable(path: path, identity: identity, nativeIdentity: row["native_identity"]),
-               let versionID = UUID(uuidString: row["base_version_id"]) {
-                return (true, (path, row["bookmark"], identity, versionID))
+            """, arguments: [accountID, epoch, objectID.uuidString]).map { row in
+                .init(path: row["path"], bookmark: row["bookmark"], identity: row["identity"], nativeIdentity: row["native_identity"],
+                    state: row["state"], versionID: UUID(uuidString: row["base_version_id"]))
+            }
+    }
+
+    private static func usableLinkedFileReference(_ references: [LinkedDisplayReference],
+        facts: inout ClipboardHistoryFileDisplayFacts) -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
+        for reference in references where !["unavailable", "detached", "identityUncertain"].contains(reference.state) {
+            if facts.isAvailable(path: reference.path, identity: reference.identity, nativeIdentity: reference.nativeIdentity),
+               let versionID = reference.versionID {
+                return (true, (reference.path, reference.bookmark, reference.identity, versionID))
             }
         }
-        return (!rows.isEmpty, nil)
+        return (!references.isEmpty, nil)
     }
 
     static func createSyncFileSchema(in database: Database) throws {

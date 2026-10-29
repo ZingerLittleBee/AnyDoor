@@ -2,11 +2,32 @@ import CryptoKit
 import Foundation
 import GRDB
 
-struct ClipboardHistoryPageSyncContext {
+struct ClipboardHistoryPageSyncContext: Sendable {
     let textConflicts: Set<String>
-    let files: [String: [ClipboardHistorySyncFileSummary]]
-    let locations: [String: [ClipboardHistoryLinkedFileLocation]]
+    let files: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistorySyncFileSummary>]]
+    let locations: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>]]
     let materializationRevisions: [String: Int64]
+}
+
+private struct ClipboardHistoryPageDisplaySnapshot: Sendable {
+    let page: ClipboardHistoryPage
+    var context: ClipboardHistoryPageSyncContext?
+
+    func resolve() throws -> ClipboardHistoryPage {
+        guard let context else { return page }
+        var facts = ClipboardHistoryFileDisplayFacts()
+        let entries = try page.entries.map { entry in
+            try Task.checkCancellation()
+            let id = entry.id.value.uuidString.lowercased()
+            return ClipboardHistoryEntry(id: entry.id, capturedAt: entry.capturedAt,
+                previewText: entry.previewText, facets: entry.facets, isFavorite: entry.isFavorite,
+                tagIDs: entry.tagIDs, source: entry.source, materializationRevision: entry.materializationRevision,
+                hasTextConflict: entry.hasTextConflict,
+                syncFiles: context.files[id]?.map { $0.resolve(&facts) } ?? [],
+                linkedFileLocations: context.locations[id]?.map { $0.resolve(&facts) } ?? [])
+        }
+        return .init(entries: entries, nextCursor: page.nextCursor, cursorDisposition: page.cursorDisposition, state: page.state)
+    }
 }
 
 extension ClipboardHistoryModule {
@@ -25,9 +46,8 @@ extension ClipboardHistoryModule {
         })
         let accountID = try String.fetchOne(database, sql: "SELECT account_id FROM clipboard_sync_settings WHERE id = 1")
         let conflicts = try syncTextConflicts(entryIDs: entryIDs, accountID: accountID, in: database)
-        var facts = ClipboardHistoryFileDisplayFacts()
-        let files = try syncFileSummaries(entryIDs: entryIDs, facts: &facts, in: database)
-        let locations = try linkedFileLocations(entryIDs: entryIDs, facts: &facts, in: database)
+        let files = try syncFileSummaryPlans(entryIDs: entryIDs, in: database)
+        let locations = try linkedFileLocationPlans(entryIDs: entryIDs, in: database)
         return .init(textConflicts: conflicts, files: files, locations: locations, materializationRevisions: materializationRevisions)
     }
 
@@ -168,10 +188,31 @@ extension ClipboardHistoryModule {
     func indexedPage(
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor?
-    ) throws -> ClipboardHistoryPage {
+    ) async throws -> ClipboardHistoryPage {
+        for _ in 0..<3 {
+            try Task.checkCancellation()
+            let epoch = storeEpoch
+            let sourceDatabase = try requiredDatabase()
+            let (snapshot, revision) = try indexedPageSnapshot(query, after: cursor)
+            let faults = faultInjector
+            let resolution = Task.detached(priority: .userInitiated) {
+                try faults.check(.pageNativeFileFacts)
+                return try snapshot.resolve()
+            }
+            let page = try await withTaskCancellationHandler { try await resolution.value } onCancel: { resolution.cancel() }
+            try Task.checkCancellation()
+            guard epoch == storeEpoch, database === sourceDatabase else { throw ClipboardHistoryModuleError.storeUnavailable }
+            if try linkedRead({ try Self.historyRevision(in: $0) }) == revision { return page }
+        }
+        throw ClipboardHistoryModuleError.operationUnavailable
+    }
+
+    private func indexedPageSnapshot(_ query: ClipboardHistoryQuery, after cursor: ClipboardHistoryCursor?)
+        throws -> (ClipboardHistoryPageDisplaySnapshot, Int64) {
         let database = try requiredDatabase()
         let normalizedQuery = Self.normalizedQuery(query.text)
         return try database.read { database in
+            let revision = try Self.historyRevision(in: database)
             let expiryCutoff = try Self.expiryCutoff(
                 at: now(),
                 in: database
@@ -204,34 +245,34 @@ extension ClipboardHistoryModule {
             }
 
             if normalizedQuery.isEmpty {
-                return try Self.browsePage(
+                return (try Self.browsePage(
                     query,
                     binding: binding,
                     cursor: validCursor,
                     disposition: disposition,
                     expiryCutoff: expiryCutoff,
                     in: database
-                )
+                ), revision)
             }
             switch try Self.searchIndexStatus(in: database) {
             case .ready:
                 break
             case .indexing:
-                return ClipboardHistoryPage(
+                return (.init(page: ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
                     cursorDisposition: disposition,
                     state: .indexing
-                )
+                )), revision)
             case .failed(let reason):
-                return ClipboardHistoryPage(
+                return (.init(page: ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
                     cursorDisposition: disposition,
                     state: .failed(reason)
-                )
+                )), revision)
             }
-            return try Self.searchPage(
+            return (try Self.searchPage(
                 query,
                 normalizedQuery: normalizedQuery,
                 binding: binding,
@@ -239,7 +280,7 @@ extension ClipboardHistoryModule {
                 disposition: disposition,
                 expiryCutoff: expiryCutoff,
                 in: database
-            )
+            ), revision)
         }
     }
 
@@ -250,7 +291,7 @@ extension ClipboardHistoryModule {
         disposition: ClipboardHistoryCursorDisposition,
         expiryCutoff: Double?,
         in database: Database
-    ) throws -> ClipboardHistoryPage {
+    ) throws -> ClipboardHistoryPageDisplaySnapshot {
         var conditions: [String] = []
         var arguments: StatementArguments = []
         appendTypedFilters(
@@ -323,11 +364,11 @@ extension ClipboardHistoryModule {
                 )
             }
             : nil
-        return ClipboardHistoryPage(
+        return .init(page: ClipboardHistoryPage(
             entries: entries,
             nextCursor: nextCursor,
             cursorDisposition: disposition
-        )
+        ), context: context)
     }
 
     private static func searchPage(
@@ -338,7 +379,7 @@ extension ClipboardHistoryModule {
         disposition: ClipboardHistoryCursorDisposition,
         expiryCutoff: Double?,
         in database: Database
-    ) throws -> ClipboardHistoryPage {
+    ) throws -> ClipboardHistoryPageDisplaySnapshot {
         let terms = normalizedQuery.split(separator: " ").map(String.init)
         guard !terms.isEmpty else {
             return try browsePage(
@@ -354,11 +395,11 @@ extension ClipboardHistoryModule {
             terms: terms,
             normalizedQuery: normalizedQuery
         ) else {
-            return ClipboardHistoryPage(
+            return .init(page: ClipboardHistoryPage(
                 entries: [],
                 nextCursor: nil,
                 cursorDisposition: disposition
-            )
+            ))
         }
 
         var conditions: [String] = []
@@ -446,11 +487,11 @@ extension ClipboardHistoryModule {
                 )
             }
             : nil
-        return ClipboardHistoryPage(
+        return .init(page: ClipboardHistoryPage(
             entries: entries,
             nextCursor: nextCursor,
             cursorDisposition: disposition
-        )
+        ), context: context)
     }
 
     /// Matching only: one CTE per term, joined so an entry must satisfy every
@@ -693,6 +734,11 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
         let context = try syncContext ?? pageSyncContext(entryIDs: [storedID], in: database)
+        // Page callers resolve these plans after releasing their SQL snapshot.
+        // Single-entry mutation results retain their existing live mapping.
+        var facts = ClipboardHistoryFileDisplayFacts()
+        let files = syncContext == nil ? context.files[storedID]?.map { $0.resolve(&facts) } ?? [] : []
+        let locations = syncContext == nil ? context.locations[storedID]?.map { $0.resolve(&facts) } ?? [] : []
         let facets = try String.fetchAll(
             database,
             sql: """
@@ -730,8 +776,8 @@ extension ClipboardHistoryModule {
             ),
             materializationRevision: context.materializationRevisions[storedID] ?? 0,
             hasTextConflict: context.textConflicts.contains(storedID),
-            syncFiles: context.files[storedID] ?? [],
-            linkedFileLocations: context.locations[storedID] ?? []
+            syncFiles: files,
+            linkedFileLocations: locations
         )
     }
 
