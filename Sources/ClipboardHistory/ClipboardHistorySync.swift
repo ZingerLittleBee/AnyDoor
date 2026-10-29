@@ -162,7 +162,7 @@ extension ClipboardHistoryModule {
         }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         do {
-            let recovery = try currentSyncRecovery()
+            let recovery = try currentSyncRetryPolicy()
             if !explicitRetry, let phase = recovery.phase, phase.requiresExplicitRetry {
                 setSyncPhase(phase)
                 return
@@ -180,7 +180,7 @@ extension ClipboardHistoryModule {
         let bindingAuthorized = syncAccountBindingGeneration == generation
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         let task = Task {
-            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation) }
+            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation, explicitRetry: explicitRetry) }
             else { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
         }
         syncTask = task
@@ -218,7 +218,7 @@ extension ClipboardHistoryModule {
               let pollingInterval = syncServices?.pollingInterval else { return }
         let retryNotBefore: Date?
         do {
-            let recovery = try currentSyncRecovery()
+            let recovery = try currentSyncRetryPolicy()
             guard recovery.phase?.requiresExplicitRetry != true else { return }
             retryNotBefore = recovery.retryNotBefore
         }
@@ -231,6 +231,19 @@ extension ClipboardHistoryModule {
             guard let self else { return }
             await self.syncPollingFired(generation: generation)
         }
+    }
+
+    private func currentSyncRetryPolicy() throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        var recovery = try currentSyncRecovery()
+        // Explicit activation may bind another account. Its dormant predecessor's
+        // reset must not authorize requests or prevent that new account binding.
+        guard syncAccountBindingGeneration != syncGeneration,
+              let reset = try currentCloudReset(), reset.status.isPending else { return recovery }
+        if reset.failure?.requiresExplicitRetry == true { recovery.phase = reset.failure }
+        if let deadline = reset.retryNotBefore {
+            recovery.retryNotBefore = max(recovery.retryNotBefore ?? deadline, deadline)
+        }
+        return recovery
     }
 
     private func syncPollingFired(generation: UInt64, explicitRetry: Bool = false) async {
@@ -671,7 +684,7 @@ extension ClipboardHistoryModule {
     }
 }
 
-private extension ClipboardHistorySyncPhase {
+extension ClipboardHistorySyncPhase {
     var requiresExplicitRetry: Bool {
         self == .failed(.providerRejected) || self == .failed(.unsupportedVersion)
     }
