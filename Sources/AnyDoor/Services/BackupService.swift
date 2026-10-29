@@ -93,6 +93,12 @@ final class BackupService {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string(try ClipboardHistoryPortableSettings.encode(definitions))
+            let names = definitions.map { $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if Set(names).count != names.count {
+                // Older readers reject duplicate names only after applying
+                // other config. Require a reader that preserves both IDs.
+                snapshot.schemaVersion = BackupSnapshot.currentSchemaVersion
+            }
         } catch {
             // A missing field leaves destination tags unchanged on import;
             // an empty list would instead explicitly remove them.
@@ -134,7 +140,7 @@ final class BackupService {
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 
         return BackupSnapshot(
-            schemaVersion: BackupSnapshot.currentSchemaVersion,
+            schemaVersion: BackupSnapshot.configurationSchemaVersion,
             exportedAt: Date(),
             appVersion: appVersion,
             deviceName: Host.current().localizedName,

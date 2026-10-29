@@ -80,6 +80,84 @@ final class BackupAvailabilityTests: XCTestCase {
         XCTAssertEqual(restoredEntry?.tagIDs, [retainedTag.id])
     }
 
+    func testSameNameTagBackupRequiresNewReaderAndPreservesIdentities() async throws {
+        let fixture = try makeFixture()
+        let entry = try await fixture.module.capture(.init(source: .unknown, content: .text("Retained membership")))
+        let first = try await fixture.module.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let definitions = [first, ClipboardHistoryTagDefinition(id: "independent-work", displayName: "Work")]
+        _ = try await fixture.module.replaceTagDefinitions(with: definitions)
+        let service = BackupService(context: fixture.context, defaults: fixture.defaults,
+            appPathResolver: { _ in nil }, currentClipboardTags: { try await fixture.module.tagDefinitions() },
+            restoreClipboardTags: { _ = try await fixture.module.replaceTagDefinitions(with: $0) }, reconcileRuntime: {})
+
+        let data = try await BackupCodec.encode(service.exportCurrentSnapshot())
+        XCTAssertThrowsError(try VersionTwoBackupCodec.decode(data)) { error in
+            XCTAssertEqual(error as? VersionTwoBackupCodec.ReadError, .unsupportedSchemaVersion(3))
+        }
+        _ = try await fixture.module.renameTagDefinition(id: first.id, to: "Changed")
+        _ = try await service.restore(BackupCodec.decode(data))
+        let restored = try await fixture.module.tagDefinitions()
+        let restoredEntry = try await fixture.module.page(.init()).entries.first
+        XCTAssertEqual(restored, definitions)
+        XCTAssertEqual(restoredEntry?.tagIDs, [first.id])
+
+        _ = try await fixture.module.renameTagDefinition(id: first.id, to: "Unique")
+        let compatible = try await BackupCodec.encode(service.exportCurrentSnapshot())
+        XCTAssertEqual(try VersionTwoBackupCodec.decode(compatible).schemaVersion, 2)
+    }
+
+    func testOmittedOrMalformedBackupTagsPreserveExistingDefinitions() async throws {
+        let fixture = try makeFixture()
+        let entry = try await fixture.module.capture(.init(source: .unknown, content: .text("Protected history")))
+        let tag = try await fixture.module.createTagDefinition(named: "Kept", assigningTo: entry.entryID).definition
+        let service = BackupService(context: fixture.context, defaults: fixture.defaults,
+            appPathResolver: { _ in nil },
+            restoreClipboardTags: { _ = try await fixture.module.replaceTagDefinitions(with: $0) }, reconcileRuntime: {})
+        var omitted = try service.exportSnapshot()
+        omitted.settings["dev.bybee.AnyDoor.language"] = .string("en")
+        omitted.omittedSections = [.clipboardTags]
+        var malformed = try service.exportSnapshot()
+        malformed.settings["dev.bybee.AnyDoor.language"] = .string("zh")
+        malformed.settings[ClipboardHistoryPortableKeys.customTags] = .string("not valid tag JSON")
+
+        for snapshot in [omitted, malformed] {
+            do {
+                _ = try await service.restore(BackupCodec.decode(BackupCodec.encode(snapshot)))
+                XCTFail("Unavailable backup tags must not be presented as a complete import")
+            } catch let partial as BackupImportPartialFailure {
+                XCTAssertEqual(partial.summary.settingsApplied, 1)
+                XCTAssertNil(partial.runtimeError)
+            }
+            let definitions = try await fixture.module.tagDefinitions()
+            let retained = try await fixture.module.page(.init()).entries.first
+            XCTAssertEqual(definitions, [tag])
+            XCTAssertEqual(retained?.tagIDs, [tag.id])
+            XCTAssertNil(fixture.defaults.object(forKey: ClipboardHistoryPortableKeys.customTags))
+        }
+        XCTAssertEqual(fixture.defaults.string(forKey: "dev.bybee.AnyDoor.language"), "zh")
+    }
+
+    func testMissingTagSectionKeepsTagsWhileExplicitEmptySectionRemovesThem() async throws {
+        let fixture = try makeFixture()
+        let entry = try await fixture.module.capture(.init(source: .unknown, content: .text("Kept entry")))
+        let tag = try await fixture.module.createTagDefinition(named: "Local", assigningTo: entry.entryID).definition
+        let service = BackupService(context: fixture.context, defaults: fixture.defaults,
+            appPathResolver: { _ in nil },
+            restoreClipboardTags: { _ = try await fixture.module.replaceTagDefinitions(with: $0) }, reconcileRuntime: {})
+        var snapshot = try service.exportSnapshot()
+        _ = try await service.restore(BackupCodec.decode(BackupCodec.encode(snapshot)))
+        let unchanged = try await fixture.module.tagDefinitions()
+        XCTAssertEqual(unchanged, [tag])
+
+        snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string("[]")
+        _ = try await service.restore(BackupCodec.decode(BackupCodec.encode(snapshot)))
+        let cleared = try await fixture.module.tagDefinitions()
+        let retained = try await fixture.module.page(.init()).entries.first
+        XCTAssertTrue(cleared.isEmpty)
+        XCTAssertEqual(retained?.tagIDs, [])
+        XCTAssertEqual(retained?.id, entry.entryID)
+    }
+
     private func makeFixture() throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("backup-availability-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -100,5 +178,34 @@ final class BackupAvailabilityTests: XCTestCase {
         let container: ModelContainer
         let defaults: UserDefaults
         var context: ModelContext { container.mainContext }
+    }
+}
+
+// The schema-2 reader gate and required payload fields from base 26f705d7.
+// Keep its supported version fixed: this represents an already shipped reader.
+private enum VersionTwoBackupCodec {
+    enum ReadError: Error, Equatable {
+        case unsupportedSchemaVersion(Int)
+    }
+
+    struct Snapshot: Decodable {
+        let schemaVersion: Int
+        let exportedAt: Date
+        let appVersion: String
+        let deviceName: String?
+        let appShortcuts: [AppShortcutDTO]
+        let builtinPreferences: [BuiltinPreferenceDTO]
+        let quicklinks: [QuicklinkDTO]?
+        let settings: [String: SettingValue]
+    }
+
+    static func decode(_ data: Data) throws -> Snapshot {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(Snapshot.self, from: data)
+        guard snapshot.schemaVersion <= 2 else {
+            throw ReadError.unsupportedSchemaVersion(snapshot.schemaVersion)
+        }
+        return snapshot
     }
 }

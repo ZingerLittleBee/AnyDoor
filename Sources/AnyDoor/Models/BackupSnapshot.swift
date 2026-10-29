@@ -121,7 +121,8 @@ enum BackupSection: String, Codable, Equatable, Sendable {
 
 /// The portable backup payload. `schemaVersion` gates future format migrations.
 struct BackupSnapshot: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    static let configurationSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int
     var exportedAt: Date
