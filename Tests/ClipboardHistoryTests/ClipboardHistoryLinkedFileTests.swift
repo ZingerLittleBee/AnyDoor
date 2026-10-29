@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import XCTest
 import ClipboardHistoryTestSupport
@@ -6,6 +7,88 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
+    @MainActor
+    func testRecoveredLinkedExchangeClearsEarlierPermissionFailure() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        for recoverWhileDisabled in [false, true] {
+            let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
+            let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+            let working = try XCTUnwrap(locations.first)
+            let updated = Data("installed before journal recovery".utf8)
+            try updated.write(to: fixture.original)
+            try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+            let parent = working.url.deletingLastPathComponent()
+            XCTAssertEqual(chmod(parent.path, 0o500), 0)
+            defer { _ = chmod(parent.path, 0o700) }
+            await fixture.receiver.retrySync()
+            let denied = try await fixture.receiver.page(.init()).entries
+            XCTAssertEqual(denied.first?.syncFiles.first?.transferFailure, .localFileAccessDenied)
+
+            XCTAssertEqual(chmod(parent.path, 0o700), 0)
+            await fixture.receiver.retrySync()
+            XCTAssertEqual(try Data(contentsOf: working.url), updated,
+                "The real exchange must precede the injected journal interruption")
+            if recoverWhileDisabled { try await fixture.receiver.setSyncEnabled(false) }
+            else { await fixture.receiver.retrySync() }
+            let recovered = try await fixture.receiver.page(.init()).entries
+            XCTAssertNil(recovered.first?.syncFiles.first?.transferFailure,
+                "A completed journal must retire its earlier location retry failure")
+            let current = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+            XCTAssertEqual(current.first?.id, working.id)
+            XCTAssertNotEqual(current.first?.baseVersionID, working.baseVersionID)
+            XCTAssertEqual(try Data(contentsOf: working.url), updated)
+        }
+    }
+
+    @MainActor
+    func testReadOnlyLinkedDestinationDoesNotBlockIndependentSharing() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let fixture = try await makeLinkedFixture()
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let tags = try await fixture.receiver.syncTags()
+        let tag = try XCTUnwrap(tags.first)
+        let removed = try await fixture.receiver.capture(.init(source: .unknown, content: .text("remove while linked update waits")))
+        _ = try await fixture.receiver.apply(.setTags(removed.entryID, [tag.id]))
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        try await fixture.receiver.setSyncEnabled(false)
+        _ = try await fixture.receiver.apply(.delete(removed.entryID))
+        let independent = try await fixture.receiver.capture(.init(source: .unknown, content: .text("share while linked update waits")))
+        _ = try await fixture.receiver.apply(.setTags(independent.entryID, [tag.id]))
+
+        let updated = Data("remote saved content".utf8)
+        try updated.write(to: fixture.original)
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        let parent = working.url.deletingLastPathComponent()
+        XCTAssertEqual(chmod(parent.path, 0o500), 0)
+        defer { _ = chmod(parent.path, 0o700) }
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.sender.retrySync()
+        let sent = try await fixture.sender.page(.init()).entries
+        XCTAssertFalse(sent.contains { $0.id == removed.entryID })
+        XCTAssertTrue(sent.contains { $0.id == independent.entryID })
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
+        let retained = try await fixture.receiver.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let reference) = retained.items.first?.representations.first else {
+            return XCTFail("The prior complete linked file must remain usable")
+        }
+        XCTAssertEqual(try Data(contentsOf: reference.currentURL), Data("initial linked bytes".utf8))
+        let status = await fixture.receiver.syncStatus()
+        XCTAssertEqual(status.phase, .failed(.localFileAccessDenied))
+        let pending = try await fixture.receiver.page(.init()).entries
+        XCTAssertEqual(pending.first { $0.id == fixture.entryID }?.syncFiles.first?.transferFailure, .localFileAccessDenied)
+
+        XCTAssertEqual(chmod(parent.path, 0o700), 0)
+        await fixture.receiver.retrySync()
+        XCTAssertEqual(try Data(contentsOf: working.url), updated)
+        let current = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(current.first?.id, working.id)
+        XCTAssertNotEqual(current.first?.baseVersionID, working.baseVersionID)
+        let repaired = try await fixture.receiver.page(.init()).entries
+        XCTAssertNil(repaired.first { $0.id == fixture.entryID }?.syncFiles.first?.transferFailure)
+    }
+
     @MainActor
     func testDeletionRevokesReplacementAlreadyWaitingAfterFileVerification() async throws {
         let barrier = LinkedReplacementBarrier()

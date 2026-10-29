@@ -115,6 +115,7 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, accountID, accountID, accountID, accountID, accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_outbox WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_file_rejoins WHERE account_id = ?", arguments: [accountID])
+        try database.execute(sql: "DELETE FROM clipboard_sync_file_retries WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_states WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_merge_outbox WHERE account_id = ?", arguments: [accountID])
         try database.execute(sql: "DELETE FROM clipboard_sync_tag_aliases WHERE account_id = ?", arguments: [accountID])

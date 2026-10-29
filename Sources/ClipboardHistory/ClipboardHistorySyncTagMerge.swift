@@ -35,7 +35,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    public func mergeSyncTags(_ preview: ClipboardHistorySyncTagMergePreview) async throws {
+    public func mergeSyncTags(_ preview: ClipboardHistorySyncTagMergePreview, waitForSync: Bool = true) async throws {
         _ = try await writableDatabase()
         let current = try prepareSyncTagMerge(sourceID: preview.sourceID, targetID: preview.targetID)
         guard current.accountID == preview.accountID, current.historyRevision == preview.historyRevision,
@@ -55,7 +55,7 @@ extension ClipboardHistoryModule {
             try Self.bumpSearchIndexGeneration(in: database)
         }
         publishMutation()
-        if !syncSuspended { await retrySync() }
+        if !syncSuspended { await retrySync(waitForSync: waitForSync) }
     }
 
     func canonicalSyncTagID(_ id: String, accountID: String, in database: Database) throws -> String {

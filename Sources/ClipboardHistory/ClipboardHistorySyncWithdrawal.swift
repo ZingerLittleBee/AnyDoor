@@ -192,6 +192,13 @@ extension ClipboardHistoryModule {
             arguments: [account.identifier, control.epoch.uuidString]) {
             let value = ClipboardSyncWithdrawal(sharedID: row["shared_id"], withdrawn: row["withdrawn"],
                 revision: .init(counter: row["counter"], operationID: row["operation_id"]))
+            if try Self.isSyncDeleted(value.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database) {
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_withdrawals SET pending = 0
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, value.sharedID])
+                continue
+            }
             let content: ClipboardSyncContent = value.withdrawn ? .withdrawal(value)
                 : .rejoin(try syncRejoinContent(value, account: account, control: control, key: key, in: database))
             let upload = try ClipboardSyncCodec.seal(content, account: account, control: control, key: key)

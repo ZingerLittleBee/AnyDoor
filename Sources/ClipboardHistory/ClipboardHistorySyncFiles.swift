@@ -383,6 +383,8 @@ extension ClipboardHistoryModule {
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }
+            guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
+                  try !shouldDeferSyncFileWork(.download(descriptor.versionID), account: account, control: control) else { continue }
             do {
             let output: ClipboardSyncPublishedFile
             if descriptor.bodyFormat != nil {
@@ -449,6 +451,7 @@ extension ClipboardHistoryModule {
                     WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
                     """, arguments: [account.identifier, control.epoch.uuidString,
                         descriptor.objectID.uuidString, descriptor.versionID.uuidString])
+                try completeSyncFileWork(.download(descriptor.versionID), account: account, control: control, in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
@@ -456,9 +459,11 @@ extension ClipboardHistoryModule {
             publishMutation()
             } catch {
                 try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
-                // A retired immutable body may be unavailable while independent
-                // conflict heads remain downloadable. Other failures still stop.
-                if (error as? ClipboardSyncServiceError) == .recordUnavailable { continue }
+                if Self.isIsolatedSyncFileFailure(error) {
+                    try deferSyncFileWork(.download(descriptor.versionID), error: error,
+                        account: account, control: control, generation: generation)
+                    continue
+                }
                 throw error
             }
         }

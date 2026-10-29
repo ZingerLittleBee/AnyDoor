@@ -35,7 +35,9 @@ extension ClipboardHistoryModule {
         }
     }
 
-    public func setSyncEnabled(_ enabled: Bool) async throws {
+    /// Passing false returns after durable intent and queues owned sync work.
+    /// Disabling always revokes and drains active work before returning.
+    public func setSyncEnabled(_ enabled: Bool, waitForSync: Bool = true) async throws {
         let generation = await stopSyncTasks()
         guard generation == syncGeneration else { return }
         _ = try await writableDatabase()
@@ -47,7 +49,7 @@ extension ClipboardHistoryModule {
             guard generation == syncGeneration else { return }
             if account == reset.account {
                 syncSuspended = false
-                await retrySync()
+                await retrySync(waitForSync: waitForSync)
                 return
             }
         }
@@ -60,10 +62,12 @@ extension ClipboardHistoryModule {
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard enabled || pendingReset else { return }
         syncSuspended = false
-        await runSync(allowAccountBinding: enabled)
+        if waitForSync { await runSync(allowAccountBinding: enabled) }
+        else { scheduleImmediateSync(allowAccountBinding: enabled) }
     }
 
-    public func setSyncTagSelected(_ tagID: String, selected: Bool) async throws {
+    /// Passing false returns after the selection is durable, before transfer.
+    public func setSyncTagSelected(_ tagID: String, selected: Bool, waitForSync: Bool = true) async throws {
         _ = try await writableDatabase()
         try syncWrite { database in
             guard try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_tag_definitions WHERE id = ?)",
@@ -90,7 +94,7 @@ extension ClipboardHistoryModule {
             try Self.bumpHistoryRevision(in: database)
         }
         publishSyncStatus()
-        if !syncSuspended { await retrySync() }
+        if !syncSuspended { await retrySync(waitForSync: waitForSync) }
     }
 
     /// Resumes only stored local consent, after the host has completed migration.
@@ -99,7 +103,7 @@ extension ClipboardHistoryModule {
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard syncStatus().isEnabled || pendingReset else { return }
         syncSuspended = false
-        await retrySync()
+        await retrySyncAutomatically()
     }
 
     /// Process shutdown/store replacement does not revoke persisted participation.
@@ -112,6 +116,7 @@ extension ClipboardHistoryModule {
         stopLinkedFileObservers()
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
+        syncRerunRequested = false
         let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
@@ -124,11 +129,33 @@ extension ClipboardHistoryModule {
         return generation
     }
 
-    public func retrySync() async { await runSync(allowAccountBinding: false) }
+    /// Passing false schedules the retry without awaiting provider transfer.
+    public func retrySync(waitForSync: Bool = true) async {
+        guard !syncSuspended else { return }
+        do {
+            try syncWrite { database in
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_file_retries SET retry_not_before = 0
+                    WHERE account_id = (SELECT account_id FROM clipboard_sync_settings WHERE id = 1)
+                    """)
+            }
+        } catch {
+            setSyncPhase(.failed(.localStorage))
+            return
+        }
+        if waitForSync { await runSync(allowAccountBinding: false) }
+        else { scheduleImmediateSync(allowAccountBinding: false) }
+    }
+
+    func retrySyncAutomatically() async { await runSync(allowAccountBinding: false) }
 
     private func runSync(allowAccountBinding: Bool) async {
         guard !syncSuspended else { return }
-        if let syncTask { await syncTask.value; return }
+        if let syncTask {
+            syncRerunRequested = true
+            await syncTask.value
+            return
+        }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         do {
             let recovery = try currentSyncRecovery()
@@ -152,7 +179,27 @@ extension ClipboardHistoryModule {
         await task.value
         guard generation == syncGeneration else { return }
         syncTask = nil
-        scheduleSync()
+        if syncRerunRequested {
+            syncRerunRequested = false
+            scheduleImmediateSync(allowAccountBinding: false)
+        } else { scheduleSync() }
+    }
+
+    /// Intent-only commands use the same owned task slots as polling. A mutation
+    /// admitted during a pass requests another pass instead of losing its wakeup.
+    private func scheduleImmediateSync(allowAccountBinding: Bool) {
+        guard !syncSuspended else { return }
+        if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
+        syncPollTask?.cancel()
+        syncPollTask = nil
+        if syncTask != nil {
+            syncRerunRequested = true
+            return
+        }
+        let generation = syncGeneration
+        syncPollTask = Task { [weak self] in
+            await self?.syncPollingFired(generation: generation)
+        }
     }
 
     func scheduleSync() {
@@ -163,16 +210,18 @@ extension ClipboardHistoryModule {
         catch { setSyncPhase(.failed(.localStorage)); return }
         let remainingDelay = retryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
         let interval = max(pollingInterval, .seconds(remainingDelay))
+        let generation = syncGeneration
         syncPollTask = Task { [weak self] in
             do { try await Task.sleep(for: interval) } catch { return }
             guard let self else { return }
-            await self.syncPollingFired()
+            await self.syncPollingFired(generation: generation)
         }
     }
 
-    private func syncPollingFired() async {
+    private func syncPollingFired(generation: UInt64) async {
+        guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return }
         syncPollTask = nil
-        await retrySync()
+        await retrySyncAutomatically()
     }
 
     func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
@@ -327,6 +376,7 @@ extension ClipboardHistoryModule {
                 throw ClipboardSyncServiceError.corruptData
             }
             setSyncPhase(.transferring)
+            deferredSyncFileFailure = nil
             if try needsSyncTextRootReplay(account: account, control: control) {
                 state.cursor = nil
             }
@@ -473,7 +523,7 @@ extension ClipboardHistoryModule {
             try acknowledgeLinkedFileVersions(account: account, control: control)
             try completeFileConflictResolutions(account: account, control: control)
             try syncWrite { try saveSyncAccount(state, in: $0) }
-            await finishSync(.upToDate, generation: generation)
+            await finishSync(deferredSyncFileFailure ?? .upToDate, generation: generation)
         } catch is CancellationError {
             return
         } catch {
@@ -526,7 +576,10 @@ extension ClipboardHistoryModule {
 
     func admitSync(_ generation: UInt64, account: ClipboardSyncAccount, services: ClipboardSyncServices) async throws {
         try admitSync(generation)
-        guard try await services.transport.account() == account else { throw ClipboardSyncServiceError.accountChanged }
+        let observed: ClipboardSyncAccount
+        do { observed = try await services.transport.account() }
+        catch ClipboardSyncServiceError.corruptData { throw ClipboardSyncServiceError.corruptAuthority }
+        guard observed == account else { throw ClipboardSyncServiceError.accountChanged }
         try await waitForWriteTurn()
         try admitSync(generation)
     }
@@ -548,7 +601,7 @@ extension ClipboardHistoryModule {
         case .localFileAccessDenied: return .failed(.localFileAccessDenied)
         case .recordUnavailable: return .failed(.network)
         case .missingRemoteState: return .failed(.recoveryRequired)
-        case .corruptData: return .failed(.corruptData)
+        case .corruptData, .corruptAuthority: return .failed(.corruptData)
         case .unsupportedVersion: return .failed(.unsupportedVersion)
         }
     }
