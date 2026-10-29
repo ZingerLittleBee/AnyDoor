@@ -212,6 +212,8 @@ Before inspecting a profile or changing the app, the provisioning command checks
 the release team, bundle-derived access group, container, and environment against
 the literal declarations in `ClipboardSyncNativeConfiguration`. A mismatch or an
 unreadable, missing, duplicate, or nonliteral declaration fails the preflight.
+The source check also rejects nested block comments and multiline or raw strings
+in that configuration file; it does not attempt to interpret arbitrary Swift.
 Update both declarations together when changing this configuration. Final
 signature verification requires the actual entitlements to equal that checked
 release configuration.

@@ -79,7 +79,15 @@ def runtime_configuration() -> dict[str, str]:
     """Read the runtime's literal declarations, rejecting unsupported source shapes."""
     source = (REPO_ROOT / "Sources/ClipboardHistory/ClipboardHistorySyncKeychain.swift").read_text()
     # Preserve offsets while excluding comments from declarations and braces.
-    tokens = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[{}]', re.DOTALL)
+    tokens = re.compile(r'//[^\n]*|/\*.*?(?:\*/|\Z)|"(?:\\.|[^"\\])*"|[{}]', re.DOTALL)
+    for token in tokens.finditer(source):
+        if token[0].startswith("/*") and ("/*" in token[0][2:] or not token[0].endswith("*/")):
+            raise ProvisioningError("ClipboardSyncNativeConfiguration preflight does not support nested or unterminated block comments")
+        if token[0].startswith('"') and (
+            source.startswith('"""', token.start()) or "\n" in token[0]
+            or (token.start() > 0 and source[token.start() - 1] == "#")
+        ):
+            raise ProvisioningError("ClipboardSyncNativeConfiguration preflight does not support multiline or raw strings")
     source = tokens.sub(lambda match: re.sub(r"[^\n]", " ", match[0]) if match[0].startswith("/") else match[0], source)
     declarations = list(re.finditer(r"(?m)^enum ClipboardSyncNativeConfiguration\s*\{", source))
     if len(declarations) != 1:

@@ -158,6 +158,12 @@ class ProvisioningTests(FakeToolTestCase):
             ("outside type", source.replace(declaration, "") + f"\nenum Unrelated {{\n{declaration}\n}}\n"),
             ("nested type", source.replace(declaration, f"    enum Nested {{\n{declaration}\n    }}")),
             ("comment", source.replace(declaration, "// " + declaration)),
+            ("nested block comment", source.replace(declaration,
+                '    static var team: String { "OTHERTEAM" }\n    /* outer /* inner */\n' + declaration + '\n    */')),
+            ("multiline string", source.replace(declaration,
+                '    static var team: String { "OTHERTEAM" }\n    static let decoy = """\n' + declaration + '\n    """')),
+            ("raw multiline string", source.replace(declaration,
+                '    static var team: String { "OTHERTEAM" }\n    static let decoy = #"""\n' + declaration + '\n    """#')),
             ("duplicate after method", source.replace("    static func validate", declaration + "\n    static func validate")),
             ("duplicate type", source + "\nenum ClipboardSyncNativeConfiguration {}\n"),
         ]:
