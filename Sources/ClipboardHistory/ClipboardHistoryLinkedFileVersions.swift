@@ -226,6 +226,7 @@ extension ClipboardHistoryModule {
                 WHERE id = ?
                 """, arguments: [versionID.uuidString, digest, proof.bookmark, proof.identity, try proof.nativeIdentity?.encoded(), proof.digest,
                     proof.digest == digest ? "current" : "localChanges", source.id.uuidString])
+            try Self.completeLinkedSyncFileWork(source.id, in: database)
             try Self.bumpHistoryRevision(in: database)
         }
         publishMutation()

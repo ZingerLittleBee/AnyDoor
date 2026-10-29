@@ -8,6 +8,39 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testRecoveredLinkedExchangeClearsEarlierPermissionFailure() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        for recoverWhileDisabled in [false, true] {
+            let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
+            let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+            let working = try XCTUnwrap(locations.first)
+            let updated = Data("installed before journal recovery".utf8)
+            try updated.write(to: fixture.original)
+            try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+            let parent = working.url.deletingLastPathComponent()
+            XCTAssertEqual(chmod(parent.path, 0o500), 0)
+            defer { _ = chmod(parent.path, 0o700) }
+            await fixture.receiver.retrySync()
+            let denied = try await fixture.receiver.page(.init()).entries
+            XCTAssertEqual(denied.first?.syncFiles.first?.transferFailure, .localFileAccessDenied)
+
+            XCTAssertEqual(chmod(parent.path, 0o700), 0)
+            await fixture.receiver.retrySync()
+            XCTAssertEqual(try Data(contentsOf: working.url), updated,
+                "The real exchange must precede the injected journal interruption")
+            if recoverWhileDisabled { try await fixture.receiver.setSyncEnabled(false) }
+            else { await fixture.receiver.retrySync() }
+            let recovered = try await fixture.receiver.page(.init()).entries
+            XCTAssertNil(recovered.first?.syncFiles.first?.transferFailure,
+                "A completed journal must retire its earlier location retry failure")
+            let current = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+            XCTAssertEqual(current.first?.id, working.id)
+            XCTAssertNotEqual(current.first?.baseVersionID, working.baseVersionID)
+            XCTAssertEqual(try Data(contentsOf: working.url), updated)
+        }
+    }
+
+    @MainActor
     func testReadOnlyLinkedDestinationDoesNotBlockIndependentSharing() async throws {
         guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
         let fixture = try await makeLinkedFixture()

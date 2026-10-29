@@ -38,6 +38,7 @@ extension ClipboardHistoryModule {
                     WHERE id = ?
                     """, arguments: [version, digest, proof.bookmark, proof.identity, try proof.nativeIdentity?.encoded(), proof.digest,
                         source.state == .paused ? "paused" : (proof.digest == digest ? "current" : "localChanges"), source.id.uuidString])
+                try Self.completeLinkedSyncFileWork(source.id, in: database)
                 try Self.bumpHistoryRevision(in: database)
                 return true
             }

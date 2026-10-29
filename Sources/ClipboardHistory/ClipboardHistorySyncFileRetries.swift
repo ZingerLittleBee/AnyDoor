@@ -68,6 +68,15 @@ extension ClipboardHistoryModule {
             arguments: [account.identifier, control.epoch.uuidString, work.identifier])
     }
 
+    static func completeLinkedSyncFileWork(_ locationID: UUID, in database: Database) throws {
+        try database.execute(sql: """
+            DELETE FROM clipboard_sync_file_retries AS retry
+            WHERE retry.work_id = ? AND EXISTS (
+                SELECT 1 FROM clipboard_sync_linked_locations AS location
+                WHERE location.id = ? AND location.account_id = retry.account_id AND location.epoch = retry.epoch)
+            """, arguments: [ClipboardSyncFileWork.linkedLocation(locationID).identifier, locationID.uuidString])
+    }
+
     static func linkedSyncFileFailure(objectID: UUID, accountID: String, epoch: String,
         in database: Database) throws -> ClipboardHistorySyncFileFailure? {
         guard let data = try Data.fetchOne(database, sql: """
