@@ -888,7 +888,10 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                         if case .failure(let error) = result { return error }
                         return nil
                     }
-                    if let error = Self.atomicModificationFailure(saveErrors: saveErrors, deleteErrors: deleteErrors) { throw error }
+                    let operationError: Error?
+                    if case .failure(let error) = outcome { operationError = error } else { operationError = nil }
+                    if let error = Self.atomicModificationFailure(saveErrors: saveErrors, deleteErrors: deleteErrors,
+                        operationError: operationError) { throw error }
                     try outcome.get()
                     guard collected.count == records.count, deleted.count == ids.count else { throw ClipboardSyncServiceError.corruptData }
                     continuation.resume(returning: try collected.mapValues { try $0.get() })
@@ -1002,23 +1005,39 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         return value
     }
 
-    nonisolated static func atomicModificationFailure(saveErrors: [Error], deleteErrors: [Error]) -> Error? {
-        if let permanent = (saveErrors + deleteErrors).compactMap(permanentFailure).first { return permanent }
+    nonisolated static func atomicModificationFailure(saveErrors: [Error], deleteErrors: [Error], operationError: Error? = nil) -> Error? {
+        let allErrors = saveErrors + deleteErrors + (operationError.map { [$0] } ?? [])
+        if let permanent = allErrors.compactMap(permanentFailure).first { return permanent }
+        let delay = allErrors.compactMap { error -> TimeInterval? in
+            if let cloud = error as? CKError { return retryAfter(cloud) }
+            if case .network(let delay) = error as? ClipboardSyncServiceError { return delay }
+            return nil
+        }.filter { $0.isFinite && $0 > 0 }.max()
+        func mapped(_ error: Error) -> Error {
+            let result = Self.failure(error)
+            if let delay {
+                switch result as? ClipboardSyncServiceError {
+                case .network, .conflict: return ClipboardSyncServiceError.network(retryAfter: delay)
+                default: break
+                }
+            }
+            return result
+        }
         let saveFailures = saveErrors.filter { !hasCode($0, .batchRequestFailed) }
         let deleteFailures = deleteErrors.filter { !hasCode($0, .batchRequestFailed) }
         // Missing authority and access failures cannot be hidden by an already
         // absent deletion target. Atomic failure has not acknowledged the CAS.
-        if let failure = saveFailures.first(where: { !hasCode($0, .serverRecordChanged) }) { return Self.failure(failure) }
+        if let failure = saveFailures.first(where: { !hasCode($0, .serverRecordChanged) }) { return mapped(failure) }
         if let failure = deleteFailures.first(where: { !hasCode($0, .unknownItem) && !hasCode($0, .serverRecordChanged) }) {
-            return Self.failure(failure)
+            return mapped(failure)
         }
         if (saveFailures + deleteFailures).contains(where: { hasCode($0, .serverRecordChanged) }) {
-            return ClipboardSyncServiceError.conflict
+            return mapped(ClipboardSyncServiceError.conflict)
         }
         if deleteFailures.contains(where: { hasCode($0, .unknownItem) }) {
-            return ClipboardSyncServiceError.conflict
+            return mapped(ClipboardSyncServiceError.conflict)
         }
-        return nil
+        return operationError.map(mapped)
     }
 
     private nonisolated static func hasCode(_ error: Error, _ code: CKError.Code) -> Bool {
