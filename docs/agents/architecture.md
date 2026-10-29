@@ -449,6 +449,9 @@ delay.
 Request-size limits, unique-constraint rejections, managed-account restrictions,
 and unrecognized provider errors pause unchanged automatic requests. Known URL
 connectivity failures remain retryable, and cancellation remains cancellation.
+The authenticated content envelope names exactly one top-level operation; mixed
+known and unknown cases are corruption. Additional fields inside a known payload
+retain normal Codable forward compatibility.
 Authenticated content with an unknown operation name and controls with an unknown
 explicit protocol version report unsupportedVersion. Invalid JSON, malformed known
 content, and authentication failures remain corruptData. A future control version

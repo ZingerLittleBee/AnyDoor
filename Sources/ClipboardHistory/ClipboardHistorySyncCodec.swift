@@ -125,14 +125,14 @@ enum ClipboardSyncCodec {
             } catch { throw ClipboardSyncServiceError.corruptData }
         }
         do {
-            let content = try JSONDecoder().decode(ClipboardSyncContent.self, from: plaintext)
+            let content = try JSONDecoder().decode(ContentEnvelope.self, from: plaintext).content
             switch (record.kind, content) {
             case (.entry, .rejoin), (.tag, .withdrawal), (.entry, .deletion), (.tag, .tag), (.tag, .tagMembership), (.tag, .tagState), (.tag, .tagMerge), (.entry, .text), (.entry, .textEdit), (.entry, .entry), (.entry, .metadata), (.entry, .fileVersion), (.fileBody, .fileBody): return content
             default: throw ClipboardSyncServiceError.corruptData
             }
         } catch let error as ClipboardSyncServiceError {
             throw error
-        } catch { throw contentDecodingFailure(plaintext) }
+        } catch { throw ClipboardSyncServiceError.corruptData }
     }
 
     static func digest(_ chunks: [Data]) -> Data {
@@ -141,16 +141,9 @@ enum ClipboardSyncCodec {
         return Data(hasher.finalize())
     }
 
-    private static func contentDecodingFailure(_ plaintext: Data) -> ClipboardSyncServiceError {
-        // Only inspect the authenticated discriminator after ordinary decoding
-        // failed. Supported content keeps its existing single decoding pass.
-        do { _ = try JSONDecoder().decode(ContentDiscriminator.self, from: plaintext) }
-        catch ClipboardSyncServiceError.unsupportedVersion { return .unsupportedVersion }
-        catch { return .corruptData }
-        return .corruptData
-    }
+    private struct ContentEnvelope: Decodable {
+        let content: ClipboardSyncContent
 
-    private struct ContentDiscriminator: Decodable {
         private struct Key: CodingKey {
             let stringValue: String
             var intValue: Int? { nil }
@@ -166,6 +159,9 @@ enum ClipboardSyncCodec {
                  "tagMembership", "tagState", "fileBody", "fileVersion", "tagMerge": break
             default: throw ClipboardSyncServiceError.unsupportedVersion
             }
+            // Reuse the decoder after validating the envelope, without parsing
+            // the plaintext again or restricting fields inside known content.
+            content = try ClipboardSyncContent(from: decoder)
         }
     }
 

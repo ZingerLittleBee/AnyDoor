@@ -4413,6 +4413,34 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(keyCount, 2)
     }
 
+    func testAuthenticatedEnvelopeRejectsMixedCasesAndKeepsNestedExtensions() async throws {
+        for ambiguous in [true, false] {
+            let cloud = SyncTestCloud(account: ClipboardHistorySyncCloudKitReadTests.account)
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("content-envelope-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let module = makeModule(services: services, keyByte: 0x10, time: 1_000, root: root.appendingPathComponent("Store"))
+            let local = try await module.capture(.init(source: .unknown, content: .text("retained local entry")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: local.entryID).definition
+            try await module.setSyncTagSelected(tag.id, selected: true)
+            try await module.setSyncEnabled(true)
+            let known = """
+                {"text":{"_0":{"id":"\(UUID().uuidString)","text":"known nested extension","capturedAt":0,
+                "sourceProvenance":"unknown","favorite":false,"tags":[{"id":"\(tag.id)","name":"Shared"}],"futureNested":{"field":true}}}}
+                """
+            let plaintext = ambiguous ? String(known.dropLast()) + #", "futureContent":{"_0":{}}}"# : known
+            try await Self.publishRawContentFixture(plaintext, cloud: cloud, keys: keys,
+                assetRoot: root.appendingPathComponent("Provider"))
+            await module.retrySync()
+            let status = await module.syncStatus()
+            XCTAssertEqual(status.phase, ambiguous ? .failed(.corruptData) : .upToDate)
+            let page = try await module.page(.init())
+            let expected: Set<String> = ambiguous ? ["retained local entry"] : ["retained local entry", "known nested extension"]
+            XCTAssertEqual(Set(page.entries.compactMap(\.previewText)), expected)
+        }
+    }
+
     func testAuthenticatedFutureContentPausesAcrossRestartWithoutImportingOrAutomaticRetry() async throws {
         let cloud = SyncTestCloud(account: ClipboardHistorySyncCloudKitReadTests.account)
         let keys = SyncTestKeys()
