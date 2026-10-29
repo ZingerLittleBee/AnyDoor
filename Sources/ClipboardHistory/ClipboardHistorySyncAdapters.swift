@@ -89,6 +89,8 @@ enum ClipboardSyncServiceError: Error, Equatable, Sendable {
     case missingRemoteState
     case recordUnavailable
     case corruptData
+    /// Account/control integrity cannot be isolated as a damaged file body.
+    case corruptAuthority
     case unsupportedVersion
 }
 

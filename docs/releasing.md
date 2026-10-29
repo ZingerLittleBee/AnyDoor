@@ -208,11 +208,27 @@ trusted signing job decodes `ANYDOOR_PROVISIONING_PROFILE_BASE64` into a tempora
 file and passes its path to `codesign.sh --profile`. The script validates the
 profile before signing, embeds it as `Contents/embedded.provisionprofile`, and
 generates concrete CloudKit and Keychain entitlements from `release.conf`.
+Before inspecting a profile or changing the app, the provisioning command checks
+the release team, bundle-derived access group, container, and environment against
+the literal declarations in `ClipboardSyncNativeConfiguration`. A mismatch or an
+unreadable, missing, duplicate, or nonliteral declaration fails the preflight.
+The source check also rejects nested block comments, multiline or raw strings,
+and conditional compilation in that configuration file; it does not attempt to
+interpret arbitrary Swift.
+Update both declarations together when changing this configuration. Final
+signature verification requires the actual entitlements to equal that checked
+release configuration.
 
 The profile must authorize the repository's team, explicit bundle identifier,
 selected signing certificate, production CloudKit container/environment, and
 application Keychain group. Expired, development, foreign, and insufficient
 profiles fail the release; the script never silently drops these capabilities.
+As a repository release policy, the profile must have at least 30 days of
+remaining validity at validation, preparation, and final verification. Exactly
+30 days passes; a shorter lifetime fails before preparation changes the app.
+This margin is an AnyDoor policy, not an Apple-mandated duration. The distributed
+app requires its capability-authorizing profile even when a user leaves Clipboard
+Sync off.
 Final verification checks the embedded profile, the actual signing certificate,
 the Developer ID requirement, and the main executable's and app's entitlements.
 

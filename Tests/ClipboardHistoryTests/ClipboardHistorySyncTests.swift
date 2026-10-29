@@ -9,6 +9,198 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testSyncCommandsCanReturnAfterDurableIntentWhileTransferIsHeld() async throws {
+        for command in ["enable", "retry", "tag"] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let module = makeModule(services: services, keyByte: 0xE0, time: 1_000)
+            let entry = try await module.capture(.init(source: .unknown, content: .text("queued by \(command)")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+            if command != "tag" { try await module.setSyncTagSelected(tag.id, selected: true) }
+            if command != "enable" { try await module.setSyncEnabled(true) }
+            if command == "retry" {
+                let next = try await module.capture(.init(source: .unknown, content: .text("explicit retry")))
+                _ = try await module.apply(.setTags(next.entryID, [tag.id]))
+            }
+            await cloud.holdNextEntryCommit()
+            let admitted = expectation(description: "\(command) returned after durable intent")
+            let requested = Task {
+                switch command {
+                case "enable": try await module.setSyncEnabled(true, waitForSync: false)
+                case "tag": try await module.setSyncTagSelected(tag.id, selected: true, waitForSync: false)
+                default: await module.retrySync(waitForSync: false)
+                }
+                admitted.fulfill()
+            }
+            addTeardownBlock { await cloud.releaseEntryCommit(); _ = try? await requested.value }
+            await cloud.waitForHeldEntryCommit()
+            await fulfillment(of: [admitted], timeout: 2)
+            let status = await module.syncStatus()
+            XCTAssertTrue(status.isEnabled)
+            let tags = try await module.syncTags()
+            XCTAssertTrue(try XCTUnwrap(tags.first { $0.id == tag.id }).isSelected)
+
+            let later = try await module.capture(.init(source: .unknown, content: .text("intent during held transfer")))
+            _ = try await module.apply(.setTags(later.entryID, [tag.id]))
+            let readmitted = expectation(description: "later intent returned during active transfer")
+            let queued = Task { await module.retrySync(waitForSync: false); readmitted.fulfill() }
+            await fulfillment(of: [readmitted], timeout: 2)
+            await cloud.releaseEntryCommit()
+            try await requested.value
+            await queued.value
+            let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+            while await module.syncStatus().phase != .upToDate, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let peer = makeModule(services: services, keyByte: 0xE1, time: 2_000)
+            try await peer.setSyncEnabled(true)
+            let received = try await peer.page(.init()).entries
+            XCTAssertTrue(received.contains { $0.id == later.entryID }, "Later admitted intent must not be lost")
+        }
+    }
+
+    func testConfirmedMergeCanReturnWhileItsNewlySharedEntryIsUploading() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0xE2, time: 1_000)
+        let entry = try await module.capture(.init(source: .unknown, content: .text("authorized by merge")))
+        let source = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+        let target = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: source.displayName)
+        _ = try await module.replaceTagDefinitions(with: [source, target])
+        try await module.setSyncTagSelected(target.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let preview = try await module.prepareSyncTagMerge(sourceID: source.id, targetID: target.id)
+        await cloud.holdNextEntryCommit()
+        let admitted = expectation(description: "confirmed merge returned after durable intent")
+        let merged = Task { try await module.mergeSyncTags(preview, waitForSync: false); admitted.fulfill() }
+        addTeardownBlock { await cloud.releaseEntryCommit(); _ = try? await merged.value }
+        await cloud.waitForHeldEntryCommit()
+        await fulfillment(of: [admitted], timeout: 2)
+        let local = try await module.page(.init()).entries
+        XCTAssertEqual(local.first?.tagIDs, [preview.canonicalTagID])
+        await cloud.releaseEntryCommit()
+        try await merged.value
+        await module.retrySync()
+        let peer = makeModule(services: services, keyByte: 0xE3, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let received = try await peer.page(.init()).entries
+        XCTAssertEqual(received.map(\.id), [entry.entryID])
+    }
+
+    @MainActor
+    func testCorruptControlDuringFilePublicationStopsIndependentUploads() async throws {
+        for byteCount in [12, 5_000_001] {
+            let fixture = try await fileFixture(names: ["Verified.txt"], contents: [Data(repeating: 0x41, count: byteCount)])
+            if byteCount > 5_000_000 { try await fixture.receiver.setSyncEnabled(true) }
+            let local = try await fixture.receiver.capture(.init(source: .unknown, content: .text("requires healthy authority")))
+            if byteCount > 5_000_000 {
+                let tags = try await fixture.receiver.syncTags()
+                _ = try await fixture.receiver.apply(.setTags(local.entryID, [try XCTUnwrap(tags.first).id]))
+            } else {
+                let tag = try await fixture.receiver.createTagDefinition(named: "Local", assigningTo: local.entryID).definition
+                try await fixture.receiver.setSyncTagSelected(tag.id, selected: true)
+            }
+            await fixture.cloud.corruptControlAfterNextFileBodyDownload()
+            if byteCount > 5_000_000 {
+                let entries = try await fixture.receiver.page(.init()).entries
+                let entry = try XCTUnwrap(entries.first { !$0.syncFiles.isEmpty })
+                let file = try XCTUnwrap(entry.syncFiles.first)
+                try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+            } else { try await fixture.receiver.setSyncEnabled(true) }
+            let failure = await fixture.receiver.syncStatus()
+            XCTAssertEqual(failure.phase, .failed(.corruptData))
+            let failed = try await fixture.receiver.page(.init()).entries
+            XCTAssertNil(failed.first { !$0.syncFiles.isEmpty }?.syncFiles.first?.transferFailure,
+                "An authority failure must not mark valid file bytes corrupt")
+            await fixture.sender.retrySync()
+            let beforeRecovery = try await fixture.sender.page(.init()).entries
+            XCTAssertFalse(beforeRecovery.contains { $0.id == local.entryID },
+                "Corrupt collection authority must stop the entire pass, including independent uploads")
+
+            await fixture.receiver.retrySync()
+            await fixture.sender.retrySync()
+            let recovered = try await fixture.sender.page(.init()).entries
+            XCTAssertTrue(recovered.contains { $0.id == local.entryID })
+        }
+    }
+
+    @MainActor
+    func testPersistentFileFailureAllowsIndependentSharingAndBacksOffAcrossRestart() async throws {
+        let fixture = try await fileFixture(names: ["Damaged.txt", "Healthy.txt"],
+            contents: [Data("damaged body".utf8), Data("healthy body".utf8)])
+        let tags = try await fixture.sender.syncTags()
+        let tag = try XCTUnwrap(tags.first)
+        let removed = try await fixture.sender.capture(.init(source: .unknown, content: .text("delete independently")))
+        _ = try await fixture.sender.apply(.setTags(removed.entryID, [tag.id]))
+        await fixture.sender.retrySync()
+        await fixture.cloud.persistentlyDamageNextFileBody()
+        try await fixture.receiver.setSyncEnabled(true)
+
+        _ = try await fixture.receiver.apply(.delete(removed.entryID))
+        let added = try await fixture.receiver.capture(.init(source: .unknown, content: .text("share despite unavailable file")))
+        _ = try await fixture.receiver.apply(.setTags(added.entryID, [tag.id]))
+        await fixture.receiver.retrySync()
+        await fixture.sender.retrySync()
+        let sent = try await fixture.sender.page(.init()).entries
+        XCTAssertFalse(sent.contains { $0.id == removed.entryID })
+        XCTAssertTrue(sent.contains { $0.id == added.entryID })
+        let received = try await fixture.receiver.page(.init()).entries
+        let fileEntry = try XCTUnwrap(received.first { !$0.syncFiles.isEmpty })
+        XCTAssertEqual(fileEntry.syncFiles.filter { $0.state == .complete }.count, 1)
+        let failed = try XCTUnwrap(fileEntry.syncFiles.first { $0.transferFailure == .corruptData })
+        do {
+            _ = try await fixture.receiver.materialize(.init(entryID: fileEntry.id, purpose: .normalPaste))
+            XCTFail("A failed member must never be omitted from materialization")
+        } catch ClipboardHistoryModuleError.syncFilesPending {}
+
+        let attempts = await fixture.cloud.fileBodyDownloadCount()
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeModule(services: fixture.services, keyByte: 0x72, time: 2_000, root: fixture.receiverRoot)
+        await reopened.resumeSync()
+        let afterResume = await fixture.cloud.fileBodyDownloadCount()
+        XCTAssertEqual(afterResume, attempts, "Restart must retain the failed object's automatic retry deadline")
+        await fixture.cloud.repairFileBodies()
+        try await reopened.requestSyncFileDownload(entryID: fileEntry.id, objectID: failed.id, versionID: failed.versionID)
+        let repaired = try await reopened.page(.init()).entries
+        XCTAssertEqual(repaired.first { $0.id == fileEntry.id }?.syncFiles.map(\.state), [.complete, .complete])
+    }
+
+    func testDeletingPendingRejoinDoesNotBlockDeletionOrUnrelatedSharing() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = makeModule(services: services, keyByte: 0xDB, time: 1_000, root: root)
+        let peer = makeModule(services: services, keyByte: 0xDC, time: 2_000)
+        let original = try await first.capture(.init(source: .unknown, content: .text("delete the pending rejoin")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: original.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await peer.setSyncEnabled(true)
+
+        try await first.setSyncEnabled(false)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        _ = try await first.apply(.delete(original.entryID))
+        let unrelated = try await first.capture(.init(source: .unknown, content: .text("independent sharing must continue")))
+        _ = try await first.apply(.setTags(unrelated.entryID, [tag.id]))
+        try await first.setSyncEnabled(true)
+        await peer.retrySync()
+
+        let status = await first.syncStatus()
+        let received = try await peer.page(.init()).entries
+        XCTAssertEqual(status.phase, .upToDate)
+        XCTAssertEqual(received.map(\.id), [unrelated.entryID])
+        XCTAssertEqual(received.first?.previewText, "independent sharing must continue")
+
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xDB, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let fresh = makeModule(services: services, keyByte: 0xDD, time: 4_000)
+        try await fresh.setSyncEnabled(true)
+        let afterRestart = try await fresh.page(.init()).entries
+        XCTAssertEqual(afterRestart.map(\.id), [unrelated.entryID])
+    }
+
     func testFreshRejoinRetainsTheOriginalRootWithoutRepeatingMigrationReplay() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
@@ -1841,7 +2033,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         await fixture.cloud.holdNextFileSegment()
         let request = Task { try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID) }
         await fixture.cloud.waitForHeldFileSegment()
-        try await fixture.receiver.setSyncEnabled(false)
+        try await fixture.receiver.setSyncEnabled(false, waitForSync: false)
         try await request.value
         let disabled = try await fixture.receiver.page(.init())
         XCTAssertEqual(disabled.entries.first?.syncFiles.first?.state, .waitingForDownload)
@@ -3748,8 +3940,15 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
     private var damagesFileBody = false
+    private var persistentDamagedBody: String?
+    private var damagesNextBodyPersistently = false
+    private var corruptsControlAfterBody = false
+    private var corruptsNextControl = false
     private var fileBodyDownloads = 0
     func damageNextFileBodyDownload() { damagesFileBody = true }
+    func persistentlyDamageNextFileBody() { damagesNextBodyPersistently = true }
+    func repairFileBodies() { persistentDamagedBody = nil; damagesNextBodyPersistently = false }
+    func corruptControlAfterNextFileBodyDownload() { corruptsControlAfterBody = true }
     func fileBodyDownloadCount() -> Int { fileBodyDownloads }
     private var reversesAllChanges = false
     private var reversesDelivery = false
@@ -3778,6 +3977,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func failNextAccountRead(with fault: ClipboardSyncServiceError) { accountFault = fault }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
+        if corruptsNextControl {
+            corruptsNextControl = false
+            throw ClipboardSyncServiceError.corruptData
+        }
         if rendezvous, descriptors[account.identifier] == nil {
             if let initialReadWaiter {
                 self.initialReadWaiter = nil
@@ -3817,10 +4020,18 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
+        if record.kind == .fileBody, corruptsControlAfterBody {
+            corruptsControlAfterBody = false
+            corruptsNextControl = true
+        }
+        if record.kind == .fileBody, damagesNextBodyPersistently {
+            damagesNextBodyPersistently = false
+            persistentDamagedBody = record.recordID
+        }
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if damagesDownload || (damagesFileBody && record.kind == .fileBody) {
+        if damagesDownload || (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID {
             damagesDownload = false
             if record.kind == .fileBody { damagesFileBody = false }
             var changed = upload.chunks
@@ -3878,6 +4089,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return try await commit(.init(record: upload.record, chunks: []), for: account, control: control)
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        if corruptsControlAfterBody {
+            corruptsControlAfterBody = false
+            corruptsNextControl = true
+        }
         if shouldHoldFileSegment {
             shouldHoldFileSegment = false
             await withCheckedContinuation {

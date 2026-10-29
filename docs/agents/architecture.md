@@ -198,6 +198,11 @@ larger versions require an exact-version download action. Uploads are automatic
 for eligible files of any size. A previously complete local version remains
 usable until the requested replacement is ready. Preview, copy, Open, and Reveal
 never authorize a pending download.
+The `v30_clipboard_sync_file_retries` journal isolates damaged or locally inaccessible
+file downloads from independent sharing and deletion. An unresolved file keeps its
+visible failure and previous complete bytes. Automatic retries wait 30 seconds,
+including across restart; explicit Retry can retry immediately. Account, key,
+control, provider backoff, and database failures still stop the pass.
 Directory/package/symlink content is not flattened into an ordinary file.
 Directories use the same version graph, transport, exact download consent, and
 Linked Location ownership as files. Their threshold includes every synchronized
