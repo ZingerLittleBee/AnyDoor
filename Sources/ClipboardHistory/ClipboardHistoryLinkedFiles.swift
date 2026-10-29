@@ -189,13 +189,14 @@ extension ClipboardHistoryModule {
         }
         let path: String = row["path"]
         let available = facts.isAvailable(path: path, identity: row["identity"], nativeIdentity: row["native_identity"])
+        let pendingApplication = (row["applying_version_id"] as String?) != nil
         // Recursive classification is persisted by reconciliation outside SQL.
         let isApplication = (row["is_application"] as Bool? ?? false) || facts.isApplication(path: path)
         let applicationVersion = row.hasColumn("application_update_version")
             ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
         return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
             url: URL(fileURLWithPath: path), kind: kind,
-            state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
+            state: [.detached, .identityUncertain, .paused].contains(storedState) || (available && !pendingApplication) ? storedState : .unavailable,
             revision: row["revision"], applicationUpdateVersionID: isApplication && applicationVersion != base ? applicationVersion : nil)
     }
 

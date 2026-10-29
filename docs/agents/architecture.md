@@ -309,6 +309,8 @@ another complete tree. A newer selected version cannot reuse an older intent.
 Application packages still require a fresh explicit Apply Update action. Unknown
 editor replacements require revision-bound reassociation, which retires the old
 journal without inferring a swap outcome or deleting either visible output.
+An unresolved journal exposes the existing Retry/Reassociate actions through
+unavailable tracking status; it does not make the saved working bytes unavailable.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
 Top-level vnode handles share a process-wide budget of 64, including handles

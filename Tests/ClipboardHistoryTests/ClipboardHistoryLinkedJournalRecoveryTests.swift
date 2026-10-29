@@ -6,6 +6,39 @@ import XCTest
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testMovedCandidateExposesReassociationWithoutChangingSavedBytes() async throws {
+        let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileBeforeReplacement]))
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        let remote = Data("prepared remote bytes kept at another path".utf8)
+        try remote.write(to: fixture.original)
+        try await fixture.sender.refreshSyncFile(entryID: fixture.entryID, objectID: working.objectID)
+        await fixture.receiver.retrySync()
+        let candidate = try XCTUnwrap(try journalOutputs(beside: working.url).first)
+        try await fixture.receiver.closeStoreForTesting()
+        let moved = fixture.root.appendingPathComponent("User retained candidate.txt")
+        try FileManager.default.moveItem(at: candidate, to: moved)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await reopened.resumeSync()
+        let visible = try await reopened.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(visible.first)
+        XCTAssertEqual(current.state, .unavailable, "The existing Host Retry/Reassociate actions must be reachable for unresolved journal ownership")
+        let materialized = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Missing saved working file") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), Data("initial linked bytes".utf8))
+        try await reopened.setSyncEnabled(false)
+        _ = try await reopened.reassociateFileLocation(.init(
+            selection: .init(entryID: fixture.entryID, locationID: current.id, expectedRevision: current.revision), url: working.url))
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
+        XCTAssertEqual(try Data(contentsOf: moved), remote)
+        let status = await reopened.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        try await reopened.setSyncEnabled(true)
+        XCTAssertEqual(try Data(contentsOf: working.url), remote)
+        XCTAssertEqual(try Data(contentsOf: moved), remote)
+    }
+
+    @MainActor
     func testAtomicSaveAfterSwapRequiresExplicitReassociationAndKeepsDisplacedBytes() async throws {
         let fixture = try await makeLinkedFixture(receiverFault: .init(points: [.linkedFileAfterReplacement]))
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
@@ -105,7 +138,7 @@ extension ClipboardHistoryLinkedFileTests {
     }
 
     @MainActor
-    func testPendingCandidateNeverAppliesAfterItsSelectedVersionChanges() async throws {
+    func testPendingCandidateRetiresWhenANewerSelectedVersionArrives() async throws {
         let fixture = try await makeLinkedFixture()
         let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
         let working = try XCTUnwrap(locations.first)
@@ -122,15 +155,13 @@ extension ClipboardHistoryLinkedFileTests {
         await fixture.receiver.retrySync()
         XCTAssertEqual(chflags(working.url.path, 0), 0)
         await fixture.receiver.retrySync()
-        XCTAssertEqual(try Data(contentsOf: working.url), Data("initial linked bytes".utf8))
+        XCTAssertEqual(try Data(contentsOf: working.url), latest,
+            "A proven no-swap old intent must not block the normal update to the new selected version")
         XCTAssertEqual(try Data(contentsOf: candidate), earlier)
-        XCTAssertEqual(try journalOutputs(beside: working.url).count, 1)
-        let displayed = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
-        let current = try XCTUnwrap(displayed.first)
-        _ = try await fixture.receiver.reassociateFileLocation(.init(
-            selection: .init(entryID: fixture.entryID, locationID: current.id, expectedRevision: current.revision), url: working.url))
-        XCTAssertEqual(try Data(contentsOf: working.url), latest)
-        XCTAssertEqual(try Data(contentsOf: candidate), earlier)
+        let retained = try journalOutputs(beside: working.url)
+        XCTAssertEqual(retained.count, 2, "Only the retired candidate and genuinely displaced original remain")
+        await fixture.receiver.retrySync()
+        XCTAssertEqual(Set(try journalOutputs(beside: working.url)), Set(retained))
     }
 
     @MainActor

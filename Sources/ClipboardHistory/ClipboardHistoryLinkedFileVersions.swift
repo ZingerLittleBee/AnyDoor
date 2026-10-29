@@ -322,12 +322,15 @@ extension ClipboardHistoryModule {
                 // Both recorded identities still occupy their original names.
                 // Keep an unchanged candidate journal for exact-version reuse,
                 // so a persistent no-swap failure cannot allocate another tree.
-                // A saved edit retires that intent without deleting either file.
-                if original.digest != source.baseDigest || prepared.digest != digest {
+                // Saved edits or a different selected version retire this intent
+                // without deleting either file or blocking the current choice.
+                let selection = try syncFileSelection(objectID: source.objectID)
+                if original.digest != source.baseDigest || prepared.digest != digest ||
+                    selection?.latest.versionID != version || selection?.hasConflict == true {
                     try clearLinkedApplication(source.id)
                 }
             }
-            // An unreadable, moved, or changed root proves neither outcome.
+            // An unreadable, moved, or replaced root proves neither outcome.
             // Retain the exact journal and both outputs for a later recovery.
         }
     }
