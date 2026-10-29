@@ -234,8 +234,8 @@ ordinary extended-attribute API requires one complete value at a time. Such
 values use fallible allocation and retain the platform limit, rather than
 claiming a 4 MiB peak for arbitrary metadata. `ClipboardSyncFilePublication` verifies the full segment sequence,
 length, and digest before a second bounded pass builds a visible working file.
-The earlier bounded small-file envelope remains readable through
-`ClipboardSyncFileIO`. These paths publish into the visible
+The earlier bounded small-file envelope shares the same candidate publication
+boundary. These paths publish into the visible
 `~/Documents/AnyDoor/Clipboard/` working root, under account/object/version folders,
 with no-follow directory traversal, a synced ordinary pending output, and atomic
 non-overwriting publication. This visible working location is the plaintext
@@ -249,6 +249,26 @@ publication rechecks account, active epoch, local generation, and live membershi
 The version descriptor is durable before publication, so interrupted publication
 retries only adopt identical complete bytes and refuse an unrelated existing file.
 Missing or replaced working files are unavailable, not a complete-looking path.
+
+The additive `v32_working_output_recovery` journal owns only exact generated
+Receiving paths, with a durable reservation before creation, pinned native
+identity, and an encrypted complete-output fingerprint. A store-local advisory
+lease excludes active constructors in this and other processes from recovery.
+On startup or a local recovery query, unchanged proven candidates can be removed;
+missing exact paths retire ownership without following renamed or published
+files. Recovery never deletes by filename pattern or reclaims retained
+`AnyDoor update` outputs.
+
+An interrupted construction without a complete proof, changed content, or an
+uncertain identity remains an ordinary readable working output for review.
+`workingOutputRecoveries` exposes that exact path across Off and restart. Keep
+File explicitly leaves its bytes alone and relinquishes ownership; users can
+inspect or remove it through Finder. One pending reservation per version directory
+prevents repeated failures from accumulating new partials. Existing review notices
+use cheap path/identity checks on refresh, rather than hashing their contents
+again. This is local recovery, with no cloud deletion, new download consent, or
+automatic re-enablement of sync. Unverified outputs never materialize as complete
+history, and encrypted background stores still contain no plaintext file cache.
 
 `ClipboardFileTree` extends that transfer with typed, canonical tree framing.
 The temporary inventory and path-validation tables use SQLCipher, including
