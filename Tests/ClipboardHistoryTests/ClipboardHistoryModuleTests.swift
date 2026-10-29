@@ -1163,6 +1163,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v28_clipboard_sync_application_updates",
                 "v29_clipboard_sync_file_lifecycle",
                 "v30_clipboard_sync_file_retries",
+                "v31_legacy_tag_recovery",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -1260,6 +1261,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v28_clipboard_sync_application_updates",
                 "v29_clipboard_sync_file_lifecycle",
                 "v30_clipboard_sync_file_retries",
+                "v31_legacy_tag_recovery",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

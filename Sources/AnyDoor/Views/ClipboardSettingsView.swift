@@ -1,6 +1,7 @@
 import AppKit
 import ClipboardHistory
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 struct ClipboardSettingsView: View {
@@ -9,6 +10,9 @@ struct ClipboardSettingsView: View {
     let presentation: SettingsPresentation
     @State private var installedApps: [InstalledApp] = []
     @State private var showsResetConfirmation = false
+    @State private var isExportingLegacyTags = false
+    @State private var legacyTagExportSucceeded = false
+    @State private var legacyTagExportFailed = false
     /// The entry count the discard confirmation shows, and confirms.
     @State private var discardConfirmationCount: Int?
 
@@ -249,7 +253,42 @@ struct ClipboardSettingsView: View {
                 recoverySection(recovery)
             }
         case .ready:
-            EmptyView()
+            if model.lifecycle.legacyTagRecoveryFormat != nil {
+                Section {
+                    LocalizedText(.settingsClipboardLegacyTagsPreserved)
+                        .foregroundStyle(.secondary)
+                    Button(L(.settingsClipboardLegacyTagsExport)) {
+                        Task { await exportLegacyTagRecovery() }
+                    }
+                    .disabled(isExportingLegacyTags)
+                    if legacyTagExportFailed {
+                        LocalizedText(.settingsClipboardOperationFailed)
+                            .foregroundStyle(.red)
+                    } else if legacyTagExportSucceeded {
+                        LocalizedText(.settingsClipboardLegacyTagsExported)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func exportLegacyTagRecovery() async {
+        guard let format = model.lifecycle.legacyTagRecoveryFormat else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = format == .json ? [.json] : [.propertyList]
+        panel.nameFieldStringValue = format == .json ? "AnyDoor-Legacy-Tags.json" : "AnyDoor-Legacy-Tags.plist"
+        panel.message = L(.settingsClipboardLegacyTagsExportMessage)
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        isExportingLegacyTags = true
+        legacyTagExportFailed = false
+        legacyTagExportSucceeded = false
+        defer { isExportingLegacyTags = false }
+        do {
+            try await model.lifecycle.exportLegacyTagRecovery(to: destination)
+            legacyTagExportSucceeded = true
+        } catch {
+            legacyTagExportFailed = true
         }
     }
 
