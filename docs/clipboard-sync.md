@@ -49,6 +49,14 @@ preserved edits are ordinary readable files. The local history database, backgro
 payloads, and transfer chunks remain encrypted. Local history uses a device-only
 Keychain key; a separate content key is distributed through iCloud Keychain for sync.
 
+If iCloud Drive **Desktop & Documents Folders** or another folder-sync service
+syncs Documents, it may upload these readable working copies separately. Those
+copies follow that service's encryption and deletion settings, outside AnyDoor's
+content encryption and cloud-clear controls. For iCloud Drive, end-to-end
+protection depends on [Advanced Data Protection](https://support.apple.com/en-ie/102651).
+Turning off Clipboard Sync or clearing its cloud data does not remove copies
+from that separate service. See [Apple's Desktop & Documents guide](https://support.apple.com/en-za/109344).
+
 Moves and renames continue tracking when the original object can be identified.
 An external editor that saves by replacing that object may require **Reassociate
 File…** when continuity cannot be proven, even at the same name or path. Review the
@@ -59,6 +67,20 @@ an item inside a tracked folder is a change to that folder's contents.
 After replacing a linked file or folder, AnyDoor keeps the previous output beside
 it with an `AnyDoor update` suffix. An editor may still save through its old open
 file descriptor, so these visible copies are retained for you to review and remove.
+
+## Review interrupted working files
+
+When a working file cannot be safely recovered after an interruption, Clipboard
+Sync settings shows **Files to Review**, including while sync is off. Each item
+shows its recorded location and why it needs review. The current contents may be
+incomplete, edited, or replaced; AnyDoor cannot verify them.
+
+**Reveal in Finder** shows the exact recorded location without searching for a
+renamed or moved file. **Keep File** leaves the current files untouched and
+dismisses the notice. It does not start a download, turn on sync, or clear cloud
+data. You can inspect, move, or remove unwanted files yourself in Finder. Local
+Clipboard History remains usable while an item needs review. If Keep File cannot
+finish, the notice remains available after refreshing so you can try again.
 
 ## Conflicts and application updates
 
@@ -99,6 +121,22 @@ use **Reassociate File…** when the file's identity is uncertain.
 For a waiting sync key, restore iCloud Keychain availability and retry. Existing
 encrypted cloud content is retained. An Apple Account change stops participation;
 sharing retained history with a different account requires explicit authorization.
+
+If AnyDoor confirms that a previously used cloud collection is missing, Clipboard
+Sync settings offers **Start a New Sync Collection**, including while sync is off.
+If the collection may return, use Retry while sync is on or a cloud clear is
+pending. When sync is off without a pending clear, turn it on to check again.
+Starting a new collection asks for
+confirmation and rechecks the current account and missing collection before
+retiring this Mac's previous participation. It preserves local history, files,
+saved changes, and the encryption key. It does not create or clear cloud data at
+that point, and does not claim that an interrupted cloud clear completed.
+
+After recovery, sync stays off and all Sync Tags are deselected. Turn Clipboard
+Sync on and choose tags explicitly to share again. If the old collection returns,
+AnyDoor will not resume sharing it automatically. If the account or collection changes
+before confirmation, recovery fails without reporting success; review the current
+status before trying again.
 
 ## Upgrading from Config Sync tag sharing
 

@@ -7,8 +7,9 @@ final class ClipboardFileTreeOutput {
     private let parent: Int32
     private let name: String
     private var root: Int32 = -1
+    private let rootCreated: ((Int32) throws -> Void)?
 
-    init(destination: URL, parentDescriptor: Int32) throws {
+    init(destination: URL, parentDescriptor: Int32, rootCreated: ((Int32) throws -> Void)? = nil) throws {
         let handle = dup(parentDescriptor)
         guard handle >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var expected = stat(), atPath = stat()
@@ -23,6 +24,7 @@ final class ClipboardFileTreeOutput {
         }
         parent = handle
         name = destination.lastPathComponent
+        self.rootCreated = rootCreated
     }
 
     deinit { if root >= 0 { close(root) }; close(parent) }
@@ -57,6 +59,7 @@ final class ClipboardFileTreeOutput {
         if header.path.isEmpty {
             root = dup(fd)
             guard root >= 0 else { close(fd); throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            do { try rootCreated?(fd) } catch { close(fd); throw error }
         }
         return fd
     }

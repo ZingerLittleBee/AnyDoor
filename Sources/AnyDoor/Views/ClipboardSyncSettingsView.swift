@@ -1,3 +1,4 @@
+import AppKit
 import ClipboardHistory
 import SwiftUI
 
@@ -26,6 +27,10 @@ struct ClipboardSyncSettingsView: View {
             )
 
             LocalizedText(.settingsClipboardSyncDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            LocalizedText(.settingsClipboardSyncWorkingCopies)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -98,7 +103,7 @@ struct ClipboardSyncSettingsView: View {
                 LocalizedText(statusKey)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if offersRetry {
+                if model.offersRetry {
                     Button {
                         Task { await model.retry() }
                     } label: {
@@ -111,6 +116,38 @@ struct ClipboardSyncSettingsView: View {
             if model.status.withdrawnEntryCount > 0 {
                 Text(L(.settingsClipboardSyncWithdrawnStatus, model.status.withdrawnEntryCount))
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !model.workingOutputRecoveries.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    LocalizedText(.settingsClipboardSyncWorkingOutputTitle)
+                        .font(.headline)
+                    LocalizedText(.settingsClipboardSyncWorkingOutputExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(model.workingOutputRecoveries) { recovery in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(recovery.url.path)
+                                .font(.caption)
+                                .textSelection(.enabled)
+                            LocalizedText(workingOutputReasonKey(recovery.reason))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Button(L(.clipboardActionRevealInFinder)) {
+                                    NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                                }
+                                .accessibilityValue(recovery.url.path)
+                                Button(L(.settingsClipboardSyncWorkingOutputKeep)) {
+                                    Task { await model.keepWorkingOutput(recovery.id) }
+                                }
+                                .accessibilityValue(recovery.url.path)
+                                .disabled(!isStoreReady || model.isPerformingAction)
+                            }
+                        }
+                        .accessibilityElement(children: .contain)
+                    }
+                }
             }
 
             if !model.preservedEdits.isEmpty {
@@ -131,6 +168,20 @@ struct ClipboardSyncSettingsView: View {
                     LocalizedText(.settingsClipboardSyncRecoveryHelp)
                 }
                 .font(.caption)
+            }
+
+            if model.status.canRecoverMissingCloudCollection {
+                LocalizedText(model.missingCollectionHelpKey)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L(.settingsClipboardSyncNewCollectionAction)) {
+                    Task { await model.prepareMissingCollectionRecovery() }
+                }
+                .disabled(!isStoreReady || model.isPerformingAction)
+            } else if model.didRecoverMissingCollection && !model.status.isEnabled {
+                LocalizedText(.settingsClipboardSyncNewCollectionPrepared)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if model.status.uploadedEntryCount > 0
@@ -222,6 +273,17 @@ struct ClipboardSyncSettingsView: View {
         } message: { preview in
             Text(L(.settingsClipboardSyncMergeScope, preview.displayName, preview.newlyEligibleEntryCount))
         }
+        .alert(L(.settingsClipboardSyncNewCollectionAction), isPresented: Binding(
+            get: { model.missingCollectionConfirmation != nil },
+            set: { if !$0 { model.cancelMissingCollectionRecovery() } }
+        ), presenting: model.missingCollectionConfirmation) { confirmation in
+            Button(L(.settingsClipboardSyncNewCollectionAction)) {
+                Task { await model.confirmMissingCollectionRecovery(confirmation) }
+            }
+            Button(L(.clipboardEditCancel), role: .cancel) { model.cancelMissingCollectionRecovery() }
+        } message: { _ in
+            LocalizedText(.settingsClipboardSyncNewCollectionExplanation)
+        }
     }
 
     private var isTransferring: Bool {
@@ -233,14 +295,11 @@ struct ClipboardSyncSettingsView: View {
         }
     }
 
-    private var offersRetry: Bool {
-        if model.operationFailed || model.status.cloudReset?.failure != nil { return true }
-        guard model.status.isEnabled else { return false }
-        switch model.status.phase {
-        case .disabled, .connecting, .transferring, .upToDate:
-            return false
-        default:
-            return true
+    private func workingOutputReasonKey(_ reason: ClipboardHistoryWorkingOutputRecovery.Reason) -> L10n.Key {
+        switch reason {
+        case .incomplete: .settingsClipboardSyncWorkingOutputIncomplete
+        case .changed: .settingsClipboardSyncWorkingOutputChanged
+        case .unavailable: .settingsClipboardSyncWorkingOutputUnavailable
         }
     }
 

@@ -9,6 +9,134 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testMissingCollectionRecoveryPreservesFrozenAndLaterSavedFiles() async throws {
+        let fixture = try await makeLinkedFixture()
+        await fixture.cloud.failCommits(true)
+        let frozen = Data("frozen but unpublished before collection loss".utf8)
+        try frozen.write(to: fixture.original)
+        try await eventually { !(await fixture.cloud.partialFileRecordIDs()).isEmpty }
+        try await fixture.sender.setSyncEnabled(false)
+        let newer = Data("saved after freezing before collection loss".utf8)
+        try newer.write(to: fixture.original)
+        let cloudBefore = await fixture.cloud.visibleRecords()
+        let partialBefore = await fixture.cloud.partialFileRecordIDs()
+        await fixture.cloud.removeControl()
+        try await fixture.sender.setSyncEnabled(true)
+        let confirmation = try await fixture.sender.prepareMissingCloudCollectionRecovery()
+        try await fixture.sender.recoverMissingCloudCollection(confirmation)
+        let notices = try await fixture.sender.preservedSyncEdits()
+        XCTAssertEqual(notices.count, 2)
+        var contents = Set<Data>()
+        for notice in notices {
+            let content = try await fixture.sender.materialize(.init(entryID: notice.id, purpose: .normalPaste))
+            guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Missing preserved file") }
+            contents.insert(try Data(contentsOf: file.currentURL))
+        }
+        XCTAssertEqual(contents, [frozen, newer])
+        XCTAssertEqual(try Data(contentsOf: fixture.original), newer)
+        let cloudAfter = await fixture.cloud.visibleRecords()
+        let partialAfter = await fixture.cloud.partialFileRecordIDs()
+        XCTAssertEqual(cloudAfter, cloudBefore)
+        XCTAssertEqual(partialAfter, partialBefore, "Recovery cannot claim to delete absent collection data")
+        let status = await fixture.sender.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+        await reopened.resumeSync()
+        let restored = try await reopened.preservedSyncEdits()
+        XCTAssertEqual(Set(restored.map(\.id)), Set(notices.map(\.id)))
+    }
+
+    @MainActor
+    func testUnreadableInstalledReplacementRetainsJournalUntilRecoveryIsProven() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let target = OSAllocatedUnfairLock(initialState: Optional<URL>.none)
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            guard point == .linkedFileAfterReplacement, let url = target.withLock({ $0 }) else { return false }
+            _ = chmod(url.path, 0)
+            return true
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        addTeardownBlock { _ = chmod(working.url.path, 0o600) }
+        target.withLock { $0 = working.url }
+        try Data("installed remote edit".utf8).write(to: fixture.original)
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+        XCTAssertThrowsError(try Data(contentsOf: working.url))
+        target.withLock { $0 = nil }
+        await fixture.receiver.retrySync()
+        try await fixture.receiver.closeStoreForTesting()
+        XCTAssertEqual(chmod(working.url.path, 0o600), 0)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await reopened.resumeSync()
+        let restored = try await reopened.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(restored.first { $0.id == working.id })
+        XCTAssertEqual(current.url, working.url, "Uncertain inspection must not rebind the link to the displaced old inode")
+        XCTAssertNotEqual(current.baseVersionID, working.baseVersionID)
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("installed remote edit".utf8))
+        let siblings = try FileManager.default.contentsOfDirectory(at: working.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+        let displaced = siblings.filter { $0.lastPathComponent.hasPrefix(working.url.lastPathComponent + " (AnyDoor update ") }
+        XCTAssertTrue(displaced.contains { (try? Data(contentsOf: $0)) == Data("initial linked bytes".utf8) })
+        try Data("saved on the installed inode".utf8).write(to: working.url)
+        await reopened.retrySync()
+        await fixture.sender.retrySync()
+        XCTAssertEqual(try Data(contentsOf: fixture.original), Data("saved on the installed inode".utf8))
+    }
+
+    @MainActor
+    func testRestoringLinkedBaseClearsSourceFailureWithoutPublishingAnotherVersion() async throws {
+        let changing = OSAllocatedUnfairLock(initialState: Optional<URL>.none)
+        let faults = ClipboardHistoryFaultInjector { point in
+            if point == .syncFileTreeBeforeFreezeVerification, let member = changing.withLock({ $0 }) {
+                try? Data("changed during freeze".utf8).write(to: member)
+            }
+            return false
+        }
+        let fixture = try await makeLinkedFixture(prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data("original tree member".utf8).write(to: root.appendingPathComponent("member"))
+        }, senderFault: faults)
+        let member = fixture.original.appendingPathComponent("member")
+        var original = stat()
+        XCTAssertEqual(lstat(member.path, &original), 0)
+        let before = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        let originalLocation = try XCTUnwrap(before.first)
+        let uploads = await fixture.cloud.uploadCount()
+        changing.withLock { $0 = member }
+        try Data("saved before freeze".utf8).write(to: member)
+        await fixture.sender.retrySync()
+        let failed = try await fixture.sender.page(.init()).entries
+        XCTAssertEqual(failed.first?.syncFiles.first?.transferFailure, .sourceChanged)
+        changing.withLock { $0 = nil }
+        try Data("original tree member".utf8).write(to: member)
+        let descriptor = open(member.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        var timestamps = [original.st_atimespec, original.st_mtimespec]
+        XCTAssertEqual(futimens(descriptor, &timestamps), 0)
+        await fixture.sender.resumeSync()
+        await fixture.sender.retrySync()
+        let restored = try await fixture.sender.linkedFileLocations(for: fixture.entryID)
+        XCTAssertEqual(restored.first?.state, .current)
+        XCTAssertEqual(restored.first?.baseVersionID, originalLocation.baseVersionID)
+        let current = try await fixture.sender.page(.init()).entries
+        XCTAssertNil(current.first?.syncFiles.first?.transferFailure)
+        let after = await fixture.cloud.uploadCount()
+        XCTAssertEqual(after, uploads, "Restoring the exact base needs no synthetic child version")
+        try await fixture.sender.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.root.appendingPathComponent("Sender"), services: fixture.services, key: 0x51)
+        await reopened.resumeSync()
+        let page = try await reopened.page(.init()).entries
+        XCTAssertNil(page.first?.syncFiles.first?.transferFailure)
+        let content = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = content.items.first?.representations.first else { return XCTFail("Expected restored tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member")), Data("original tree member".utf8))
+    }
+
+    @MainActor
     func testChangingLinkedSourceKeepsItsDeadlineAcrossObservedSavesAndRestart() async throws {
         let changes = OSAllocatedUnfairLock(initialState: (url: Optional<URL>.none, attempts: 0))
         let faults = ClipboardHistoryFaultInjector { point in
@@ -526,8 +654,12 @@ actor LinkedFileKeys: ClipboardSyncKeyStoring {
 }
 
 actor LinkedFileCloud: ClipboardSyncTransport {
-    private var identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
+    private var identity: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "linked-file-user")) {
+        identity = account
+    }
     private var currentControl: ClipboardSyncControl?
+    func removeControl() { currentControl = nil }
     private var uploads: [ClipboardSyncUpload] = []
     private var purgedRecords: Set<String> = []
     private var commitsFail = false

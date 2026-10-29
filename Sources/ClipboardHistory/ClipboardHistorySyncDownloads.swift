@@ -142,19 +142,27 @@ extension ClipboardHistoryModule {
               Data(encryptedDigest.finalize()) == body.digest else { throw ClipboardSyncServiceError.corruptData }
         let publicationRoot = try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch)
         let candidate = try await ClipboardSyncFilePublication.construct(descriptor: descriptor,
-            encryptedDirectory: directory, root: publicationRoot, account: account, control: control, key: key, faults: faultInjector)
-        defer { ClipboardSyncFilePublication.discard(candidate) }
-        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-        try await waitForWriteTurn()
-        try admitSync(generation)
-        guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { return nil }
-        let published = try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: publicationRoot,
-            accountID: account.identifier, faults: faultInjector)
-        try await ClipboardSyncFilePublication.verifyPublished(published, candidate: candidate, faults: faultInjector)
-        try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-        guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
-              try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else { return nil }
-        return published
+            encryptedDirectory: directory, root: publicationRoot, account: account, control: control, key: key,
+            ownership: workingOutputJournal(), faults: faultInjector)
+        do {
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            try await waitForWriteTurn()
+            try admitSync(generation)
+            guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else {
+                await ClipboardSyncFilePublication.discard(candidate)
+                return nil
+            }
+            let published = try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor, root: publicationRoot,
+                accountID: account.identifier, faults: faultInjector)
+            try await ClipboardSyncFilePublication.verifyPublished(published, candidate: candidate, faults: faultInjector)
+            await ClipboardSyncFilePublication.discard(candidate)
+            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
+                  try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else {
+                return nil
+            }
+            return published
+        } catch { await ClipboardSyncFilePublication.discard(candidate); throw error }
     }
 
     func admitSyncFilePublication(_ generation: UInt64, account: ClipboardSyncAccount,

@@ -24,7 +24,7 @@ extension ClipboardHistoryModule {
         let account = try await services.transport.account()
         guard generation == syncGeneration, store == storeEpoch, availability == .ready else { throw CancellationError() }
         guard try currentSyncAccountID() == account.identifier else { throw ClipboardSyncServiceError.accountChanged }
-        guard let control = try await services.transport.control(for: account) else { throw ClipboardSyncServiceError.missingRemoteState }
+        guard let control = try await observedSyncControl(for: account, generation: generation, services: services) else { throw ClipboardSyncServiceError.missingRemoteState }
         guard try await services.transport.account() == account else { throw ClipboardSyncServiceError.accountChanged }
         guard generation == syncGeneration, store == storeEpoch, availability == .ready else { throw CancellationError() }
         return .init(account: account, control: control)
@@ -141,7 +141,7 @@ extension ClipboardHistoryModule {
 
     /// Old account journals remain dormant while another account participates.
     /// Resolving the current system account never grants ordinary sync consent.
-    func discoverPendingCloudReset(generation: UInt64) async {
+    func discoverPendingCloudReset(generation: UInt64, explicitRetry: Bool) async {
         do {
             guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
             try admitCloudResetDiscovery(generation)
@@ -155,6 +155,7 @@ extension ClipboardHistoryModule {
                         arguments: [account.identifier])
                     try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
                 }
+                if !explicitRetry, journal.failure?.requiresExplicitRetry == true { publishSyncStatus(); return }
                 if let deadline = journal.retryNotBefore, deadline > now() { publishSyncStatus(); return }
                 await performCloudReset(generation: generation)
             } else if syncStatus().isEnabled {
@@ -185,7 +186,7 @@ extension ClipboardHistoryModule {
         do {
             guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
             try await admitCloudReset(generation, account: journal.account, services: services)
-            guard var control = try await services.transport.control(for: journal.account) else {
+            guard var control = try await observedSyncControl(for: journal.account, generation: generation, services: services) else {
                 throw ClipboardSyncServiceError.missingRemoteState
             }
             try await admitCloudReset(generation, account: journal.account, services: services)

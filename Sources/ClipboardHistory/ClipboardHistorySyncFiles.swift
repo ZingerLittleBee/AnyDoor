@@ -11,9 +11,40 @@ extension ClipboardHistoryModule {
               AND current.representation_index = member.representation_index AND current.kind = 'fileReference')
         """
 
-    static func syncFileSummaries(entryID: String, in database: Database) throws -> [ClipboardHistorySyncFileSummary] {
-        try Row.fetchAll(database, sql: """
-            SELECT member.account_id, member.epoch, version.descriptor, completed.version_id AS complete_version_id,
+    private struct FileSummaryScope: Hashable {
+        let accountID: String
+        let epoch: String
+    }
+
+    private struct FileSummaryObject: Hashable {
+        let scope: FileSummaryScope
+        let objectID: String
+    }
+
+    private struct FileSummaryFacts {
+        let descriptor: ClipboardSyncFileDescriptor
+        let state: ClipboardHistorySyncFileState
+        let availableVersionID: UUID?
+        let transfer: (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool)
+        let conflict: Bool
+
+        func summary(hasRetrySource: Bool) -> ClipboardHistorySyncFileSummary {
+            .init(id: descriptor.objectID, versionID: descriptor.versionID,
+                displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
+                availableVersionID: availableVersionID, transferredByteCount: transfer.bytes,
+                transferFailure: transfer.failure, downloadRequested: transfer.requested,
+                uploadPending: transfer.uploadPending || (descriptor.state == .sourceUnavailable && hasRetrySource),
+                hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
+        }
+    }
+
+    static func syncFileSummaries(entryIDs: [String], facts: inout ClipboardHistoryFileDisplayFacts,
+        in database: Database) throws -> [String: [ClipboardHistorySyncFileSummary]] {
+        guard !entryIDs.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: entryIDs.count).joined(separator: ",")
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT member.entry_id, member.object_id, member.account_id, member.epoch, version.descriptor,
+                   completed.version_id AS complete_version_id,
                    completed.transfer_state, completed.local_path, completed.local_identity,
                    (member.origin = 'local' AND COALESCE(source.reference_provenance, '') IN ('ordinary', 'legacyUnverified')
                      AND COALESCE(version.local_bookmark, source.bookmark_data) IS NOT NULL
@@ -25,39 +56,57 @@ extension ClipboardHistoryModule {
               AND version.epoch = member.epoch AND version.object_id = member.object_id AND version.version_id = choice.current_version_id
             LEFT JOIN clipboard_sync_file_versions AS completed ON completed.account_id = member.account_id
               AND completed.epoch = member.epoch AND completed.object_id = member.object_id AND completed.version_id = choice.complete_version_id
-            WHERE member.entry_id = ? AND \(liveSyncFileMember)
-            ORDER BY member.item_index, member.representation_index
-            """, arguments: [entryID]).map { row in
-                let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
-                let state: ClipboardHistorySyncFileState
-                let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
-                let linked = try usableLinkedFileReference(objectID: descriptor.objectID,
-                    accountID: row["account_id"], epoch: row["epoch"], in: database)
-                let available = (row["transfer_state"] as String?) == "complete"
-                    && (linked.exists ? linked.reference != nil
-                        : ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"]))
-                let availableVersion = linked.reference?.versionID ?? completeVersion
-                if available {
-                    state = availableVersion == descriptor.versionID ? .complete : .updateAvailable
-                } else if completeVersion != nil {
-                    state = .localUnavailable
-                } else {
-                    state = switch descriptor.state {
-                    case .available: .waitingForDownload
-                    case .sourceUnavailable: .sourceUnavailable
-                    case .pendingUpload: .waitingForUpload
-                    case .unsupportedKind: .unsupportedKind
-                    }
+            WHERE member.entry_id IN (\(placeholders)) AND \(liveSyncFileMember)
+            ORDER BY member.entry_id, member.item_index, member.representation_index
+            """, arguments: StatementArguments(entryIDs))
+        var result: [String: [ClipboardHistorySyncFileSummary]] = [:]
+        var objects: [FileSummaryObject: FileSummaryFacts] = [:]
+        var journals: [FileSummaryScope: ClipboardSyncFileRestorationSnapshot] = [:]
+        for row in rows {
+            let scope = FileSummaryScope(accountID: row["account_id"], epoch: row["epoch"])
+            let object = FileSummaryObject(scope: scope, objectID: row["object_id"])
+            let summary: FileSummaryFacts
+            if let cached = objects[object] { summary = cached }
+            else {
+                if journals[scope] == nil, let epoch = UUID(uuidString: scope.epoch) {
+                    journals[scope] = try syncFileRestorationSnapshot(accountID: scope.accountID, epoch: epoch, in: database)
                 }
-                let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"], in: database)
-                let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
-                let sourcePending = descriptor.state == .sourceUnavailable && (row["has_retry_source"] as Bool)
-                return ClipboardHistorySyncFileSummary(id: descriptor.objectID, versionID: descriptor.versionID,
-                    displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
-                    availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
-                    transferFailure: transfer.failure, downloadRequested: transfer.requested, uploadPending: transfer.uploadPending || sourcePending,
-                    hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
+                summary = try syncFileSummaryFacts(row, facts: &facts, restorations: journals[scope], in: database)
+                objects[object] = summary
             }
+            result[row["entry_id"], default: []].append(summary.summary(hasRetrySource: row["has_retry_source"]))
+        }
+        return result
+    }
+
+    private static func syncFileSummaryFacts(_ row: Row, facts: inout ClipboardHistoryFileDisplayFacts,
+        restorations: ClipboardSyncFileRestorationSnapshot?, in database: Database) throws -> FileSummaryFacts {
+        let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+        let state: ClipboardHistorySyncFileState
+        let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
+        let linked = try usableLinkedFileReference(objectID: descriptor.objectID,
+            accountID: row["account_id"], epoch: row["epoch"], facts: &facts, in: database)
+        let available = (row["transfer_state"] as String?) == "complete"
+            && (linked.exists ? linked.reference != nil
+                : ClipboardSyncFileIO.isAvailable(path: row["local_path"], identity: row["local_identity"]))
+        let availableVersion = linked.reference?.versionID ?? completeVersion
+        if available {
+            state = availableVersion == descriptor.versionID ? .complete : .updateAvailable
+        } else if completeVersion != nil {
+            state = .localUnavailable
+        } else {
+            state = switch descriptor.state {
+            case .available: .waitingForDownload
+            case .sourceUnavailable: .sourceUnavailable
+            case .pendingUpload: .waitingForUpload
+            case .unsupportedKind: .unsupportedKind
+            }
+        }
+        let transfer = try syncFileTransferSummary(descriptor, accountID: row["account_id"], epoch: row["epoch"],
+            in: database, restorations: restorations)
+        let conflict = try syncFileHasConflict(objectID: descriptor.objectID, accountID: row["account_id"], epoch: row["epoch"], in: database)
+        return .init(descriptor: descriptor, state: state, availableVersionID: available ? availableVersion : nil,
+            transfer: transfer, conflict: conflict)
     }
 
     func materializeSyncFileReferences(
@@ -107,6 +156,12 @@ extension ClipboardHistoryModule {
 
     private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
         in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
+        var facts = ClipboardHistoryFileDisplayFacts()
+        return try usableLinkedFileReference(objectID: objectID, accountID: accountID, epoch: epoch, facts: &facts, in: database)
+    }
+
+    private static func usableLinkedFileReference(objectID: UUID, accountID: String, epoch: String,
+        facts: inout ClipboardHistoryFileDisplayFacts, in database: Database) throws -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
         let rows = try Row.fetchAll(database, sql: """
             SELECT path, bookmark, identity, native_identity, state, base_version_id FROM clipboard_sync_linked_locations
             WHERE account_id = ? AND epoch = ? AND object_id = ?
@@ -115,7 +170,7 @@ extension ClipboardHistoryModule {
         for row in rows where !["unavailable", "detached", "identityUncertain"].contains(row["state"] as String) {
             let path: String = row["path"]
             let identity: Data = row["identity"]
-            if ClipboardLinkedIdentityResolution.isAvailable(path: path, identity: identity, nativeIdentity: row["native_identity"]),
+            if facts.isAvailable(path: path, identity: identity, nativeIdentity: row["native_identity"]),
                let versionID = UUID(uuidString: row["base_version_id"]) {
                 return (true, (path, row["bookmark"], identity, versionID))
             }
@@ -390,20 +445,14 @@ extension ClipboardHistoryModule {
         }
         for descriptor in descriptors {
             try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
-            guard try syncFileRead({ database in
-                let nodes = try Row.fetchAll(database, sql: """
-                    SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
-                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
-                        guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
-                        return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
-                    }
-                return ClipboardSyncVersionGraph.isComplete(nodes)
-            }) else { continue }
+            let requirement = try syncFileDownloadRequirement(descriptor, account: account, epoch: control.epoch)
+            guard requirement.ancestryComplete else { continue }
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
-                  try !shouldDeferSyncFileWork(.download(descriptor.versionID), account: account, control: control) else { continue }
+                  try !shouldDeferSyncFileWork(.download(descriptor.versionID), account: account, control: control,
+                    reportMissingRecord: requirement.reportMissingRecord) else { continue }
             do {
             let output: ClipboardSyncPublishedFile
             if descriptor.bodyFormat != nil {
@@ -427,18 +476,28 @@ extension ClipboardHistoryModule {
                Int64(content.bytes.count) == size, Data(SHA256.hash(data: content.bytes)) == descriptor.contentDigest else {
                 throw ClipboardSyncServiceError.corruptData
             }
-            // Authentication is complete before any ordinary file is created.
-            // Publication stays synchronous with final admission and DB commit.
-            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-            try await waitForWriteTurn()
-            try admitSync(generation)
-            guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
-            output = try ClipboardSyncFileIO.publish(
-                content.bytes, descriptor: descriptor, root: try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch),
-                accountID: account.identifier, faultInjector: faultInjector
-            )
+            // Authentication precedes off-actor construction; final publication
+            // remains synchronous with renewed admission and local completion.
+            let publicationRoot = try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch)
+            let candidate = try await ClipboardSyncFilePublication.constructInline(content.bytes,
+                descriptor: descriptor, root: publicationRoot, accountID: account.identifier,
+                ownership: workingOutputJournal(), faults: faultInjector)
+            do {
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                try await waitForWriteTurn()
+                try admitSync(generation)
+                guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else {
+                    await ClipboardSyncFilePublication.discard(candidate)
+                    continue
+                }
+                output = try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor,
+                    root: publicationRoot, accountID: account.identifier, faults: faultInjector)
+                await ClipboardSyncFilePublication.discard(candidate)
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
+                      try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else { continue }
+            } catch { await ClipboardSyncFilePublication.discard(candidate); throw error }
             }
-            try faultInjector.check(.syncFileAfterPublication)
             try syncWrite { database in
                 try database.execute(sql: """
                     UPDATE clipboard_sync_file_versions
@@ -480,11 +539,42 @@ extension ClipboardHistoryModule {
                 try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
                 if Self.isIsolatedSyncFileFailure(error) {
                     try deferSyncFileWork(.download(descriptor.versionID), error: error,
-                        account: account, control: control, generation: generation)
+                        account: account, control: control, generation: generation,
+                        reportMissingRecord: syncFileDownloadRequirement(descriptor, account: account, epoch: control.epoch).reportMissingRecord)
                     continue
                 }
                 throw error
             }
+        }
+    }
+
+    private func syncFileDownloadRequirement(_ descriptor: ClipboardSyncFileDescriptor,
+        account: ClipboardSyncAccount, epoch: UUID) throws -> (ancestryComplete: Bool, reportMissingRecord: Bool) {
+        try syncFileRead { database in
+            let nodes = try Row.fetchAll(database, sql: """
+                SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
+                    guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                    return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                }
+            guard ClipboardSyncVersionGraph.isComplete(nodes) else { return (false, true) }
+            let heads = ClipboardSyncVersionGraph.heads(nodes)
+            guard heads.count > 1, !heads.contains(descriptor.versionID) else { return (true, true) }
+            // A complete conflict graph can retain a historical selection until
+            // the user chooses a head. Its retired bytes are optional unless the
+            // exact version was explicitly requested or pinned.
+            let optionalFallback = try Bool.fetchOne(database, sql: """
+                SELECT current_version_id = ?
+                  AND NOT EXISTS(SELECT 1 FROM clipboard_sync_file_downloads
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND authorized = 1)
+                  AND NOT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                FROM clipboard_sync_file_selections WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString]) ?? false
+            return (true, !optionalFallback)
         }
     }
 

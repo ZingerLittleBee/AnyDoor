@@ -106,10 +106,39 @@ public struct ClipboardHistoryTextConflictResolution: Sendable {
 }
 
 extension ClipboardHistoryModule {
-    static func hasSyncTextConflict(entryID: ClipboardHistoryEntryID, in database: Database) throws -> Bool {
-        guard let basis = try syncTextEditBasis(for: entryID, in: database) else { return false }
-        return ClipboardSyncVersionGraph.heads(try syncVersionNodes(subjectID: basis.subjectID,
-            accountID: basis.accountID, epoch: basis.epoch, in: database)).count > 1
+    static func syncTextConflicts(entryIDs: [String], accountID: String?, in database: Database) throws -> Set<String> {
+        guard !entryIDs.isEmpty, let accountID,
+              let encoded = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID]),
+              let control = try JSONDecoder().decode(ClipboardSyncAccountState.self, from: encoded).control else { return [] }
+        let values = Array(repeating: "(?)", count: entryIDs.count).joined(separator: ",")
+        // Drive entry-leading lookups from the bounded page, even when a large
+        // account makes an account-prefix scan look cheaper to the planner.
+        let rows = try Row.fetchAll(database, sql: """
+            WITH page_entries(entry_id) AS (VALUES \(values))
+            SELECT shared.local_entry_id, shared.account_id, shared.epoch, shared.shared_id, shared.record_id, selection.version_id
+            FROM page_entries CROSS JOIN clipboard_sync_entries AS shared INDEXED BY clipboard_sync_entries_local_entry
+            LEFT JOIN clipboard_sync_version_selections AS selection
+              ON selection.account_id = shared.account_id AND selection.epoch = shared.epoch
+             AND selection.subject_id = shared.shared_id
+            WHERE shared.local_entry_id = page_entries.entry_id AND shared.account_id = ? AND shared.epoch = ?
+            """, arguments: StatementArguments(entryIDs + [accountID, control.epoch.uuidString]))
+        var conflicts = Set<String>()
+        var seenEntries = Set<String>()
+        var subjects: [String: Bool] = [:]
+        for row in rows {
+            let entryID: String = row["local_entry_id"]
+            guard seenEntries.insert(entryID).inserted else { continue }
+            let basis = try syncTextEditBasis(row: row)
+            let conflict: Bool
+            if let cached = subjects[basis.subjectID] { conflict = cached }
+            else {
+                conflict = ClipboardSyncVersionGraph.heads(try syncVersionNodes(subjectID: basis.subjectID,
+                    accountID: basis.accountID, epoch: basis.epoch, in: database)).count > 1
+                subjects[basis.subjectID] = conflict
+            }
+            if conflict { conflicts.insert(entryID) }
+        }
+        return conflicts
     }
 
     public func textEditPlan(for entryID: ClipboardHistoryEntryID) throws -> ClipboardHistoryTextEditPlan {
@@ -286,6 +315,10 @@ extension ClipboardHistoryModule {
              AND selection.subject_id = shared.shared_id
             WHERE shared.local_entry_id = ? AND shared.account_id = ? AND shared.epoch = ?
             """, arguments: [entryID.value.uuidString.lowercased(), boundAccount, control.epoch.uuidString]) else { return nil }
+        return try syncTextEditBasis(row: row)
+    }
+
+    private static func syncTextEditBasis(row: Row) throws -> ClipboardSyncTextEditBasis {
         let accountID: String = row["account_id"]
         let epoch: String = row["epoch"]
         let subjectID: String = row["shared_id"]
@@ -354,28 +387,36 @@ extension ClipboardHistoryModule {
             }
     }
 
-    func stageSyncTextEdits(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        let rows = try Row.fetchAll(database, SQLRequest<Row>(literal: """
+    func stageSyncTextEdits(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterSubject = ""
+        var afterVersion = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, SQLRequest<Row>(literal: """
             SELECT version.subject_id, version.version_id, version.content FROM clipboard_sync_versions AS version
             JOIN clipboard_sync_entries AS shared ON shared.account_id = version.account_id
                 AND shared.epoch = version.epoch AND shared.shared_id = version.subject_id
             JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
             WHERE version.account_id = \(account.identifier) AND version.epoch = \(control.epoch.uuidString)
               AND version.origin = 'local' AND version.record_id IS NULL
+              AND (version.subject_id, version.version_id) > (\(afterSubject), \(afterVersion))
               AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
-            ORDER BY version.created_at, version.version_id
-            """))
-        for row in rows {
-            guard try !Self.isSyncDeleted(row["subject_id"], accountID: account.identifier, epoch: control.epoch.uuidString, in: database) else { continue }
+            ORDER BY version.subject_id, version.version_id LIMIT 1
+            """)) }) {
             let encoded: Data = row["content"]
+            let subject: String = row["subject_id"]
+            afterSubject = subject
+            afterVersion = row["version_id"]
             let edit = try JSONDecoder().decode(ClipboardSyncTextEditContent.self, from: encoded)
-            let upload = try ClipboardSyncCodec.seal(.textEdit(edit), account: account, control: control, key: key, operationID: edit.versionID)
-            try storeSyncUpload(upload, subjectID: row["subject_id"], account: account, in: database)
-            try database.execute(sql: """
-                UPDATE clipboard_sync_versions SET record_id = ?
-                WHERE account_id = ? AND epoch = ? AND subject_id = ? AND version_id = ?
-                """, arguments: [upload.record.recordID, account.identifier, control.epoch.uuidString,
-                    edit.id.uuidString.lowercased(), edit.versionID.uuidString])
+            try await stageSyncOperation(.textEdit(edit), subjectID: subject, operationID: edit.versionID,
+                account: account, control: control, key: key, generation: generation) { database, record in
+                guard try syncSubjectCanStage(subject, account: account, control: control, in: database) else { return false }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_versions SET record_id = ?
+                    WHERE account_id = ? AND epoch = ? AND subject_id = ? AND version_id = ?
+                      AND origin = 'local' AND record_id IS NULL AND content = ?
+                    """, arguments: [record.recordID, account.identifier, control.epoch.uuidString, subject, edit.versionID.uuidString, encoded])
+                return database.changesCount == 1
+            }
         }
     }
 

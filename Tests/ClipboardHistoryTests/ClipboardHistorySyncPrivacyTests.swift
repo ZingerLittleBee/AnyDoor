@@ -161,7 +161,14 @@ extension ClipboardHistoryLinkedFileTests {
             _ = try await receiver.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
             XCTFail("An interrupted ordinary candidate must not materialize")
         } catch ClipboardHistoryModuleError.syncFilesPending { }
-        for candidate in probe.candidates { XCTAssertFalse(FileManager.default.fileExists(atPath: candidate.path)) }
+        let pendingNotices = try await receiver.workingOutputRecoveries()
+        XCTAssertEqual(pendingNotices.count, probe.candidates.count)
+        XCTAssertEqual(Set(pendingNotices.map { $0.url.resolvingSymlinksInPath() }),
+            Set(probe.candidates.map { $0.resolvingSymlinksInPath() }))
+        for notice in pendingNotices {
+            XCTAssertEqual(notice.reason, .incomplete)
+            XCTAssertEqual(try Data(contentsOf: notice.url.appendingPathComponent(memberName)), contents)
+        }
         probe.scan(stage: "interrupted")
         let uploads = await cloud.uploadedRecords()
         XCTAssertTrue(uploads.contains { $0.record.kind == .fileBody })
@@ -173,6 +180,12 @@ extension ClipboardHistoryLinkedFileTests {
             if point == .linkedFileBeforeReplacement { probe.inspectReplacement() }
             return false
         })
+        let retainedNotices = try await reopened.workingOutputRecoveries()
+        XCTAssertEqual(retainedNotices.map(\.id), pendingNotices.map(\.id))
+        for notice in retainedNotices {
+            try await reopened.keepWorkingOutput(notice.id)
+            XCTAssertEqual(try Data(contentsOf: notice.url.appendingPathComponent(memberName)), contents)
+        }
         await reopened.resumeSync()
         await reopened.retrySync()
         let materialized = try await reopened.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))

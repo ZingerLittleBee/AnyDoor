@@ -207,6 +207,49 @@ final class ClipboardFileTree: @unchecked Sendable {
         }
     }
 
+    /// Includes every member's native snapshot as well as content and portable
+    /// metadata. The digest is safe to persist; the inventory remains encrypted.
+    func ownershipFingerprint() throws -> Data {
+        var hash = SHA256()
+        hash.update(data: try stream { _ in }.digest)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        try database.read { db in
+            let cursor = try Row.fetchCursor(db, sql: "SELECT path, snapshot FROM entries ORDER BY path")
+            while let row = try cursor.next() {
+                try Task.checkCancellation()
+                let path: String = row["path"]
+                hash.update(data: Data(path.utf8) + Data([0]))
+                hash.update(data: try encoder.encode(JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"])))
+            }
+        }
+        try verify()
+        return Data(hash.finalize())
+    }
+
+    func ownershipSnapshot(_ path: String) throws -> ClipboardSyncFileSnapshot {
+        try database.read { db in
+            guard let data = try Data.fetchOne(db, sql: "SELECT snapshot FROM entries WHERE path = ?", arguments: [path]) else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+            }
+            return try JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: data)
+        }
+    }
+
+    /// One encrypted inventory row at a time; callers may consult ancestors
+    /// without recursively entering the inventory's database connection.
+    func forEachOwnershipEntry(_ consume: (String, ClipboardSyncFileSnapshot) throws -> Void) throws {
+        var previous: String?
+        while let row = try database.read({ db in
+            try Row.fetchOne(db, sql: "SELECT path, snapshot FROM entries WHERE ? IS NULL OR path < ? ORDER BY path DESC LIMIT 1",
+                arguments: [previous, previous])
+        }) {
+            let path: String = row["path"]
+            try consume(path, JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"]))
+            previous = path
+        }
+    }
+
     @discardableResult
     private func check(_ path: String, snapshot: ClipboardSyncFileSnapshot, rootPath: URL? = nil, afterExchange: Bool = false) throws -> ClipboardSyncFileSnapshot {
         var status = stat()

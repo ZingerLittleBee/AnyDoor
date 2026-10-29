@@ -34,7 +34,23 @@ The active plaintext preferences mirror is retired: startup imports any missing
 legacy identities into the writable encrypted store once, preserving existing
 names and associations, and removes the old value only after success. A durable
 encrypted marker prevents stale copies from resurrecting removed tags on restart;
-failed transactions retain the original value for retry. New tag operations do not
+failed transactions retain the original value for retry. If the first legacy value
+cannot be decoded or has duplicate/empty IDs or blank names, additive migration
+`v31_legacy_tag_recovery` preserves the entire original in SQLCipher before marking
+retirement complete. No definitions from an invalid value are applied; current
+encrypted definitions and memberships remain authoritative. JSON strings retain
+their exact UTF-8 bytes; non-string preference values retain their type and value
+as a binary property list. Actual database failures still fail migration and leave
+the preference available for retry.
+
+Clipboard Settings shows a recovery notice while this retained value exists,
+including after restart. **Export Original Tags** writes the original JSON or
+property list only after the user chooses a destination, with a warning that the
+export is unencrypted. The file is for manual inspection and recovery of missing
+names, not a Config Backup or an automatic import. The encrypted original remains
+available after export and ordinary history clearing; an explicit store reset
+removes it with the rest of the store. There is no plaintext quarantine, automatic
+export, or background synchronization of recovery data. New tag operations do not
 write a mirror. Explicit manual backup export builds definitions in memory from
 the module; import replaces them directly through the module, retaining existing
 memberships for retained IDs and removing memberships of removed IDs. These

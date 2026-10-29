@@ -128,7 +128,12 @@ extension ClipboardHistoryModule {
                     sharedID: subject, accountID: account.identifier, in: database)
             }
             if try !Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database),
-               try !Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) { retired = false }
+               try !Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
+                || Self.hasUnpublishedSyncWithdrawal(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+                // Keep the authenticated version graph until local withdrawal
+                // is acknowledged. Existing authority still gates body receipt.
+                retired = false
+            }
         }
         return retired
     }

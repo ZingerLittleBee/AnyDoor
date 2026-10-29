@@ -220,11 +220,15 @@ extension ClipboardHistoryModule {
                 account: account, control: control, key: key)
             let root = destination.deletingLastPathComponent()
             let candidate = try await ClipboardSyncFilePublication.construct(descriptor: frozen.descriptor,
-                encryptedDirectory: frozen.uploadDirectory, root: root, account: account, control: control, key: key)
-            defer { ClipboardSyncFilePublication.discard(candidate) }
-            let output = try ClipboardSyncFilePublication.publish(candidate, descriptor: frozen.descriptor,
-                root: root, accountID: account.identifier, faults: faultInjector)
-            return try await Task.detached { try ClipboardLinkedFileIO.inspect(output.url, expectedIdentity: output.identity) }.value
+                encryptedDirectory: frozen.uploadDirectory, root: root, account: account, control: control, key: key,
+                ownership: workingOutputJournal())
+            do {
+                let output = try ClipboardSyncFilePublication.publish(candidate, descriptor: frozen.descriptor,
+                    root: root, accountID: account.identifier, faults: faultInjector)
+                let proof = try await Task.detached { try ClipboardLinkedFileIO.inspect(output.url, expectedIdentity: output.identity) }.value
+                await ClipboardSyncFilePublication.discard(candidate)
+                return proof
+            } catch { await ClipboardSyncFilePublication.discard(candidate); throw error }
         }
         return try await Task.detached(priority: .utility) {
             let proof = try ClipboardLinkedIdentityResolution.inspect(source.location)
