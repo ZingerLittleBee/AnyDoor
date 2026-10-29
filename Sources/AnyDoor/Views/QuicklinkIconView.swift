@@ -1,11 +1,11 @@
 import AppKit
 import SwiftUI
 
-struct QuicklinkIconView: View {
+struct QuicklinkIconView<Fallback: View>: View {
     let request: QuicklinkIconRequest?
-    let fallbackSymbol: String
     let size: CGFloat
-    var symbolPointSize: CGFloat = 13
+    /// Drawn until the icon resolves, and in its place when there is none.
+    @ViewBuilder let fallback: () -> Fallback
 
     @State private var resolvedRequest: QuicklinkIconRequest?
     @State private var resolvedIcon: NSImage?
@@ -16,14 +16,11 @@ struct QuicklinkIconView: View {
                 Image(nsImage: icon)
                     .resizable()
                     .interpolation(.high)
+                    .frame(width: size, height: size)
             } else {
-                Image(systemName: fallbackSymbol)
-                    .font(.system(size: symbolPointSize))
-                    .foregroundStyle(.secondary)
-                    .opticallyCentered(symbol: fallbackSymbol, pointSize: symbolPointSize)
+                fallback()
             }
         }
-        .frame(width: size, height: size)
         .task(id: request) {
             guard let request else {
                 resolvedRequest = nil
@@ -47,5 +44,28 @@ struct QuicklinkIconView: View {
         if let cached = QuicklinkIconProvider.cached(request) { return cached }
         guard resolvedRequest == request else { return nil }
         return resolvedIcon
+    }
+}
+
+extension QuicklinkIconView where Fallback == QuicklinkSymbolIcon {
+    init(request: QuicklinkIconRequest?, fallbackSymbol: String, size: CGFloat, symbolPointSize: CGFloat = 13) {
+        self.init(request: request, size: size) {
+            QuicklinkSymbolIcon(symbol: fallbackSymbol, size: size, pointSize: symbolPointSize)
+        }
+    }
+}
+
+/// The default fallback: the Quicklink's symbol, dimmed, in the icon's frame.
+struct QuicklinkSymbolIcon: View {
+    let symbol: String
+    let size: CGFloat
+    let pointSize: CGFloat
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: pointSize))
+            .foregroundStyle(.secondary)
+            .opticallyCentered(symbol: symbol, pointSize: pointSize)
+            .frame(width: size, height: size)
     }
 }

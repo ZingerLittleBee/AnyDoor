@@ -47,7 +47,7 @@ struct CommandPalettePicker: View {
                 // the search field, its placeholder/caret, and the root list can
                 // neither show through nor accept stray input.
                 backHeader
-                Divider().opacity(0.4)
+                CommandPaletteDivider()
                 detailView
             } else {
                 // Argument-input mode carries its own search-field badge (Raycast
@@ -56,7 +56,7 @@ struct CommandPalettePicker: View {
 
                 searchField
 
-                Divider().opacity(0.4)
+                CommandPaletteDivider()
 
                 if state.flatEntries.isEmpty {
                     if let scope = state.activeDevToolScope {
@@ -71,16 +71,16 @@ struct CommandPalettePicker: View {
                 }
 
                 if state.isCurrencyContext {
-                    Divider().opacity(0.4)
+                    CommandPaletteDivider()
                     footerBar
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.
-        // Driving the whole palette from one surface keeps the search field,
-        // rows, and section headers visually consistent.
-        .adaptivePanelSurface(cornerRadius: 16)
+        // Liquid Glass on macOS 26+; .thickMaterial on earlier systems; black in
+        // Dark Mode. Driving the whole palette from one surface keeps the search
+        // field, rows, and section headers visually consistent.
+        .modifier(CommandPaletteSurface(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
@@ -391,7 +391,7 @@ struct CommandPalettePicker: View {
             VStack(spacing: 0) {
                 loadedDetailScroll(markdown: markdown)
                 if !state.detailActions.isEmpty {
-                    Divider().opacity(0.5)
+                    CommandPaletteDivider()
                     HStack(spacing: 8) {
                         Spacer()
                         ForEach(state.detailActions, id: \.id) { action in
@@ -682,9 +682,50 @@ struct CommandPalettePicker: View {
             .textCase(.uppercase)
             .foregroundStyle(.secondary)
             .tracking(0.6)
-            .padding(.horizontal, 22)
+            .padding(.horizontal, 20)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The palette's panel surface. In Dark Mode a black wash sits between the
+/// glass and the content: bare dark glass lifts to mid gray over bright
+/// windows, which washes out the dividers and secondary text. The wash stays
+/// translucent enough for colors behind the palette to show through. Light Mode
+/// keeps the plain glass and must not get even a clear background: any layer
+/// under the content turns light Liquid Glass dark behind the black text.
+private struct CommandPaletteSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content
+                .background(
+                    Color.black.opacity(0.75),
+                    in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+                .adaptivePanelSurface(cornerRadius: cornerRadius)
+        } else {
+            content.adaptivePanelSurface(cornerRadius: cornerRadius)
+        }
+    }
+}
+
+/// The palette's hairline. The system separator is too faint on the Dark Mode
+/// black surface, so Dark Mode draws a brighter line of the same thickness.
+private struct CommandPaletteDivider: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if colorScheme == .dark {
+            Rectangle()
+                .fill(Color.white.opacity(0.2))
+                .frame(height: 1)
+        } else {
+            Divider().opacity(0.4)
+        }
     }
 }
 
@@ -707,34 +748,34 @@ private struct CommandPaletteRow: View {
                 .frame(width: Self.iconSize, height: Self.iconSize)
             titleBlock
             Spacer()
-            if let option, option.isChecked {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            } else if let badge = pluginBadge {
-                Text(badge)
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.secondary.opacity(0.12))
-                    )
-                    .foregroundStyle(.secondary)
-            } else if let hotkey = entry.hotkey {
-                Text(hotkey.displayString(hyperFlags: hyperFlags))
-                    .font(.system(size: 12, design: .rounded))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(Color.secondary.opacity(0.12))
-                    )
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                if let option, option.isChecked {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                } else if let badge = pluginBadge {
+                    Text(badge)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.secondary.opacity(0.12))
+                        )
+                        .foregroundStyle(.secondary)
+                } else if let hotkey = entry.hotkey {
+                    ForEach(Array(hotkey.displayParts(hyperFlags: hyperFlags).enumerated()), id: \.offset) { _, part in
+                        keycap(Text(part).font(.system(size: 12, design: .rounded)), lit: isSelected)
+                    }
+                }
+                // Return commits the selected row; the hint marks which one.
+                if isSelected {
+                    keycap(Image(systemName: "return").font(.system(size: 11, weight: .medium)), lit: true)
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(rowBackground)
@@ -767,7 +808,7 @@ private struct CommandPaletteRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(entry.localizedTitle())
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(option?.role == .destructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                .foregroundStyle(titleStyle)
                 .lineLimit(1)
             if showsSubtitle, let subtitle = entry.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
@@ -781,12 +822,12 @@ private struct CommandPaletteRow: View {
     @ViewBuilder
     private var icon: some View {
         if let request = entry.quicklinkIcon {
-            QuicklinkIconView(
-                request: request,
-                fallbackSymbol: entry.symbol,
-                size: Self.iconSize,
-                symbolPointSize: 13
-            )
+            // Favicons carry no transparent padding, so they keep the smaller
+            // size inside the icon slot instead of filling it like app icons.
+            // A link without one shows its symbol tile like any symbol row.
+            QuicklinkIconView(request: request, size: Self.quicklinkIconSize) {
+                symbolTile
+            }
         } else if iconPath != nil {
             // App-backed row: render the cached icon loaded in `.task`. Never
             // resolve it inside `body` — see the .task comment above.
@@ -800,39 +841,72 @@ private struct CommandPaletteRow: View {
                 }
             }
         } else {
-            // SF Symbols carry no built-in transparent padding, so they need a
-            // smaller point size than the 22pt frame to read at the same visual
-            // weight as NSImage app icons. Built-in toggles read at full
-            // strength; other symbol rows match the dimmer fallback weight.
-            //
-            // A toggle in its on-state gets an accent-tinted badge behind the
-            // glyph (mirroring the menu-bar panel's `iconBadge`), so the active
-            // state is visible right on the icon without a trailing switch. The
-            // glyph color itself never changes — only the badge tint does, like
-            // the menu bar (whose symbol stays `.primary` on and off).
-            Image(systemName: entry.symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .opticallyCentered(symbol: entry.symbol, pointSize: 13)
-                .frame(width: Self.iconSize, height: Self.iconSize)
-                .background {
-                    if isToggleOn {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.22))
-                    }
-                }
+            symbolTile
         }
     }
 
-    /// Side length of the leading icon slot / on-state badge. Kept at the
-    /// original size so row height, alignment and the badge stay unchanged —
-    /// only the glyph drawn inside it is smaller (the 13pt symbol above).
-    private static let iconSize: CGFloat = 22
+    /// SF Symbols sit on a tile the size of an app icon, so symbol and app
+    /// rows line up. The tile and glyph brighten with the row state; a toggle
+    /// in its on-state fills the tile with the accent color, so the active
+    /// state is visible right on the icon without a trailing switch.
+    private var symbolTile: some View {
+        let tile = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let pointSize = SymbolOpticalCentering.balancedPointSize(
+            symbol: entry.symbol, pointSize: 14, side: 13.5, maxSide: 16
+        )
+        return Image(systemName: entry.symbol)
+            .font(.system(size: pointSize))
+            .foregroundStyle(glyphStyle)
+            .opticallyCentered(symbol: entry.symbol, pointSize: pointSize)
+            .frame(width: Self.iconSize, height: Self.iconSize)
+            .background {
+                if isToggleOn {
+                    tile.fill(Color.accentColor)
+                        .overlay {
+                            if isSelected { tile.fill(Color.white.opacity(0.18)) }
+                        }
+                } else {
+                    tile.fill(Color.primary.opacity(isSelected ? 0.15 : isHovering ? 0.09 : 0.06))
+                        .overlay(tile.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                }
+            }
+    }
+
+    /// Side length of the leading icon slot: an app icon or a symbol's tile.
+    private static let iconSize: CGFloat = 26
+    private static let quicklinkIconSize: CGFloat = 22
 
     /// True when this row is a toggle that is currently on. Drives the
-    /// accent-tinted on-state badge behind the icon.
+    /// accent-filled tile behind the icon.
     private var isToggleOn: Bool {
         entry.kind == .toggle && entry.toggleState == true
+    }
+
+    /// Rows step down a level until hovered or selected, so the selected row
+    /// stands out by brightness alone.
+    private var titleStyle: AnyShapeStyle {
+        if option?.role == .destructive { return AnyShapeStyle(.red) }
+        return AnyShapeStyle(Color.primary.opacity(isSelected ? 1 : isHovering ? 0.92 : 0.8))
+    }
+
+    private var glyphStyle: AnyShapeStyle {
+        if isToggleOn { return AnyShapeStyle(.white) }
+        if isSelected { return AnyShapeStyle(.primary) }
+        return isHovering ? AnyShapeStyle(Color.primary.opacity(0.75)) : AnyShapeStyle(.secondary)
+    }
+
+    /// One key of a shortcut, or the selected row's Return hint. Lit caps
+    /// belong to the selected row.
+    private func keycap(_ label: some View, lit: Bool) -> some View {
+        label
+            .foregroundStyle(lit ? AnyShapeStyle(Color.primary.opacity(0.92)) : AnyShapeStyle(.secondary))
+            .frame(minWidth: 10, minHeight: 16)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(lit ? 0.16 : 0.07))
+            )
     }
 
     /// A plugin row's declared trailing status chip (e.g. "开启" on a
@@ -869,11 +943,6 @@ private struct CommandPaletteRow: View {
         }
     }
 
-    private var isBuiltin: Bool {
-        if case .builtin = entry.source { return true }
-        return false
-    }
-
     private var bindingID: UUID {
         if case .appShortcut(let id) = entry.source { return id }
         return UUID()
@@ -881,10 +950,10 @@ private struct CommandPaletteRow: View {
 
     private var rowBackground: Color {
         if isSelected {
-            return Color.accentColor.opacity(0.25)
+            return Color.primary.opacity(0.11)
         }
         if isHovering {
-            return Color.primary.opacity(0.08)
+            return Color.primary.opacity(0.05)
         }
         return Color.clear
     }
@@ -942,7 +1011,7 @@ private struct MarkdownBlocksView: View {
                         .fill(Color.primary.opacity(0.06))
                 )
         case .thematicBreak:
-            Divider().opacity(0.5).padding(.vertical, 2)
+            CommandPaletteDivider().padding(.vertical, 2)
         case .blockquote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
