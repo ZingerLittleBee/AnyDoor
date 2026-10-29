@@ -1,0 +1,119 @@
+import ClipboardHistory
+import SwiftUI
+
+struct ClipboardSyncFileControls: View {
+    let entry: ClipboardHistoryEntry
+    let presentation: ClipboardHistoryPresentationModel
+    @State private var requests: Set<UUID> = []
+    @State private var requestFailures: [UUID: ClipboardHistoryActionFailure] = [:]
+
+    private var pending: [ClipboardHistorySyncFileSummary] {
+        let conflictIDs = Set(conflicts.map(\.id))
+        return entry.syncFiles.filter { file in
+            !conflictIDs.contains(file.id) &&
+                (file.uploadPending || file.state == .waitingForDownload || file.state == .updateAvailable || file.transferFailure != nil)
+        }
+    }
+
+    private var conflicts: [ClipboardHistorySyncFileSummary] {
+        entry.syncFiles.filter { file in
+            file.hasConflict || entry.linkedFileLocations.contains { $0.objectID == file.id && $0.state == .conflict }
+        }
+    }
+
+    private var applicationUpdates: [ClipboardHistoryLinkedFileLocation] {
+        entry.linkedFileLocations.filter { $0.applicationUpdateVersionID != nil }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !pending.isEmpty || !conflicts.isEmpty || !applicationUpdates.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(applicationUpdates) { location in
+                            HStack {
+                                Text(location.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                                    .help(location.url.path)
+                                Spacer(minLength: 4)
+                                Button(L(.clipboardApplicationUpdateTitle)) {
+                                    Task {
+                                        await presentation.beginApplicationUpdate(.init(entryID: entry.id,
+                                            locationID: location.id, expectedRevision: location.revision))
+                                    }
+                                }
+                                .accessibilityLabel(L(.clipboardApplicationUpdateTitle) + ": " + location.url.path)
+                            }
+                        }
+                        ForEach(conflicts) { file in
+                            HStack {
+                                Text(file.displayName).lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 4)
+                                Button(L(.clipboardFileConflictTitle)) {
+                                    Task { await presentation.beginFileConflict(entryID: entry.id, objectID: file.id) }
+                                }
+                                .accessibilityLabel(L(.clipboardFileConflictTitle) + ": " + file.displayName)
+                            }
+                        }
+                        ForEach(pending) { file in
+                            let actionTitle = L(file.transferFailure == nil && !file.downloadRequested && !file.uploadPending
+                                ? .clipboardSyncFileDownload : .settingsClipboardSyncRetry)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(file.displayName).lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 4)
+                                    Button(actionTitle) {
+                                        requests.insert(file.versionID)
+                                        requestFailures[file.versionID] = nil
+                                        Task {
+                                            requestFailures[file.versionID] = await presentation.transferSyncFile(file, entryID: entry.id)
+                                            requests.remove(file.versionID)
+                                        }
+                                    }
+                                    .disabled(requests.contains(file.versionID))
+                                    .accessibilityLabel(actionTitle + ": " + file.displayName)
+                                }
+                                if let total = file.transferTotalByteCount ?? file.originalByteCount, file.downloadRequested || file.uploadPending {
+                                    ProgressView(value: Double(min(total, file.transferredByteCount)), total: Double(max(1, total)))
+                                        .accessibilityLabel(file.displayName)
+                                    Text(L(.clipboardSyncFileProgress,
+                                        ByteCountFormatter.string(fromByteCount: file.transferredByteCount, countStyle: .file),
+                                        ByteCountFormatter.string(fromByteCount: total, countStyle: .file)))
+                                        .foregroundStyle(.secondary)
+                                }
+                                if requestFailures[file.versionID] != nil {
+                                    LocalizedText(.clipboardSyncFileRequestFailed)
+                                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                } else if let failure = file.transferFailure {
+                                    Text(failureText(failure)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 72)
+                .font(.caption)
+                .controlSize(.small)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { presentation.fileConflictEntryID == entry.id },
+            set: { if !$0 && presentation.fileConflictEntryID == entry.id { presentation.dismissFileConflict() } }
+        )) {
+            ClipboardFileConflictSheet(presentation: presentation)
+        }
+        .sheet(isPresented: Binding(
+            get: { presentation.applicationUpdateSelection?.entryID == entry.id },
+            set: { if !$0 && presentation.applicationUpdateSelection?.entryID == entry.id { presentation.dismissApplicationUpdate() } }
+        )) {
+            ClipboardApplicationUpdateSheet(presentation: presentation)
+        }
+        .onDisappear {
+            if presentation.fileConflictEntryID == entry.id { presentation.dismissFileConflict() }
+            if presentation.applicationUpdateSelection?.entryID == entry.id { presentation.dismissApplicationUpdate() }
+        }
+    }
+
+    private func failureText(_ failure: ClipboardHistorySyncFileFailure) -> String {
+        L(failure.presentationMessageKey)
+    }
+}

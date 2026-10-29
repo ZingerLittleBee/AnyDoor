@@ -71,8 +71,15 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             -> ClipboardHistoryLegacyCleanupReport
     let retryStore: @Sendable () async -> Void
     let resetStore: @Sendable () async throws -> Void
+    let resumeSync: @Sendable () async -> Void
+    let suspendSync: @Sendable () async -> Void
+    let importLegacyTagDefinitions: @Sendable (ClipboardHistoryLegacyTagPreference) async throws
+        -> ClipboardHistoryLegacyTagPreference.Format?
+    let legacyTagRecovery: @Sendable () async throws -> ClipboardHistoryLegacyTagPreference?
 
     init(module: ClipboardHistoryModule) {
+        importLegacyTagDefinitions = { try await module.importLegacyTagDefinitions($0) }
+        legacyTagRecovery = { try await module.legacyTagRecovery() }
         status = {
             await module.status()
         }
@@ -100,6 +107,12 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         resetStore = {
             try await module.reset(confirmation: .confirmed)
         }
+        resumeSync = {
+            await module.resumeSync()
+        }
+        suspendSync = {
+            await module.suspendSync()
+        }
     }
 
     init(
@@ -121,7 +134,12 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             @escaping @Sendable (URL) async throws
                 -> ClipboardHistoryLegacyCleanupReport,
         retryStore: @escaping @Sendable () async -> Void,
-        resetStore: @escaping @Sendable () async throws -> Void
+        resetStore: @escaping @Sendable () async throws -> Void,
+        resumeSync: @escaping @Sendable () async -> Void = {},
+        suspendSync: @escaping @Sendable () async -> Void = {},
+        importLegacyTagDefinitions: @escaping @Sendable (ClipboardHistoryLegacyTagPreference) async throws
+            -> ClipboardHistoryLegacyTagPreference.Format? = { _ in nil },
+        legacyTagRecovery: @escaping @Sendable () async throws -> ClipboardHistoryLegacyTagPreference? = { nil }
     ) {
         self.status = status
         self.setMonitoring = setMonitoring
@@ -131,6 +149,10 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         self.cleanupLegacyPayloads = cleanupLegacyPayloads
         self.retryStore = retryStore
         self.resetStore = resetStore
+        self.resumeSync = resumeSync
+        self.suspendSync = suspendSync
+        self.importLegacyTagDefinitions = importLegacyTagDefinitions
+        self.legacyTagRecovery = legacyTagRecovery
     }
 }
 
@@ -160,6 +182,7 @@ final class ClipboardHistoryLifecycle {
     private(set) var state: ClipboardHistoryLifecycleState = .preparing
     private(set) var migrationReport:
         ClipboardHistoryLegacyMigrationReport?
+    private(set) var legacyTagRecoveryFormat: ClipboardHistoryLegacyTagPreference.Format?
     /// Set once this process has seen the pre-v2 cutover complete. A cutover
     /// never comes undone, so the `.preparing` pass of a later retry does not
     /// hold explicit captures back.
@@ -345,6 +368,7 @@ final class ClipboardHistoryLifecycle {
             unlockNotifications.removeObserver(screenUnlockObserver)
             self.screenUnlockObserver = nil
         }
+        await operations.suspendSync()
         _ = await operations.setMonitoring(
             .stop,
             ClipboardPreferences.monitoringConfiguration(from: defaults)
@@ -531,10 +555,19 @@ final class ClipboardHistoryLifecycle {
         }
         guard cleanupState != .completed else {
             hasConfirmedLegacyCutover = true
+            do {
+                try await retireLegacyTagDefaults()
+            } catch {
+                state = .migrationFailed
+                return
+            }
+            guard !Task.isCancelled, generation == requestGeneration else { return }
             state = .ready
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
             }
+            guard !Task.isCancelled, generation == requestGeneration else { return }
+            await operations.resumeSync()
             return
         }
         _ = await operations.setMonitoring(
@@ -614,6 +647,7 @@ final class ClipboardHistoryLifecycle {
                 try finishMigration()
             }
             hasConfirmedLegacyCutover = true
+            try await retireLegacyTagDefaults()
             _ = await operations.setMonitoring(
                 .migrationCompleted,
                 configuration
@@ -625,6 +659,8 @@ final class ClipboardHistoryLifecycle {
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
             }
+            guard !Task.isCancelled, generation == requestGeneration else { return }
+            await operations.resumeSync()
         } catch ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(
             let entryCount
         ) {
@@ -640,6 +676,20 @@ final class ClipboardHistoryLifecycle {
             )
             state = .migrationFailed
         }
+    }
+
+    private func retireLegacyTagDefaults() async throws {
+        legacyTagRecoveryFormat = try await operations.importLegacyTagDefinitions(
+            ClipboardHistoryPortableSettings.legacyTagPreference(from: defaults))
+        defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+    }
+
+    /// Called only after the user chooses a destination in the recovery Save panel.
+    func exportLegacyTagRecovery(to destination: URL) async throws {
+        guard state == .ready, let source = try await operations.legacyTagRecovery() else {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        try source.data.write(to: destination, options: .atomic)
     }
 
     /// Names `error` for the log by what failed, never by what it carries:

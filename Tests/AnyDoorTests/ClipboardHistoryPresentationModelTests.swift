@@ -8,6 +8,34 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryPresentationModelTests: XCTestCase {
+    func testFileTransferActionUsesDisplayedVersionAndInvalidatesMaterialization() async {
+        let value = entry(1)
+        let recorder = FileTransferActionRecorder()
+        let operations = ClipboardHistoryPresentationOperations(
+            status: { .init(availability: .ready, isMonitoring: true, searchIndex: .ready) },
+            page: { _, _ in .init(entries: [value], nextCursor: nil, cursorDisposition: .initial) },
+            apply: { _ in .notFound }, materialize: { _ in .init(items: []) }, tagDefinitions: { [] },
+            requestSyncFileDownload: { entryID, objectID, versionID in await recorder.download(entryID, objectID, versionID) },
+            retrySyncFileTransfer: { await recorder.retry() })
+        let model = ClipboardHistoryPresentationModel(operations: operations)
+        let object = UUID(), version = UUID()
+        _ = await model.materialization(for: value.id, purpose: .hostAction)
+        await model.transferSyncFile(.init(id: object, versionID: version, displayName: "File.bin",
+            originalByteCount: 5_000_001, state: .waitingForDownload), entryID: value.id)
+        let requests = await recorder.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.0, value.id)
+        XCTAssertEqual(requests.first?.1, object)
+        XCTAssertEqual(requests.first?.2, version)
+        XCTAssertNil(model.cachedMaterialization(for: value.id, purpose: .hostAction))
+        await model.transferSyncFile(.init(id: object, versionID: version, displayName: "File.bin",
+            originalByteCount: 5_000_001, state: .complete, uploadPending: true), entryID: value.id)
+        let retries = await recorder.retries
+        let downloads = await recorder.requests.count
+        XCTAssertEqual(retries, 1)
+        XCTAssertEqual(downloads, 1)
+    }
+
     func testInitialLoadPublishesFirstPageAndSelectsNewestEntry() async {
         let first = entry(1)
         let second = entry(2)
@@ -2930,4 +2958,13 @@ private struct TemporaryHistoryStore {
             )
         )
     }
+}
+
+private actor FileTransferActionRecorder {
+    private(set) var requests: [(ClipboardHistoryEntryID, UUID, UUID)] = []
+    private(set) var retries = 0
+    func download(_ entryID: ClipboardHistoryEntryID, _ objectID: UUID, _ versionID: UUID) {
+        requests.append((entryID, objectID, versionID))
+    }
+    func retry() { retries += 1 }
 }

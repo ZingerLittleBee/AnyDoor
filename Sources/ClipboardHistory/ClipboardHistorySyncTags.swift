@@ -1,0 +1,249 @@
+import Foundation
+import GRDB
+
+struct ClipboardSyncTagRevision: Codable, Equatable, Comparable, Sendable {
+    let counter: Int64
+    let operationID: String
+
+    static let initial = Self(counter: 0, operationID: "")
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.counter == rhs.counter ? lhs.operationID < rhs.operationID : lhs.counter < rhs.counter
+    }
+}
+
+struct ClipboardSyncTagMembership: Codable, Equatable, Sendable {
+    let sharedID: String
+    let tagID: String
+    let present: Bool
+    let revision: ClipboardSyncTagRevision
+}
+
+extension ClipboardHistoryModule {
+    static func createSyncTagSchema(in database: Database) throws {
+        try database.execute(sql: """
+            CREATE TABLE clipboard_sync_tag_clock (id INTEGER PRIMARY KEY CHECK(id = 1), counter INTEGER NOT NULL);
+            INSERT INTO clipboard_sync_tag_clock VALUES (1, 0);
+            CREATE TABLE clipboard_sync_tag_states (
+                account_id TEXT NOT NULL, tag_id TEXT NOT NULL, state BLOB NOT NULL, pending INTEGER NOT NULL,
+                PRIMARY KEY(account_id, tag_id)
+            ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_tag_aliases (
+                account_id TEXT NOT NULL, alias_id TEXT NOT NULL, canonical_id TEXT NOT NULL,
+                PRIMARY KEY(account_id, alias_id)
+            ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_tag_merge_outbox (
+                operation_id TEXT PRIMARY KEY NOT NULL, account_id TEXT NOT NULL, content BLOB NOT NULL
+            );
+            CREATE TABLE clipboard_sync_tag_blocked_entries (
+                account_id TEXT NOT NULL, local_entry_id TEXT NOT NULL,
+                PRIMARY KEY(account_id, local_entry_id)
+            ) WITHOUT ROWID;
+            CREATE TABLE clipboard_sync_memberships (
+                account_id TEXT NOT NULL, epoch TEXT NOT NULL, shared_id TEXT NOT NULL, tag_id TEXT NOT NULL,
+                present INTEGER NOT NULL, counter INTEGER NOT NULL, operation_id TEXT NOT NULL,
+                pending INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(account_id, epoch, shared_id, tag_id)
+            ) WITHOUT ROWID;
+            """)
+    }
+
+    func nextSyncTagRevision(in database: Database) throws -> ClipboardSyncTagRevision {
+        try database.execute(sql: "UPDATE clipboard_sync_tag_clock SET counter = counter + 1 WHERE id = 1")
+        return ClipboardSyncTagRevision(counter: try Int64.fetchOne(database,
+            sql: "SELECT counter FROM clipboard_sync_tag_clock WHERE id = 1") ?? 1,
+            operationID: UUID().uuidString.lowercased())
+    }
+
+    func observeSyncTagRevision(_ revision: ClipboardSyncTagRevision, in database: Database) throws {
+        guard revision.counter >= 0, revision.counter < Int64.max, !revision.operationID.isEmpty else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        try database.execute(sql: "UPDATE clipboard_sync_tag_clock SET counter = MAX(counter, ?) WHERE id = 1",
+            arguments: [revision.counter])
+    }
+
+    /// Initial snapshots seed only absent associations. Later operations win even
+    /// when metadata is delivered before the entry or in a different page order.
+    func seedSyncMemberships(_ tags: [ClipboardSyncTagContent], sharedID: String, localID: String,
+                             account: ClipboardSyncAccount, epoch: UUID, in database: Database) throws {
+        for tag in tags {
+            let tagID = try canonicalSyncTagID(tag.id, accountID: account.identifier, in: database)
+            try database.execute(sql: """
+                INSERT OR IGNORE INTO clipboard_sync_memberships
+                    (account_id, epoch, shared_id, tag_id, present, counter, operation_id)
+                VALUES (?, ?, ?, ?, 1, 0, '')
+                """, arguments: [account.identifier, epoch.uuidString, sharedID, tagID])
+        }
+        try applySyncMemberships(sharedID: sharedID, localID: localID, account: account, epoch: epoch, in: database)
+    }
+
+    /// Snapshot local differences before applying incoming operations. A local
+    /// edit made while a provider request is suspended must not be overwritten.
+    func recordLocalSyncMemberships(account: ClipboardSyncAccount, epoch: UUID,
+        sharedID: String? = nil, tagID: String? = nil, in database: Database) throws {
+        let selected: Set<String>
+        if let tagID {
+            selected = Set(try String.fetchAll(database, sql: """
+                SELECT tag.tag_id FROM clipboard_sync_tags AS tag
+                JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
+                WHERE tag.account_id = ? AND tag.tag_id = ? AND tag.selected = 1
+                """, arguments: [account.identifier, tagID]))
+        } else {
+            selected = Set(try selectedSyncTags(accountID: account.identifier, in: database).map(\.id))
+        }
+        let entries: [Row]
+        if let sharedID {
+            entries = try Row.fetchAll(database, sql: """
+                SELECT shared_id, local_entry_id FROM clipboard_sync_entries
+                WHERE account_id = ? AND epoch = ? AND shared_id = ?
+                """, arguments: [account.identifier, epoch.uuidString, sharedID])
+        } else {
+            entries = try Row.fetchAll(database, sql: """
+                SELECT shared_id, local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ?
+                """, arguments: [account.identifier, epoch.uuidString])
+        }
+        for entry in entries {
+            let sharedID: String = entry["shared_id"]
+            let localID: String = entry["local_entry_id"]
+            let current = Set(try String.fetchAll(database,
+                sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID])).intersection(selected)
+            guard try !Self.isSyncDeleted(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database) else { continue }
+            let withdrawn = try Self.isSyncWithdrawn(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database)
+            for tagID in selected.sorted() {
+                let previous = try Bool.fetchOne(database, sql: """
+                    SELECT present FROM clipboard_sync_memberships
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ?
+                    """, arguments: [account.identifier, epoch.uuidString, sharedID, tagID]) ?? false
+                let present = current.contains(tagID)
+                guard previous != present, !withdrawn || !present else { continue }
+                try saveSyncMembership(.init(sharedID: sharedID, tagID: tagID, present: present,
+                    revision: nextSyncTagRevision(in: database)), account: account, epoch: epoch, pending: true, in: database)
+            }
+        }
+    }
+
+    func recordLocalSyncMemberships(before content: ClipboardSyncContent, account: ClipboardSyncAccount,
+        epoch: UUID, in database: Database) throws {
+        switch content {
+        case .tagState, .tagMerge:
+            try recordLocalSyncMemberships(account: account, epoch: epoch, in: database)
+        case .withdrawal(let value):
+            try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: value.sharedID, in: database)
+        case .deletion(let value):
+            try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: value.sharedID, in: database)
+        case .entry, .text, .textEdit, .metadata, .rejoin, .tagMembership:
+            if let subject = content.entrySubjectID {
+                try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: subject, in: database)
+            }
+        case .tag, .fileBody, .fileVersion:
+            break
+        }
+    }
+
+    func stageSyncMemberships(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterSubject = ""
+        var afterTag = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, sql: """
+            SELECT * FROM clipboard_sync_memberships WHERE account_id = ? AND epoch = ? AND pending = 1
+              AND (shared_id, tag_id) > (?, ?) ORDER BY shared_id, tag_id LIMIT 1
+            """, arguments: [account.identifier, control.epoch.uuidString, afterSubject, afterTag]) }) {
+            let membership = syncMembership(from: row)
+            afterSubject = membership.sharedID
+            afterTag = membership.tagID
+            try await stageSyncOperation(.tagMembership(membership), subjectID: membership.sharedID,
+                account: account, control: control, key: key, generation: generation) { database, _ in
+                // The source assignment/selection may change without updating
+                // this register until its next snapshot. Recheck only this pair.
+                guard try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_tags AS tag
+                    JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
+                    WHERE tag.account_id = ? AND tag.tag_id = ? AND tag.selected = 1)
+                    """, arguments: [account.identifier, membership.tagID]) == true else { return false }
+                try recordLocalSyncMemberships(account: account, epoch: control.epoch,
+                    sharedID: membership.sharedID, tagID: membership.tagID, in: database)
+                guard try !Self.isSyncDeleted(membership.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database),
+                      try !membership.present || syncSubjectCanStage(membership.sharedID, account: account, control: control, in: database) else { return false }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_memberships SET pending = 0
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ? AND pending = 1
+                      AND counter = ? AND operation_id = ? AND present = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, membership.sharedID, membership.tagID,
+                        membership.revision.counter, membership.revision.operationID, membership.present])
+                return database.changesCount == 1
+            }
+        }
+    }
+
+    func importSyncMembership(_ membership: ClipboardSyncTagMembership, account: ClipboardSyncAccount,
+                              epoch: UUID, in database: Database) throws {
+        guard UUID(uuidString: membership.sharedID) != nil, !membership.tagID.isEmpty else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        try observeSyncTagRevision(membership.revision, in: database)
+        let membership = ClipboardSyncTagMembership(sharedID: membership.sharedID,
+            tagID: try canonicalSyncTagID(membership.tagID, accountID: account.identifier, in: database),
+            present: membership.present, revision: membership.revision)
+        if let previous = try Row.fetchOne(database, sql: """
+            SELECT * FROM clipboard_sync_memberships WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ?
+            """, arguments: [account.identifier, epoch.uuidString, membership.sharedID, membership.tagID]),
+           syncMembership(from: previous).revision >= membership.revision { return }
+        try saveSyncMembership(membership, account: account, epoch: epoch, pending: false, in: database)
+        if let localID = try String.fetchOne(database, sql: """
+            SELECT local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
+            """, arguments: [account.identifier, epoch.uuidString, membership.sharedID]) {
+            try applySyncMemberships(sharedID: membership.sharedID, localID: localID, account: account, epoch: epoch, in: database)
+        }
+    }
+
+    private func syncMembership(from row: Row) -> ClipboardSyncTagMembership {
+        .init(sharedID: row["shared_id"], tagID: row["tag_id"], present: row["present"],
+            revision: .init(counter: row["counter"], operationID: row["operation_id"]))
+    }
+
+    private func saveSyncMembership(_ value: ClipboardSyncTagMembership, account: ClipboardSyncAccount,
+                                    epoch: UUID, pending: Bool, in database: Database) throws {
+        try database.execute(sql: """
+            INSERT INTO clipboard_sync_memberships(account_id, epoch, shared_id, tag_id, present, counter, operation_id, pending)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, epoch, shared_id, tag_id) DO UPDATE SET
+                present = excluded.present, counter = excluded.counter, operation_id = excluded.operation_id, pending = excluded.pending
+            """, arguments: [account.identifier, epoch.uuidString, value.sharedID, value.tagID,
+                value.present, value.revision.counter, value.revision.operationID, pending])
+    }
+
+    func applyAllSyncMemberships(account: ClipboardSyncAccount, epoch: UUID, in database: Database) throws {
+        for row in try Row.fetchAll(database, sql: "SELECT shared_id, local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ?",
+            arguments: [account.identifier, epoch.uuidString]) {
+            try applySyncMemberships(sharedID: row["shared_id"], localID: row["local_entry_id"], account: account, epoch: epoch, in: database)
+        }
+    }
+
+    func applySyncMemberships(sharedID: String, localID: String, account: ClipboardSyncAccount,
+                                      epoch: UUID, in database: Database) throws {
+        guard try !Self.isSyncDeleted(sharedID, accountID: account.identifier, epoch: epoch.uuidString, in: database),
+              try Bool.fetchOne(database, sql: "SELECT EXISTS(SELECT 1 FROM clipboard_entries WHERE id = ?)",
+                arguments: [localID]) == true else { return }
+        let wasProtected = try protectionState(for: localID, in: database)
+        let rows = try Row.fetchAll(database, sql: """
+            SELECT membership.tag_id, membership.present FROM clipboard_sync_memberships AS membership
+            JOIN clipboard_sync_tags AS tag ON tag.account_id = membership.account_id AND tag.tag_id = membership.tag_id
+            JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
+            WHERE membership.account_id = ? AND membership.epoch = ? AND membership.shared_id = ? AND tag.selected = 1
+            """, arguments: [account.identifier, epoch.uuidString, sharedID])
+        for row in rows {
+            let tagID: String = row["tag_id"]
+            if row["present"] as Bool {
+                try database.execute(sql: "INSERT OR IGNORE INTO clipboard_entry_tags(entry_id, tag_id) VALUES (?, ?)",
+                    arguments: [localID, tagID])
+            } else {
+                try database.execute(sql: "DELETE FROM clipboard_entry_tags WHERE entry_id = ? AND tag_id = ?",
+                    arguments: [localID, tagID])
+            }
+        }
+        let isProtected = try recomputeProtection(for: localID, in: database)
+        if wasProtected && !isProtected {
+            try resetRetentionStart(for: localID, to: now(), in: database)
+        }
+    }
+}

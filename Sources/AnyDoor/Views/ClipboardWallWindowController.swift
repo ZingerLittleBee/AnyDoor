@@ -13,6 +13,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     static let shared = ClipboardWallWindowController()
 
     private var configuredState: ClipboardWallState?
+    private var clipboardModule: ClipboardHistoryModule?
     private var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
     private var state: ClipboardWallState {
         guard let configuredState else {
@@ -94,6 +95,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         lifecycle: ClipboardHistoryLifecycle
     ) {
         guard configuredState == nil else { return }
+        clipboardModule = module
         configuredState = ClipboardWallState(
             presentation: ClipboardHistoryPresentationModel(module: module)
         )
@@ -124,6 +126,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Never resurface a stale tag dialog (it may pin a deleted item).
         state.tagDialog = nil
         state.tagDialogText = ""
+        state.presentation.dismissFileConflict()
+        state.presentation.dismissApplicationUpdate()
         // A rebuild started from an earlier session reports nothing here.
         state.forgetUserRebuild()
         // Seed from the live flags: ⌥ may already be held when the wall opens,
@@ -218,6 +222,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     ) {
         // The floating panels have no life of their own once the wall goes away.
         closePreviews()
+        configuredState?.presentation.dismissFileConflict()
+        configuredState?.presentation.dismissApplicationUpdate()
         guard let window, window.isVisible, let screen = NSScreen.main else {
             // Nothing on screen to slide out. Settling runs what was queued
             // now, so none of it can run in a later session.
@@ -285,6 +291,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                 )
             },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
+            onOpenFiles: { [weak self] item in self?.openFiles(item) },
+            onSaveFiles: { [weak self] item in self?.saveFiles(item) },
+            onAssociateFile: { [weak self] item, objectID in self?.associateFile(item, objectID: objectID) },
+            onReassociateFile: { [weak self] selection in self?.reassociateFile(selection) },
+            onSetFileLocationPaused: { [weak self] selection, paused in self?.setFileLocationPaused(selection, paused: paused) },
+            onRevealLinkedLocation: { NSWorkspace.shared.activateFileViewerSelecting([$0]) },
             onDelete: { [weak self] item in
                 self?.performMutation(.delete(item.id))
             },
@@ -351,7 +363,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             MainThreadIsolation.run {
                 guard let self else { return }
                 // Don't throw away an in-progress edit on a stray outside click.
-                if ClipboardTextWindow.shared.isEditing { return }
+                if ClipboardTextWindow.shared.isEditing || self.state.presentation.hasFileActionSheet { return }
                 if ClipboardQuickLookWindow.shared.containsMouseEvent(event) { return }
                 self.dismiss(restoreFocus: false)
             }
@@ -371,6 +383,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             MainThreadIsolation.run {
                 guard let self, self.window?.isVisible == true,
                       !ClipboardTextWindow.shared.isEditing,
+                      !self.state.presentation.hasFileActionSheet,
                       ClipboardWallDismissalPolicy.shouldDismissAfterActivatingApplication(
                         hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
                         activatedProcessID: processID,
@@ -415,6 +428,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // cards advance under it). This subsumes the old floating-text-panel
         // check, since that panel is a different window.
         guard event.window === window else { return false }
+        if state.presentation.hasFileActionSheet { return false }
         // The selection must not change behind the tag dialog's modal dimmer.
         if state.tagDialog != nil { return true }
         // The top strip (tab row + search field) hosts its own horizontal
@@ -444,6 +458,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // The native conflict sheet owns Return, Escape, and candidate navigation.
+        if state.presentation.hasFileActionSheet { return false }
         // Once the wall is closing, or a dismissal waits for the slide-in,
         // keys no longer act on it: a quick ⌫ after Return must not delete
         // the selected entry, and a second Return must not commit again.
@@ -734,27 +750,38 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// wall stays open behind it (windowDidResignKey exempts the text panel);
     /// key status returns to the wall when the editor closes.
     private func beginEdit(_ entry: ClipboardHistoryEntry) {
+        guard let module = clipboardModule else { return }
         Task { [self] in
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .hostAction
-                ),
-                let text = materialization.editableText
-            else {
-                presentActionFailure()
-                return
-            }
-            ClipboardTextWindow.shared.showEditor(
-                entry: entry,
-                text: text,
-                onSave: { [weak self] text in
-                    self?.performMutation(.editText(entry.id, text))
-                },
-                onClose: { [weak self] in
-                    self?.window?.makeKey()
+            do {
+                var plan = try await module.textEditPlan(for: entry.id)
+                if plan.hasConflict {
+                    ClipboardTextWindow.shared.showConflict(
+                        entry: entry,
+                        plan: plan,
+                        onResolve: { versionID in
+                            _ = try await module.resolveTextConflict(.init(plan: plan, versionID: versionID))
+                        },
+                        reload: {
+                            plan = try await module.textEditPlan(for: entry.id)
+                            return plan.versions
+                        },
+                        onClose: { [weak self] in self?.window?.makeKey() }
+                    )
+                } else {
+                    let editPlan = plan
+                    ClipboardTextWindow.shared.showEditor(
+                        entry: entry,
+                        text: plan.text,
+                        onSave: { text in
+                            let outcome = try await module.saveTextEdit(text, using: editPlan)
+                            if case .notFound = outcome { throw ClipboardHistoryModuleError.entryNotFound }
+                        },
+                        onClose: { [weak self] in self?.window?.makeKey() }
+                    )
                 }
-            )
+            } catch {
+                ClipboardHistoryActionFailurePresenter.present(ClipboardHistoryActionFailure(error))
+            }
         }
     }
 
@@ -1019,8 +1046,94 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         }
     }
 
-    /// "Reveal in Finder" from a file card's context menu. Prefers each entry's
-    /// original path; falls back to the stored copy when the original is gone.
+    private func openFiles(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let content = await state.presentation.materialization(for: entry.id, purpose: .hostAction, usesCache: false),
+                  !content.fileURLs.isEmpty else { presentActionFailure(); return }
+            for url in content.fileURLs {
+                if !NSWorkspace.shared.open(url) { ClipboardHistoryActionFailurePresenter.present(.operationUnavailable) }
+            }
+        }
+    }
+
+    private func associateFile(_ entry: ClipboardHistoryEntry, objectID: UUID) {
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardLinkedFileAssociate)
+        panel.message = L(.clipboardLinkedFileAssociateMessage)
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if !(await state.presentation.associateFileLocation(.init(entryID: entry.id, objectID: objectID, url: url))) {
+                presentActionFailure()
+            }
+        }
+    }
+
+    private func reassociateFile(_ selection: ClipboardHistoryFileLocationSelection) {
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardLinkedFileReassociate)
+        panel.message = L(.clipboardLinkedFileReassociateMessage)
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            if !(await state.presentation.reassociateFileLocation(.init(selection: selection, url: url))) {
+                presentFileLocationFailure()
+            }
+        }
+    }
+
+    private func setFileLocationPaused(_ selection: ClipboardHistoryFileLocationSelection, paused: Bool) {
+        Task {
+            if !(await state.presentation.setFileLocationPaused(selection, paused: paused)) {
+                presentFileLocationFailure()
+            }
+        }
+    }
+
+    private func presentFileLocationFailure() {
+        if state.presentation.actionFailure == .operationUnavailable {
+            ToastPresenter.shared.show(.failure(L(.clipboardLinkedFileActionChanged)))
+        } else {
+            presentActionFailure()
+        }
+    }
+
+    private func saveFiles(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let content = await state.presentation.materialization(for: entry.id, purpose: .hostAction, usesCache: false),
+                  !content.fileURLs.isEmpty else { presentActionFailure(); return }
+            let destinations: [URL]
+            if content.fileURLs.count == 1, let source = content.fileURLs.first {
+                let picker = ClipboardFileExportPicker()
+                guard let url = picker.chooseDestination(suggestedName: source.lastPathComponent) else { return }
+                destinations = [url]
+            } else {
+                let panel = NSOpenPanel()
+                panel.title = L(.clipboardActionSaveFiles)
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = false
+                panel.canCreateDirectories = true
+                panel.allowsMultipleSelection = false
+                guard panel.runModal() == .OK, let directory = panel.url else { return }
+                do {
+                    destinations = try ClipboardFileExportPicker().destinations(for: content.fileURLs, in: directory)
+                } catch {
+                    ClipboardHistoryActionFailurePresenter.present(ClipboardHistoryActionFailure(error))
+                    return
+                }
+            }
+            if !(await state.presentation.exportFiles(entry.id, to: destinations)) { presentActionFailure() }
+        }
+    }
+
+    /// "Reveal in Finder" uses the module's complete local references or synced
+    /// working copies. Unavailable members fail the complete entry first.
     /// Activating Finder resigns the wall's key status and dismisses it, which
     /// is fine — the user is leaving for Finder anyway.
     private func revealInFinder(_ entry: ClipboardHistoryEntry) {
@@ -1152,12 +1265,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func presentPreview(for entry: ClipboardHistoryEntry) {
         previewTask?.cancel()
         previewTask = Task {
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .fullPreview
-                ),
-                !Task.isCancelled,
+            let content = await state.presentation.previewMaterialization(for: entry.id)
+            guard !Task.isCancelled else { return }
+            guard let materialization = content,
                 state.selectedItem?.id == entry.id
             else {
                 if state.presentation.actionFailure != nil {
@@ -1187,6 +1297,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func windowWillClose(_ notification: Notification) {
+        configuredState?.presentation.dismissFileConflict()
         removeMonitors()
     }
     func windowDidResignKey(_ notification: Notification) {
@@ -1200,7 +1311,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             hasTextWindow: ClipboardTextWindow.shared.isVisible,
             hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
             isOpening: lifecycle.phase == .opening,
-            openedOverAnotherApp: previousApp != nil
+            openedOverAnotherApp: previousApp != nil,
+            hasFileConflictSheet: configuredState?.presentation.fileConflictEntryID != nil,
+            hasApplicationUpdateSheet: configuredState?.presentation.applicationUpdateSelection != nil
         ) else { return }
         // A click elsewhere already moved focus; don't yank it back.
         dismiss(restoreFocus: false)
@@ -1220,10 +1333,12 @@ enum ClipboardWallDismissalPolicy {
         hasTextWindow: Bool,
         hasQuickLook: Bool,
         isOpening: Bool,
-        openedOverAnotherApp: Bool
+        openedOverAnotherApp: Bool,
+        hasFileConflictSheet: Bool = false,
+        hasApplicationUpdateSheet: Bool = false
     ) -> Bool {
         if isOpening && !openedOverAnotherApp { return false }
-        return !hasTextWindow && !hasQuickLook
+        return !hasTextWindow && !hasQuickLook && !hasFileConflictSheet && !hasApplicationUpdateSheet
     }
 
     static func shouldDismissAfterActivatingApplication(

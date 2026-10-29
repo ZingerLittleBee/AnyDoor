@@ -78,6 +78,37 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.folderPath, folder.path)
     }
 
+    func testEnablingSyncRetiresSavedTagsWithoutClearingLocalDefinitions() async throws {
+        let tagKey = SyncKey.setting(key: ClipboardHistoryPortableKeys.customTags)
+        let localTags = #"[{"id":"local","name":"Local"}]"#
+        defaults.set("upgrade-device", forKey: SyncDefaultsKeys.deviceID)
+        defaults.set(localTags, forKey: ClipboardHistoryPortableKeys.customTags)
+        var document = SyncDocument(deviceID: "upgrade-device")
+        document.entries[tagKey] = SyncEntry(
+            payload: .setting(.string(#"[{"id":"old","name":"Old shared tag"}]"#)),
+            clock: SyncTimestamp(wallMillis: 1_000, counter: 0, deviceID: "upgrade-device")
+        )
+        try SyncLocalStateStore(url: stateURL).save(SyncLocalState(
+            clock: SyncClock(deviceID: "upgrade-device"), document: document
+        ))
+        let coordinator = makeCoordinator()
+        coordinator.bootstrap(modelContainer: container)
+        coordinator.configureFolder(folder)
+        defer { coordinator.disable() }
+
+        await waitUntil("the upgraded device to sync") { coordinator.hasSynced }
+
+        let published = try SyncStateCodec.decode(
+            SyncDocument.self,
+            from: Data(contentsOf: folder.appendingPathComponent(
+                SyncStateFile.name(forDeviceID: "upgrade-device")
+            ))
+        )
+        XCTAssertNil(published.entries[tagKey])
+        XCTAssertNil(try XCTUnwrap(SyncLocalStateStore(url: stateURL).load()).document.entries[tagKey])
+        XCTAssertEqual(defaults.string(forKey: ClipboardHistoryPortableKeys.customTags), localTags)
+    }
+
     func testConfigureWebDAVValidationAndPersistence() async throws {
         let service = "SyncCoordinatorTests-\(UUID().uuidString)"
         let credentials = SyncWebDAVCredentialStore(service: service)

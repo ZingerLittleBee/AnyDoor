@@ -1,5 +1,7 @@
 import XCTest
 import SwiftData
+import ClipboardHistoryTestSupport
+@testable import ClipboardHistory
 @testable import AnyDoor
 
 final class BackupServiceTests: XCTestCase {
@@ -37,7 +39,7 @@ final class BackupServiceTests: XCTestCase {
                                     appPathResolver: { _ in nil })
         let snapshot = try service.exportSnapshot()
 
-        XCTAssertEqual(snapshot.schemaVersion, BackupSnapshot.currentSchemaVersion)
+        XCTAssertEqual(snapshot.schemaVersion, 2, "Configuration without same-name tag identities remains readable by older clients")
         XCTAssertEqual(snapshot.appShortcuts.count, 1)
         XCTAssertEqual(snapshot.appShortcuts.first?.appBundleID, "com.apple.Safari")
         XCTAssertEqual(snapshot.builtinPreferences.first?.itemKey, "darkMode")
@@ -72,14 +74,16 @@ final class BackupServiceTests: XCTestCase {
 
     @MainActor
     func testClipboardBackupCarriesOnlyPortableDefinitionsAndRules()
-        throws
+        async throws
     {
         let context = try makeContext()
         let defaults = makeDefaults()
-        defaults.set(
-            "[{\"id\":\"work\",\"name\":\"Work\"}]",
-            forKey: ClipboardHistoryPortableKeys.customTags
-        )
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingDatabaseURL: directory.appendingPathComponent("history.sqlite"), databaseKey: Data(repeating: 0x42, count: 32)))
+        _ = try await module.replaceTagDefinitions(with: [.init(id: "work", displayName: "Work")])
         defaults.set(
             "[\"all\",\"tag:work\"]",
             forKey: ClipboardCategoryOrder.defaultsKey
@@ -108,11 +112,13 @@ final class BackupServiceTests: XCTestCase {
             forKey: "clipboard.historyPayload"
         )
 
-        let snapshot = try BackupService(
+        let snapshot = try await BackupService(
             context: context,
             defaults: defaults,
-            appPathResolver: { _ in nil }
-        ).exportSnapshot()
+            appPathResolver: { _ in nil },
+            currentClipboardTags: { try await module.tagDefinitions() }
+        ).exportCurrentSnapshot()
+        XCTAssertNil(defaults.object(forKey: ClipboardHistoryPortableKeys.customTags))
 
         XCTAssertNotNil(
             snapshot.settings[ClipboardHistoryPortableKeys.customTags]

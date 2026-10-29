@@ -1,3 +1,4 @@
+import AppKit
 import ClipboardHistoryTestSupport
 import Foundation
 import XCTest
@@ -10,7 +11,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testClearDefaultsToUnprotectedAndRefreshesStaleCount()
         async throws
     {
-        let fixture = try SettingsFixture(testCase: self)
+        let fixture = try await SettingsFixture(testCase: self)
         let first = try await fixture.module.capture(
             request("first")
         )
@@ -54,7 +55,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testClearIncludingProtectedPreservesTagDefinitions()
         async throws
     {
-        let fixture = try SettingsFixture(testCase: self)
+        let fixture = try await SettingsFixture(testCase: self)
         let entry = try await fixture.module.capture(request("tagged"))
         let assignment = try await fixture.module.createTagDefinition(
             named: "Keep Definition",
@@ -75,7 +76,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     }
 
     func testRefreshReadsThirtyDayAndOCRDefaults() async throws {
-        let fixture = try SettingsFixture(testCase: self)
+        let fixture = try await SettingsFixture(testCase: self)
 
         await fixture.model.refresh()
 
@@ -89,7 +90,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testFirstShowAndClipboardSelectedReopenRefreshFreshUsage()
         async throws
     {
-        let fixture = try SettingsFixture(testCase: self)
+        let fixture = try await SettingsFixture(testCase: self)
         fixture.presentation.selectedTab = .clipboard
 
         fixture.presentation.recordShow()
@@ -124,7 +125,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         async throws
     {
         let usageReader = ControlledStorageUsageReader()
-        let fixture = try SettingsFixture(
+        let fixture = try await SettingsFixture(
             testCase: self,
             refreshOperations: usageReader.operations
         )
@@ -159,7 +160,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
             let presentation = SettingsPresentation(
                 selectedTab: .clipboard
             )
-            let fixture = try SettingsFixture(
+            let fixture = try await SettingsFixture(
                 testCase: self,
                 presentation: presentation,
                 refreshOperations: usageReader.operations
@@ -205,7 +206,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         async throws
     {
         let presentation = SettingsPresentation(selectedTab: .clipboard)
-        let fixture = try SettingsFixture(
+        let fixture = try await SettingsFixture(
             testCase: self,
             presentation: presentation,
             refreshOperations: .alwaysFailing
@@ -252,7 +253,7 @@ private struct SettingsFixture {
         testCase: XCTestCase,
         presentation: SettingsPresentation = SettingsPresentation(),
         refreshOperations: ClipboardHistorySettingsRefreshOperations? = nil
-    ) throws {
+    ) async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
@@ -267,6 +268,17 @@ private struct SettingsFixture {
                 databaseKey: Data(repeating: 0x31, count: 32)
             )
         )
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("ClipboardHistorySettingsModelTests-\(UUID().uuidString)")
+        )
+        testCase.addTeardownBlock { @MainActor in pasteboard.releaseGlobally() }
+        await module.installCaptureMonitorForTesting(ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            sourceProvider: { nil },
+            isKeychainUnlocked: { true },
+            installsSystemObservers: false
+        ))
         defaults = testCase.makeTemporaryDefaults()
         lifecycle = ClipboardHistoryLifecycle(
             module: module,

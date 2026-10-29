@@ -61,6 +61,8 @@ public actor ClipboardHistoryModule {
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
+    /// Ordinary editable files are deliberately separate from encrypted storage.
+    let syncWorkingRoot: URL
     /// Moves a store out of the pre-v2 folder before every open. Nil only
     /// for test modules that do not model the legacy folder.
     let relocation: ClipboardHistoryStoreRelocation?
@@ -87,6 +89,8 @@ public actor ClipboardHistoryModule {
     nonisolated let derivedJobBootstrap =
         ClipboardHistoryDerivedJobBootstrap()
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    var legacyTagImportTask: Task<ClipboardHistoryLegacyTagImportResult, Error>?
+    var legacyTagImportStoreTransitions = 0
     private var nextWriteTurn = 0
     private var currentWriteTurn = 0
     private var writeTurnWaiters: [CheckedContinuation<Void, Never>] = []
@@ -97,6 +101,27 @@ public actor ClipboardHistoryModule {
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
+    var syncServices: ClipboardSyncServices?
+    var syncPhase: ClipboardHistorySyncPhase = .disabled
+    var deferredSyncFileFailure: ClipboardHistorySyncPhase?
+    var syncGeneration: UInt64 = 0
+    var activeFileConflictResolutions: Set<UUID> = []
+    var syncTask: Task<Void, Never>?
+    var syncPollTask: Task<Void, Never>?
+    var syncRerunRequested = false
+    var syncExplicitRerunRequested = false
+    var prioritizedSyncFileDownloads: Set<UUID> = []
+    var linkedFileObservers: [UUID: ClipboardLinkedFileObservation] = [:]
+    var linkedFileReconciliationTask: Task<Void, Never>?
+    let linkedFileMutationGate = ClipboardLinkedFileMutationGate()
+    var linkedFileObservationTasks: [UUID: Task<Void, Never>] = [:]
+    var linkedFileObservationRevisions: [UUID: UInt64] = [:]
+    var linkedFileIdentityEvents: [UUID: ClipboardLinkedFileIdentityEvent] = [:]
+    var linkedFileObservationCache: [UUID: ClipboardLinkedObservationCache] = [:]
+    var applicationRunningGuards: [UUID: ClipboardApplicationRunningGuard] = [:]
+    var activeApplicationUpdates: Set<UUID> = []
+    var syncSuspended = true
+    var syncAccountBindingGeneration: UInt64?
 
     /// The `appBuild` of a build without a `CFBundleVersion` (`swift run`),
     /// fixed so that relaunching one never resets the retry budget.
@@ -112,6 +137,7 @@ public actor ClipboardHistoryModule {
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
         captureNoticeHandler = captureNotices
         notificationCenter = .default
+        syncServices = .production()
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
@@ -145,6 +171,8 @@ public actor ClipboardHistoryModule {
             maintenanceDate: Date()
         )
         storeRoot = root
+        syncWorkingRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/AnyDoor/Clipboard", isDirectory: true)
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
@@ -168,6 +196,7 @@ public actor ClipboardHistoryModule {
             .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
+                try? await self?.recoverWorkingOutputs()
                 await self?.startMaintenanceTaskIfNeeded()
             }
         )
@@ -197,6 +226,8 @@ public actor ClipboardHistoryModule {
             suppression: suppression
         )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
+        syncWorkingRoot = testingDatabaseURL.deletingLastPathComponent()
+            .appendingPathComponent("Linked Working Copies", isDirectory: true)
         relocation = nil
         keyStore = nil
         self.faultInjector = faultInjector
@@ -257,7 +288,10 @@ public actor ClipboardHistoryModule {
             ClipboardHistoryVisionRecognizer(),
         notificationCenter: NotificationCenter = .default,
         captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil,
-        appBuild: String = unversionedAppBuild
+        appBuild: String = unversionedAppBuild,
+        syncServices: ClipboardSyncServices? = nil,
+        testingSyncWorkingRoot: URL? = nil,
+        testingDatabasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -278,14 +312,18 @@ public actor ClipboardHistoryModule {
             relocation: relocation,
             at: testingStoreRoot,
             keyStore: keyStore,
-            maintenanceDate: now()
+            maintenanceDate: now(),
+            databasePreparation: testingDatabasePreparation
         )
         storeRoot = testingStoreRoot
+        syncWorkingRoot = testingSyncWorkingRoot
+            ?? testingStoreRoot.appendingPathComponent("Linked Working Copies", isDirectory: true)
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
         self.appBuild = appBuild
         self.now = now
+        self.syncServices = syncServices
         self.maintenanceScheduler = maintenanceScheduler
         self.storageTraversalHook = storageTraversalHook
         self.fingerprintDigest = fingerprintDigest
@@ -304,6 +342,7 @@ public actor ClipboardHistoryModule {
             .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
+                try? await self?.recoverWorkingOutputs()
                 await self?.startMaintenanceTaskIfNeeded()
             }
         )
@@ -366,6 +405,9 @@ public actor ClipboardHistoryModule {
 
     public func retry() async {
         guard let keyStore else { return }
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
+        await stopLegacyTagImport()
         await stopMaintenanceTask()
         await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
@@ -455,6 +497,7 @@ public actor ClipboardHistoryModule {
             name: .clipboardHistoryV2DidMutate,
             object: nil
         )
+        scheduleSync()
     }
 
     func installCaptureMonitorForTesting(
@@ -490,11 +533,11 @@ extension ClipboardHistoryModule {
 
     /// Whether `waitForWriteTurn()` would suspend right now.
     var mustWaitForWriteTurn: Bool {
-        searchIndexRebuildTask != nil || nextWriteTurn != currentWriteTurn
+        searchIndexRebuildTask != nil || legacyTagImportTask != nil || nextWriteTurn != currentWriteTurn
     }
 
-    /// Suspends until no search index rebuild is in flight and every writer
-    /// that arrived earlier has had its turn; returns at once otherwise.
+    /// Suspends until no owned legacy import or search index rebuild is in
+    /// flight and every earlier writer has had its turn; returns at once otherwise.
     ///
     /// A rebuild holds the pool's writer for one long transaction, about a
     /// minute on a large store. A synchronous `write` issued on this actor
@@ -517,7 +560,10 @@ extension ClipboardHistoryModule {
         let turn = nextWriteTurn
         nextWriteTurn += 1
         while true {
-            if let rebuild = searchIndexRebuildTask {
+            if let importing = legacyTagImportTask {
+                _ = try? await importing.value
+                if legacyTagImportTask == importing { legacyTagImportTask = nil }
+            } else if let rebuild = searchIndexRebuildTask {
                 _ = await rebuild.value
                 // A retry or reset may have started another one meanwhile.
                 if searchIndexRebuildTask == rebuild {
@@ -552,6 +598,10 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         isClosingStore = true
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
+        await stopLegacyTagImport()
+        await suspendSync()
         // The monitor holds this module strongly. Drop it before the first
         // suspension, so a reentrant caller cannot reuse a monitor that is
         // being torn down. A setMonitoring call during or after the close
@@ -649,7 +699,8 @@ extension ClipboardHistoryModule {
     static func resolveStore(
         at root: URL,
         keyStore: any ClipboardHistoryMasterKeyStoring,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) -> StoreResolution {
         let databaseURL = databaseURL(in: root)
         let databaseExists = FileManager.default.fileExists(
@@ -692,7 +743,8 @@ extension ClipboardHistoryModule {
         return openStore(
             at: root,
             keys: ClipboardHistoryKeyDerivation.deriveV1(from: masterKey),
-            maintenanceDate: maintenanceDate
+            maintenanceDate: maintenanceDate,
+            databasePreparation: databasePreparation
         )
     }
 
@@ -700,14 +752,16 @@ extension ClipboardHistoryModule {
     static func openStore(
         at root: URL,
         keys: ClipboardHistoryDerivedKeys,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) -> StoreResolution {
         do {
             try prepareStoreDirectories(at: root)
 
             let database = try openDatabase(
                 at: databaseURL(in: root),
-                databaseKey: keys.databaseKey
+                databaseKey: keys.databaseKey,
+                databasePreparation: databasePreparation
             )
             try database.write { database in
                 _ = try ensureMaintenanceDeadline(
@@ -759,7 +813,8 @@ extension ClipboardHistoryModule {
     static func openDatabase(
         at databaseURL: URL,
         databaseKey: Data,
-        migrationTarget: String? = nil
+        migrationTarget: String? = nil,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) throws -> DatabasePool {
         let existed = FileManager.default.fileExists(atPath: databaseURL.path)
         var configuration = Configuration()
@@ -773,6 +828,7 @@ extension ClipboardHistoryModule {
             try database.execute(sql: "PRAGMA secure_delete = ON")
             // Reclaim a previously busy WAL when the next writer resets it.
             try database.execute(sql: "PRAGMA journal_size_limit = 0")
+            try databasePreparation?(database)
         }
 
         do {

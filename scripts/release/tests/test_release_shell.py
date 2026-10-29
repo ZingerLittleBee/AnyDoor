@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ import textwrap
 import unittest
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RELEASE_DIR = Path(__file__).resolve().parents[1]
@@ -32,6 +34,34 @@ TEAM_ID = release_conf.get("APPLE_TEAM_ID")
 MIN_MACOS = release_conf.get("MIN_MACOS")
 IS_DARWIN = sys.platform == "darwin"
 SAFE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+CERTIFICATE = b"fixture Developer ID certificate"
+IDENTITY = hashlib.sha1(CERTIFICATE).hexdigest().upper()
+
+FAKE_CMS = """
+import os, pathlib, sys
+if os.environ.get("FAKE_CMS_FAILURE"):
+    sys.exit(1)
+assert sys.argv[1:3] == ["cms", "-D"]
+sys.stdout.buffer.write(pathlib.Path(sys.argv[sys.argv.index("-i") + 1]).read_bytes())
+"""
+
+
+def profile_fixture() -> dict[str, object]:
+    return {
+        "ExpirationDate": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=90),
+        "Platform": ["OSX"],
+        "TeamIdentifier": ["9VM4RM39R3"],
+        "ProvisionsAllDevices": True,
+        "DeveloperCertificates": [CERTIFICATE],
+        "Entitlements": {
+            "com.apple.application-identifier": "9VM4RM39R3.dev.bybee.AnyDoor",
+            "com.apple.developer.team-identifier": "9VM4RM39R3",
+            "com.apple.developer.icloud-container-identifiers": ["iCloud.dev.bybee.AnyDoor"],
+            "com.apple.developer.icloud-services": ["CloudKit"],
+            "com.apple.developer.icloud-container-environment": "Production",
+            "keychain-access-groups": ["9VM4RM39R3.*"],
+        },
+    }
 
 
 @dataclass
@@ -316,12 +346,22 @@ class NotarizeTests(FakeToolTestCase):
 
 
 FAKE_CODESIGN = """
-import json, os, sys
+import json, os, pathlib, plistlib, sys
 
 argv = sys.argv[1:]
-with open(os.environ["FAKE_CALLS"], "a") as handle:
-    handle.write(json.dumps({"tool": "codesign", "argv": argv}) + "\\n")
 target = argv[-1]
+record = {"tool": "codesign", "argv": argv}
+state_path = pathlib.Path(os.environ["FAKE_SIGNED_STATE"])
+state = json.loads(state_path.read_text()) if state_path.exists() else {}
+if "--sign" in argv and "--entitlements" in argv:
+    values = plistlib.loads(pathlib.Path(argv[argv.index("--entitlements") + 1]).read_bytes())
+    record["entitlements"] = values
+    root = pathlib.Path(target.split(".app", 1)[0] + ".app")
+    record["embedded_profile_present"] = (root / "Contents/embedded.provisionprofile").is_file()
+    state[target] = values
+    state_path.write_text(json.dumps(state))
+with open(os.environ["FAKE_CALLS"], "a") as handle:
+    handle.write(json.dumps(record) + "\\n")
 if "--sign" in argv:
     marker = os.environ.get("FAKE_FAIL_ONCE", "")
     if marker and target.endswith(marker):
@@ -333,8 +373,14 @@ if "--sign" in argv:
     sys.exit(0)
 if "--verify" in argv:
     sys.exit(0)
+if "--extract-certificates" in argv:
+    pathlib.Path(argv[argv.index("--extract-certificates") + 1] + "0").write_bytes(b"fixture Developer ID certificate")
+    sys.exit(0)
 if "--entitlements" in argv:
-    print(os.environ.get("FAKE_ENTITLEMENTS", "[Key] com.apple.security.automation.apple-events [Value] [Bool] true"))
+    if "FAKE_ENTITLEMENTS" in os.environ:
+        print(os.environ["FAKE_ENTITLEMENTS"])
+    else:
+        sys.stdout.buffer.write(plistlib.dumps(state[target]))
     sys.exit(0)
 flags = os.environ.get("FAKE_FLAGS", "0x10000(runtime)")
 sys.stderr.write(f"Executable={target}\\nCodeDirectory v=20500 size=1 flags={flags} hashes=1+7 location=embedded\\n")
@@ -343,13 +389,11 @@ team = next((value for suffix, value in teams.items() if target.endswith(suffix)
 sys.stderr.write(f"TeamIdentifier={team}\\n")
 """
 
-IDENTITY = "0123456789ABCDEF0123456789ABCDEF01234567"
-
-
 class CodesignTests(FakeToolTestCase):
     def setUp(self) -> None:
         super().setUp()
         write_executable(self.bin / "codesign", FAKE_CODESIGN)
+        write_executable(self.bin / "security", FAKE_CMS)
         self.app = self.root / "AnyDoor.app"
         contents = self.app / "Contents"
         sparkle = contents / "Frameworks" / "Sparkle.framework" / "Versions" / "B"
@@ -366,6 +410,12 @@ class CodesignTests(FakeToolTestCase):
             binary.write_bytes(b"binary")
         self.keychain = self.root / "signing.keychain-db"
         self.keychain.write_bytes(b"keychain")
+        (contents / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "dev.bybee.AnyDoor"}))
+        self.profile = self.root / "AnyDoor.provisionprofile"
+        self.profile.write_bytes(plistlib.dumps(profile_fixture()))
+
+    def environment(self, **overrides: str) -> dict[str, str]:
+        return super().environment(FAKE_SIGNED_STATE=str(self.root / "signed.json"), **overrides)
 
     def sign_calls(self) -> list[list[str]]:
         return [argv for argv in self.recorded("codesign") if "--sign" in argv]
@@ -373,9 +423,43 @@ class CodesignTests(FakeToolTestCase):
     def signed_targets(self) -> list[str]:
         return [os.path.relpath(argv[-1], self.app) for argv in self.sign_calls()]
 
+    def test_developer_id_requires_a_profile_before_signing(self) -> None:
+        result = self.run_script(
+            "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            env=self.environment(FAKE_TEAM=TEAM_ID),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--profile is required for Developer ID", result.stderr)
+        self.assertEqual(self.sign_calls(), [])
+
+    def test_profile_rejection_precedes_all_signatures(self) -> None:
+        profile = profile_fixture()
+        profile["ExpirationDate"] = datetime(2020, 1, 1)
+        self.profile.write_bytes(plistlib.dumps(profile))
+        result = self.run_script(
+            "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            "--profile", str(self.profile), env=self.environment(FAKE_TEAM=TEAM_ID),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("expired", result.stderr)
+        self.assertEqual(self.sign_calls(), [])
+
+    def test_ad_hoc_signing_rejects_a_provisioning_profile(self) -> None:
+        result = self.run_script(
+            "codesign.sh", "--app", str(self.app), "--identity", "-",
+            "--profile", str(self.profile), env=self.environment(),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ad-hoc signing cannot include", result.stderr)
+        self.assertEqual(self.sign_calls(), [])
+
     def test_developer_id_signs_depth_first_with_runtime_timestamp_and_team(self) -> None:
         result = self.run_script(
             "codesign.sh", "--app", str(self.app), "--identity", IDENTITY, "--keychain", str(self.keychain),
+            "--profile", str(self.profile),
             env=self.environment(FAKE_TEAM=TEAM_ID),
         )
 
@@ -393,7 +477,6 @@ class CodesignTests(FakeToolTestCase):
             "Contents/MacOS/AnyDoor",
             ".",
         ])
-        entitlements = str(REPO_ROOT / "Resources" / "AnyDoor.entitlements")
         for argv in self.sign_calls():
             self.assertIn("--force", argv)
             self.assertIn("--options=runtime", argv)
@@ -402,8 +485,11 @@ class CodesignTests(FakeToolTestCase):
             self.assertEqual(argv[argv.index("--keychain") + 1], str(self.keychain))
             expects_entitlements = argv[-1] in (str(self.app), str(self.app / "Contents/MacOS/AnyDoor"))
             self.assertEqual("--entitlements" in argv, expects_entitlements, argv[-1])
-            if expects_entitlements:
-                self.assertEqual(argv[argv.index("--entitlements") + 1], entitlements)
+        records = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        for record in (record for record in records if "entitlements" in record):
+            self.assertTrue(record["embedded_profile_present"])
+            self.assertEqual(record["entitlements"]["keychain-access-groups"], ["9VM4RM39R3.dev.bybee.AnyDoor"])
+            self.assertEqual(record["entitlements"]["com.apple.developer.icloud-container-identifiers"], ["iCloud.dev.bybee.AnyDoor"])
         self.assertIn(["--verify", "--deep", "--strict", "--verbose=2", str(self.app)], self.recorded("codesign"))
         team_checks = [argv[-1] for argv in self.recorded("codesign") if argv[:2] == ["-d", "--verbose=4"]]
         self.assertCountEqual(set(team_checks), [argv[-1] for argv in self.sign_calls()])
@@ -415,6 +501,7 @@ class CodesignTests(FakeToolTestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("native Clipboard Sync unavailable", result.stderr)
         self.assertEqual(len(self.sign_calls()), 10)
         for argv in self.sign_calls():
             self.assertNotIn("--timestamp", argv)
@@ -425,6 +512,7 @@ class CodesignTests(FakeToolTestCase):
     def test_foreign_team_on_nested_code_fails(self) -> None:
         result = self.run_script(
             "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            "--profile", str(self.profile),
             env=self.environment(FAKE_TEAM=TEAM_ID, FAKE_TEAMS=json.dumps({"AnyDoorHostsHelper": "ZZZZZZZZZZ"})),
         )
 
@@ -434,6 +522,7 @@ class CodesignTests(FakeToolTestCase):
     def test_missing_apple_events_entitlement_fails(self) -> None:
         result = self.run_script(
             "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            "--profile", str(self.profile),
             env=self.environment(FAKE_TEAM=TEAM_ID, FAKE_ENTITLEMENTS="[Dict]"),
         )
 
@@ -443,6 +532,7 @@ class CodesignTests(FakeToolTestCase):
     def test_missing_hardened_runtime_fails(self) -> None:
         result = self.run_script(
             "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            "--profile", str(self.profile),
             env=self.environment(FAKE_TEAM=TEAM_ID, FAKE_FLAGS="0x0(none)"),
         )
 
@@ -452,6 +542,7 @@ class CodesignTests(FakeToolTestCase):
     def test_transient_failure_retries_that_signature_once(self) -> None:
         result = self.run_script(
             "codesign.sh", "--app", str(self.app), "--identity", IDENTITY,
+            "--profile", str(self.profile),
             env=self.environment(FAKE_TEAM=TEAM_ID, FAKE_FAIL_ONCE="SQLCipher.framework"),
         )
 

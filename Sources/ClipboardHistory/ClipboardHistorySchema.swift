@@ -183,6 +183,101 @@ extension ClipboardHistoryModule {
                     """, arguments: [entryID])
             }
         }
+        migrator.registerMigration("v14_clipboard_sync") { database in
+            try Self.createSyncSchema(in: database)
+        }
+        migrator.registerMigration("v15_clipboard_sync_tags") { database in
+            try Self.createSyncTagSchema(in: database)
+        }
+        migrator.registerMigration("v16_clipboard_sync_recovery") { database in
+            try database.execute(sql: """
+                CREATE TABLE clipboard_sync_recovery (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    phase BLOB,
+                    retry_not_before REAL
+                );
+                INSERT INTO clipboard_sync_recovery(id) VALUES (1);
+                """)
+        }
+        migrator.registerMigration("v17_clipboard_sync_content") { database in
+            try Self.createSyncContentSchema(in: database)
+        }
+        migrator.registerMigration("v18_clipboard_sync_versions") { database in
+            try Self.createSyncVersionSchema(in: database)
+        }
+        migrator.registerMigration("v19_clipboard_sync_files") { database in
+            try Self.createSyncFileSchema(in: database)
+        }
+        migrator.registerMigration("v20_clipboard_sync_reset") { database in
+            try database.execute(sql: """
+                CREATE TABLE clipboard_sync_reset (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    activation_authorized INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO clipboard_sync_reset(id) VALUES (1);
+                CREATE TABLE clipboard_sync_resets (
+                    account_id TEXT PRIMARY KEY NOT NULL,
+                    journal BLOB NOT NULL
+                ) WITHOUT ROWID;
+                CREATE TABLE clipboard_sync_reset_exclusions (
+                    account_id TEXT NOT NULL,
+                    local_entry_id TEXT NOT NULL REFERENCES clipboard_entries(id) ON DELETE CASCADE,
+                    PRIMARY KEY(account_id, local_entry_id)
+                ) WITHOUT ROWID;
+                """)
+        }
+        migrator.registerMigration("v21_clipboard_sync_withdrawal") { database in
+            try Self.createSyncWithdrawalSchema(in: database)
+        }
+        migrator.registerMigration("v22_clipboard_sync_deletion") { database in
+            try Self.createSyncDeletionSchema(in: database)
+        }
+        migrator.registerMigration("v23_clipboard_sync_downloads") { database in
+            try Self.createSyncDownloadSchema(in: database)
+        }
+        migrator.registerMigration("v24_clipboard_linked_locations") { database in
+            try Self.createLinkedFileSchema(in: database)
+        }
+        migrator.registerMigration("v25_clipboard_sync_file_identity") { database in
+            try Self.createLinkedFileIdentitySchema(in: database)
+        }
+        migrator.registerMigration("v26_clipboard_sync_file_conflicts") { database in
+            try Self.createSyncFileConflictSchema(in: database)
+        }
+        migrator.registerMigration("v27_clipboard_sync_directory_versions") { database in
+            // Keep advertised descriptors immutable. Locally owned trees from
+            // the old unsupported format publish a new child version on resume.
+            try database.execute(sql: """
+                UPDATE clipboard_sync_file_versions SET transfer_state = 'pendingUpload'
+                WHERE transfer_state = 'unsupportedKind' AND local_bookmark IS NOT NULL AND local_identity IS NOT NULL
+                """)
+        }
+        migrator.registerMigration("v28_clipboard_sync_application_updates") { database in
+            try Self.createApplicationUpdateSchema(in: database)
+        }
+        migrator.registerMigration("v29_clipboard_sync_file_lifecycle") { database in
+            try Self.createSyncFileLifecycleSchema(in: database)
+        }
+        migrator.registerMigration("v30_clipboard_sync_file_retries") { database in
+            try Self.createSyncFileRetrySchema(in: database)
+        }
+        migrator.registerMigration("v31_legacy_tag_recovery") { database in
+            try Self.createLegacyTagRecoverySchema(in: database)
+        }
+        migrator.registerMigration("v32_working_output_recovery") { database in
+            try Self.createWorkingOutputRecoverySchema(in: database)
+        }
+        migrator.registerMigration("v33_clipboard_sync_page_indexes") { database in
+            try database.execute(sql: """
+                CREATE INDEX clipboard_sync_entries_local_entry
+                    ON clipboard_sync_entries(local_entry_id, account_id, epoch);
+                CREATE INDEX clipboard_sync_file_members_entry
+                    ON clipboard_sync_file_members(entry_id, account_id, epoch);
+                """)
+        }
+        migrator.registerMigration("v34_working_output_members") { database in
+            try Self.createWorkingOutputMemberSchema(in: database)
+        }
         return migrator
     }
 

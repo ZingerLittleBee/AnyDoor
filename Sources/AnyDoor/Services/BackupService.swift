@@ -5,13 +5,23 @@ import PluginInterface
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.
-struct ImportSummary: Equatable {
+struct ImportSummary: Equatable, Sendable {
     var shortcutsUpdated: Int
     var shortcutsInserted: Int
     var preferencesUpdated: Int
     var quicklinksUpdated: Int
     var quicklinksInserted: Int
     var settingsApplied: Int
+}
+
+struct BackupImportPartialFailure: Error {
+    let summary: ImportSummary
+    let clipboardTagsError: any Error
+    let runtimeError: (any Error)?
+}
+
+enum BackupImportIssue: Error {
+    case clipboardTagsOmitted
 }
 
 /// Gathers local config into a `BackupSnapshot` (export) and merges a snapshot
@@ -26,6 +36,12 @@ final class BackupService {
     private let defaults: UserDefaults
     private let appPathResolver: (String) -> String?
     private let reconcileRuntime: @MainActor () async throws -> Void
+    private let currentClipboardTags: @MainActor () async throws -> [ClipboardHistoryTagDefinition]?
+    private static var readClipboardTags: @MainActor () async throws -> [ClipboardHistoryTagDefinition]? = { nil }
+    private let restoreClipboardTags: @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void
+    private static var writeClipboardTags: @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void = { _ in
+        throw ClipboardHistoryModuleError.operationUnavailable
+    }
 
     /// - Parameter appPathResolver: bundleID → absolute path. Defaults to
     ///   `NSWorkspace`. Injected as `{ _ in nil }` in tests.
@@ -35,6 +51,12 @@ final class BackupService {
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
         },
+        currentClipboardTags: @escaping @MainActor () async throws -> [ClipboardHistoryTagDefinition]? = {
+            try await BackupService.readClipboardTags()
+        },
+        restoreClipboardTags: @escaping @MainActor ([ClipboardHistoryTagDefinition]) async throws -> Void = {
+            try await BackupService.writeClipboardTags($0)
+        },
         reconcileRuntime: @escaping @MainActor () async throws -> Void = {
             try await BackupService.reconcileLiveRuntime()
         }
@@ -43,21 +65,47 @@ final class BackupService {
         self.defaults = defaults
         self.appPathResolver = appPathResolver
         self.reconcileRuntime = reconcileRuntime
+        self.currentClipboardTags = currentClipboardTags
+        self.restoreClipboardTags = restoreClipboardTags
     }
 
     static func configureClipboardHistoryRuntime(
         module: ClipboardHistoryModule,
         lifecycle: ClipboardHistoryLifecycle
     ) {
-        reconcileClipboardHistory = {
-            try await ClipboardHistoryPortableSettings.reconcile(
-                module: module
-            )
-            await lifecycle.refreshMonitoringConfiguration()
+        readClipboardTags = {
+            guard lifecycle.state == .ready else { throw ClipboardHistoryModuleError.operationUnavailable }
+            return try await module.tagDefinitions()
         }
+        writeClipboardTags = { definitions in
+            guard lifecycle.state == .ready else { throw ClipboardHistoryModuleError.operationUnavailable }
+            _ = try await module.replaceTagDefinitions(with: definitions)
+        }
+        reconcileClipboardHistory = { await lifecycle.refreshMonitoringConfiguration() }
     }
 
     // MARK: - Export
+
+    func exportCurrentSnapshot() async throws -> BackupSnapshot {
+        var snapshot = try exportSnapshot()
+        do {
+            guard let definitions = try await currentClipboardTags() else {
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
+            snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string(try ClipboardHistoryPortableSettings.encode(definitions))
+            let names = definitions.map { $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if Set(names).count != names.count {
+                // Older readers reject duplicate names only after applying
+                // other config. Require a reader that preserves both IDs.
+                snapshot.schemaVersion = BackupSnapshot.currentSchemaVersion
+            }
+        } catch {
+            // A missing field leaves destination tags unchanged on import;
+            // an empty list would instead explicitly remove them.
+            snapshot.omittedSections = [.clipboardTags]
+        }
+        return snapshot
+    }
 
     /// Throws if a store read fails, so a transient fetch error surfaces to the
     /// caller instead of silently producing (and writing) an empty backup that
@@ -92,7 +140,7 @@ final class BackupService {
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 
         return BackupSnapshot(
-            schemaVersion: BackupSnapshot.currentSchemaVersion,
+            schemaVersion: BackupSnapshot.configurationSchemaVersion,
             exportedAt: Date(),
             appVersion: appVersion,
             deviceName: Host.current().localizedName,
@@ -110,11 +158,43 @@ final class BackupService {
     /// plugin lifecycle or derived surfaces are still stale.
     @discardableResult
     func restore(_ snapshot: BackupSnapshot) async throws -> ImportSummary {
-        let summary = try apply(snapshot)
-        try await reconcileRuntime()
+        var importedTags: [ClipboardHistoryTagDefinition]?
+        var clipboardTagsError: (any Error)?
+        do {
+            if let value = snapshot.settings[ClipboardHistoryPortableKeys.customTags] {
+                guard case .string(let json) = value else { throw ClipboardHistoryModuleError.invalidTagName }
+                importedTags = try ClipboardHistoryPortableSettings.definitions(from: json)
+            } else if snapshot.omittedSections.contains(.clipboardTags) {
+                throw BackupImportIssue.clipboardTagsOmitted
+            }
+        } catch {
+            clipboardTagsError = error
+        }
+        var summary = try apply(snapshot)
+        if let importedTags {
+            do {
+                try await restoreClipboardTags(importedTags)
+                defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+                summary.settingsApplied += 1
+            } catch {
+                clipboardTagsError = error
+            }
+        }
+        let runtimeError: (any Error)?
+        do {
+            try await reconcileRuntime()
+            runtimeError = nil
+        } catch {
+            runtimeError = error
+        }
         // Restored rows are portable config the sync engine (if running)
         // must capture; settings writes already fired the defaults notification.
         NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
+        if let clipboardTagsError {
+            throw BackupImportPartialFailure(summary: summary,
+                clipboardTagsError: clipboardTagsError, runtimeError: runtimeError)
+        }
+        if let runtimeError { throw runtimeError }
         return summary
     }
 
@@ -231,7 +311,8 @@ final class BackupService {
 
     /// Re-read settings into the modules whose setters carry side effects that
     /// raw UserDefaults writes bypass, then rebuild derived surfaces. Shared
-    /// with `SyncEngine`, whose applies bypass the same setters.
+    /// with `SyncEngine`. Clipboard tags are owned by the encrypted module;
+    /// only an explicit manual backup import can replace their definitions.
     static func reconcileLiveRuntime() async throws {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()

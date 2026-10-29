@@ -56,9 +56,57 @@ server. Notes:
 ## What never syncs
 
 - Clipboard history, translation history, API keys (Keychain)
+- Clipboard tag definitions and entry associations
 - Machine-local state: privileged-helper approval, Script Plugins and their
   developer mode, window positions
 - The sync configuration itself (folder choice, device identity)
+
+### Clipboard tags after upgrading
+
+Config Sync no longer transfers clipboard tags. Native Clipboard Sync owns shared
+selection, tag identities, and selected associations through its encrypted channel.
+Selected content, complete file/directory versions, and their sharing lifecycle
+use that same channel. See the [Clipboard Sync guide](clipboard-sync.md) for
+per-device activation, selected tags, downloads, and linked copies.
+Existing local tags and their history associations stay in place,
+and explicit Config Backup export/import still includes tag definitions.
+
+When Config Sync starts, it removes the retired tag record from its local sync
+document. Subsequent syncs ignore tag records from older clients and rewrite
+this Mac's state file without tags. An unavailable sync location delays that
+rewrite. Other devices' files, historical cloud copies, and older clients may
+still contain plaintext tag names; upgrading does not erase those copies.
+
+Ordinary configuration updates never restore a local tag mirror over the history
+module. Startup imports the old preferences mirror once into encrypted storage
+without replacing existing identities or memberships, then removes it only after
+success. Failure preserves the old value for retry; restarting cannot replay a stale
+mirror. New tag operations do not write plaintext tag preferences. Manual exports
+read current definitions into the explicit backup file, and manual imports apply
+them directly to the module, preserving distinct IDs even when names match.
+See [ADR-0028](adr/0028-move-tag-sync-out-of-config-sync.md) for the ownership
+decision.
+
+### Manual backup availability and compatibility
+
+Manual backup can still export other portable configuration while Clipboard History
+is paused or unavailable. The result explicitly reports that clipboard tags were
+omitted, and the backup file records that omission. Export again when Clipboard
+History is available to include the current tags. A failure to read the other
+configuration still fails the export rather than silently producing an empty file.
+
+Restore applies independent configuration even when the tag section is unavailable
+or invalid, then reports a partial import. Existing tags and their history
+associations remain unchanged in that case; rejected tags are never saved as a
+plaintext preference for later automatic application. An older backup with no tag
+section also leaves tags unchanged. An explicitly empty tag list, however, replaces
+the definitions with an empty list and removes their associations.
+
+Backups containing separate tag IDs with the same name require an updated AnyDoor
+with Clipboard Sync support. These backups use schema 3 so older readers reject
+them before changing configuration. Tags are never merged or renamed to fit an
+older reader. Other exports retain schema 2, and the current importer continues
+to accept schema 1 and schema 2 backups.
 
 ## How it works
 

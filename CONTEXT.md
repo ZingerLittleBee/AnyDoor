@@ -383,12 +383,17 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   source, capture time, favorite, and tags remain, an edit time is recorded,
   and Retention Start resets without moving recency. Equal content in another
   entry is not destructively merged.
+  A shared edit records the displayed version as its parent. Concurrent text
+  versions remain available for an explicit choice; resolving them creates a
+  new version that names all displayed conflict heads as parents. Editing or
+  receiving a shared entry never replaces the current system clipboard.
   _Avoid_: Rich Text Edit, Edit as New Capture, Duplicate Merge.
 - **Capture Safety Limit** (捕获安全上限) — A non-configurable per-entry guard
   of 128 MiB across the canonical plaintext bytes of all Standard Clipboard
   Representations selected for persistence, plus a 64-megapixel decoded-image
   limit, both aggregated across the complete Clipboard Entry. Referenced file
-  contents do not count because AnyDoor never reads or stores them. Exceeding
+  contents do not count because capture stores references without reading their
+  contents. Opted-in Clipboard Sync reads file content separately. Exceeding
   either limit rejects the entire history entry, leaves the system pasteboard
   unchanged, and shows a non-modal “content too large” notice, rate-limited so
   repeated rejections raise one notice rather than a stream. It never silently
@@ -682,6 +687,45 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   Image Conversion output and its user-relevant configuration/outcome. Records
   do not own their files and are created only when an output exists.
 
+## Clipboard Sync
+
+Vocabulary for the [Clipboard iCloud Sync specification](docs/prds/2026-10-28-clipboard-icloud-sync.md).
+The [runtime reference](docs/agents/architecture.md#clipboard-sync) describes the
+implemented workflow; [acceptance evidence](docs/testing/clipboard-sync-signing.md)
+records its verification scope.
+
+- **Clipboard Sync**: Optional sharing of selected Clipboard History across
+  participating Macs using the same Apple Account. It is distinct from Config
+  Sync and from replacing the current system clipboard.
+  _Avoid_: Universal Clipboard, Config Sync.
+- **Sync Tag**: A Clipboard History tag selected to include matching entries
+  in Clipboard Sync. The selected set is shared by participating devices.
+  _Avoid_: Sync Folder, Content Facet.
+- **Participating Device**: A Mac on which the user has explicitly enabled
+  Clipboard Sync. Sharing an Apple Account alone does not make a Mac a
+  Participating Device.
+  _Avoid_: Every Account Device, Automatically Enabled Device.
+- **Tracked File**: A file, directory, or file package whose content changes
+  continue to be reflected in Clipboard Sync while it remains in the selected
+  scope.
+  _Avoid_: Initial Snapshot, Static File Attachment.
+- **File Placeholder**: A synchronized file listing whose current content is
+  not downloaded on this device. It represents known remote content rather
+  than a missing original file.
+  _Avoid_: Empty File, Broken File Reference.
+- **Linked Location**: A local file, directory, or package location associated
+  with a Tracked File for bidirectional changes. A separately pasted or saved
+  copy is not a Linked Location unless explicitly associated.
+  _Avoid_: Every Copy, Matching Path.
+- **Linked Working Copy**: An ordinary editable local copy of a Tracked File
+  at a Linked Location. It is distinct from encrypted background storage and
+  from an independent exported copy.
+  _Avoid_: Encrypted Cache, Temporary Preview.
+- **Cloud Reset**: The explicit removal of shared Clipboard Sync data while
+  preserving local copies and ending current device participation. Retained
+  copies do not by themselves authorize publishing that data again.
+  _Avoid_: Local Clear History, Disable This Device.
+
 ## Config Sync & Backup
 
 - **Config Sync** (配置同步) — Optional automatic convergence of Portable
@@ -706,7 +750,8 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   stops a deleted record from being resurrected by a machine that still
   carries it; expired Tombstones are garbage-collected.
 - **Portable Setting** (可携带设置) — A configuration value allowed to travel
-  between machines, enumerated by a single whitelist.
+  between machines. Explicit Config Backup and automatic Config Sync may
+  support different sets of these settings.
 - **Machine-Local Setting** (机器本地设置) — A setting that deliberately never
   travels (e.g. helper approval, Script Plugin state, the Sync Folder choice
   itself). Not a Portable Setting.

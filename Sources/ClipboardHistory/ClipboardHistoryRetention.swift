@@ -47,6 +47,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.invalidTagName
         }
         let database = try await writableDatabase()
+        let epoch = storeEpoch
         let storedEntryID = entryID.value.uuidString.lowercased()
         let timestamp = now()
         let result: TagAssignmentMutationResult = try mapMutationStorageFailure {
@@ -57,6 +58,12 @@ extension ClipboardHistoryModule {
                     in: database
                 ) else {
                     throw ClipboardHistoryModuleError.entryNotFound
+                }
+                let matchingCount = try Int.fetchOne(database,
+                    sql: "SELECT COUNT(*) FROM clipboard_tag_definitions WHERE display_name = ?",
+                    arguments: [displayName]) ?? 0
+                guard matchingCount <= 1 else {
+                    throw ClipboardHistoryModuleError.duplicateTagName
                 }
                 let existing = try Row.fetchOne(
                     database,
@@ -131,24 +138,24 @@ extension ClipboardHistoryModule {
                     try Self.bumpSearchIndexGeneration(in: database)
                 }
                 return TagAssignmentMutationResult(
-                    assignment: ClipboardHistoryTagAssignment(
-                        definition: definition,
-                        entry: try Self.entry(
-                            from: try requiredEntryRow(
-                                storedEntryID,
-                                in: database
-                            ),
-                            in: database
-                        )
-                    ),
-                    didMutate: insertedDefinition || !hadMembership
+                    definition: definition,
+                    mutation: try Self.entryMutationResult(from: requiredEntryRow(storedEntryID, in: database),
+                        in: database, didMutate: insertedDefinition || !hadMembership)
                 )
             }
         }
-        if result.didMutate {
+        if result.mutation.didMutate {
             publishMutation()
         }
-        return result.assignment
+        guard case .updated(let entry) = try await resolveMutationDisplay(result.mutation, in: database, epoch: epoch) else {
+            throw ClipboardHistoryModuleError.entryNotFound
+        }
+        guard let definition = try linkedRead({ database -> ClipboardHistoryTagDefinition? in
+            guard let row = try Row.fetchOne(database, sql: "SELECT id, display_name FROM clipboard_tag_definitions WHERE id = ?",
+                arguments: [result.definition.id]) else { return nil }
+            return .init(id: row["id"], displayName: row["display_name"])
+        }) else { throw ClipboardHistoryModuleError.tagDefinitionNotFound }
+        return ClipboardHistoryTagAssignment(definition: definition, entry: entry)
     }
 
     public func renameTagDefinition(
@@ -319,6 +326,7 @@ extension ClipboardHistoryModule {
                         arguments: [timestamp, entryID]
                     )
                 }
+                try recordSyncWithdrawals(in: database)
                 if definitionExists || removedMembershipCount > 0 {
                     try Self.bumpHistoryRevision(in: database)
                     try Self.bumpSearchIndexGeneration(in: database)
@@ -371,9 +379,9 @@ extension ClipboardHistoryModule {
                 in: .whitespacesAndNewlines
             )
         }
-        guard !names.contains(where: \.isEmpty),
-            Set(names).count == names.count
-        else {
+        // Names are presentation, not identity. A manual backup may contain
+        // independent same-name tags introduced by encrypted Clipboard Sync.
+        guard !names.contains(where: \.isEmpty) else {
             throw ClipboardHistoryModuleError.invalidTagName
         }
         let database = try await writableDatabase()
@@ -399,6 +407,7 @@ extension ClipboardHistoryModule {
                         displayName: $0["display_name"]
                     )
                 }
+                try Self.markLegacyTagDefinitionsImported(in: database)
                 guard currentDefinitions != normalizedDefinitions else {
                     return TagDefinitionUpdateMutationResult(
                         update: ClipboardHistoryTagDefinitionUpdate(
@@ -518,6 +527,7 @@ extension ClipboardHistoryModule {
                         arguments: [timestamp, entryID]
                     )
                 }
+                try recordSyncWithdrawals(in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 return TagDefinitionUpdateMutationResult(
@@ -668,9 +678,13 @@ extension ClipboardHistoryModule {
                         in: database
                     )
                 }
+                let currentSharedScope: [String]
+                if case .clear = payload.operation {
+                    currentSharedScope = try Self.syncDeletionScope(entryIDs: currentIDs, in: database)
+                } else { currentSharedScope = [] }
                 let sortedCurrentIDs = currentIDs.sorted()
                 guard currentRevision == payload.revision,
-                    sortedCurrentIDs == payload.entryIDs
+                    sortedCurrentIDs == payload.entryIDs, currentSharedScope == payload.sharedScope
                 else {
                     return ConfirmationApplyResult(
                         outcome: .stale(
@@ -687,6 +701,9 @@ extension ClipboardHistoryModule {
                 }
 
                 let expiredIDs = try expiredEntryIDs(at: date, in: database)
+                if case .clear = payload.operation {
+                    try Self.recordExplicitSyncDeletion(entryIDs: currentIDs, in: database)
+                }
                 let allDeletedIDs = Set(currentIDs).union(expiredIDs)
                 let payloadPaths = try logicallyDelete(
                     entryIDs: Array(allDeletedIDs),
@@ -754,18 +771,8 @@ extension ClipboardHistoryModule {
                     arguments: [storedID]
                 ) ?? false
                 if currentFavorite == isFavorite {
-                    return MutationApplyResult(
-                        outcome: .updated(
-                            try Self.entry(
-                                from: try requiredEntryRow(
-                                    storedID,
-                                    in: database
-                                ),
-                                in: database
-                            )
-                        ),
-                        didMutate: false
-                    )
+                    return try Self.entryMutationResult(from: requiredEntryRow(storedID, in: database),
+                        in: database, didMutate: false)
                 }
                 let wasProtected = try protectionState(
                     for: storedID,
@@ -790,20 +797,11 @@ extension ClipboardHistoryModule {
                         in: database
                     )
                 }
+                try recordSyncFavoriteChange(isFavorite, entryID: storedID, in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
-                return MutationApplyResult(
-                    outcome: .updated(
-                        try Self.entry(
-                            from: try requiredEntryRow(
-                                storedID,
-                                in: database
-                            ),
-                            in: database
-                        )
-                    ),
-                    didMutate: true
-                )
+                return try Self.entryMutationResult(from: requiredEntryRow(storedID, in: database),
+                    in: database, didMutate: true)
             }
         }
     }
@@ -845,18 +843,8 @@ extension ClipboardHistoryModule {
                     )
                 )
                 if currentTagIDs == tagIDs {
-                    return MutationApplyResult(
-                        outcome: .updated(
-                            try Self.entry(
-                                from: try requiredEntryRow(
-                                    storedID,
-                                    in: database
-                                ),
-                                in: database
-                            )
-                        ),
-                        didMutate: false
-                    )
+                    return try Self.entryMutationResult(from: requiredEntryRow(storedID, in: database),
+                        in: database, didMutate: false)
                 }
                 let wasProtected = try protectionState(
                     for: storedID,
@@ -878,6 +866,14 @@ extension ClipboardHistoryModule {
                         arguments: [storedID, tagID]
                     )
                 }
+                try recordSyncWithdrawals(in: database)
+                if let accountID = try syncSettings(in: database).accountID {
+                    let selected = Set(try selectedSyncTags(accountID: accountID, in: database).map(\.id))
+                    for tagID in tagIDs.subtracting(currentTagIDs).intersection(selected) {
+                        try authorizeSyncRejoin(tagID: tagID, revision: nextSyncTagRevision(in: database),
+                            localEntryID: storedID, in: database)
+                    }
+                }
                 let isProtected = try recomputeProtection(
                     for: storedID,
                     in: database
@@ -891,18 +887,8 @@ extension ClipboardHistoryModule {
                 }
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
-                return MutationApplyResult(
-                    outcome: .updated(
-                        try Self.entry(
-                            from: try requiredEntryRow(
-                                storedID,
-                                in: database
-                            ),
-                            in: database
-                        )
-                    ),
-                    didMutate: true
-                )
+                return try Self.entryMutationResult(from: requiredEntryRow(storedID, in: database),
+                    in: database, didMutate: true)
             }
         }
     }
@@ -910,13 +896,48 @@ extension ClipboardHistoryModule {
     func editText(
         _ text: String,
         for entryID: ClipboardHistoryEntryID,
-        in database: DatabasePool
+        in database: DatabasePool,
+        plan: ClipboardHistoryTextEditPlan? = nil
     ) async throws -> MutationApplyResult {
+        let date = now()
+        let result: TextEditResult
+        do {
+            result = try await database.write { database in
+                let current = try Self.syncTextEditBasis(for: entryID, in: database)
+                let basis: ClipboardSyncTextEditBasis?
+                if let plan {
+                    guard current?.accountID == plan.basis?.accountID, current?.epoch == plan.basis?.epoch,
+                          current?.subjectID == plan.basis?.subjectID else { throw ClipboardHistoryModuleError.operationUnavailable }
+                    basis = plan.basis
+                } else {
+                    basis = current
+                }
+                let result = try replaceText(text, for: entryID, at: date, in: database)
+                if result.outcome.didMutate, let basis {
+                    try Self.recordSyncTextEdit(text, basis: basis, at: date, in: database)
+                }
+                return try refreshingTextEditResult(result, entryID: entryID, in: database)
+            }
+        } catch let error as ClipboardHistoryModuleError {
+            throw error
+        } catch {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        cancelDerivedJobs(for: [entryID.value.uuidString.lowercased()])
+        await enqueueReclamation(for: result.payloadPaths)
+        return result.outcome
+    }
+
+    nonisolated func replaceText(
+        _ text: String,
+        for entryID: ClipboardHistoryEntryID,
+        at date: Date,
+        in database: Database
+    ) throws -> TextEditResult {
         guard !text.isEmpty else {
             throw ClipboardHistoryModuleError.invalidTextEdit
         }
         let storedID = entryID.value.uuidString.lowercased()
-        let date = now()
         let snapshot = PasteboardSnapshot(
             items: [
                 PasteboardSnapshot.Item(
@@ -938,235 +959,222 @@ extension ClipboardHistoryModule {
         let facets = Set([ClipboardHistoryFacet.text]).union(
             Self.inferredFacets(forExactText: text)
         )
-        let result: TextEditResult
-        do {
-            result = try await database.write { database in
-                guard try isLiveEntry(storedID, at: date, in: database) else {
-                    return TextEditResult(
-                        outcome: MutationApplyResult(
-                            outcome: .notFound,
-                            didMutate: false
-                        ),
-                        payloadPaths: []
-                    )
-                }
-                let itemCount =
-                    try Int.fetchOne(
-                        database,
-                        sql: """
-                            SELECT COUNT(*)
-                            FROM clipboard_items
-                            WHERE entry_id = ?
-                            """,
-                        arguments: [storedID]
-                    ) ?? 0
-                let exactTextCount =
-                    try Int.fetchOne(
-                        database,
-                        sql: """
-                            SELECT COUNT(*)
-                            FROM clipboard_representations
-                            WHERE entry_id = ?
-                              AND type_identifier = 'public.utf8-plain-text'
-                              AND text_value IS NOT NULL
-                            """,
-                        arguments: [storedID]
-                    ) ?? 0
-                guard itemCount == 1, exactTextCount >= 1 else {
-                    throw ClipboardHistoryModuleError.invalidTextEdit
-                }
-
-                let payloads = try Row.fetchAll(
-                    database,
-                    sql: """
-                        SELECT DISTINCT payload.id, payload.relative_path
-                        FROM clipboard_payloads AS payload
-                        WHERE payload.id IN (
-                            SELECT payload_id
-                            FROM clipboard_representations
-                            WHERE entry_id = ?
-                              AND payload_id IS NOT NULL
-                            UNION
-                            SELECT thumbnail_payload_id
-                            FROM clipboard_entries
-                            WHERE id = ?
-                              AND thumbnail_payload_id IS NOT NULL
-                            UNION
-                            SELECT payload_id
-                            FROM clipboard_file_members
-                            WHERE entry_id = ?
-                              AND payload_id IS NOT NULL
-                        )
-                        ORDER BY payload.id
-                        """,
-                    arguments: [storedID, storedID, storedID]
-                )
-
-                try Self.deleteSearchFields(
-                    forEntryID: storedID,
-                    from: database,
-                    faultInjector: faultInjector
-                )
-                try faultInjector.check(.logicalDeletionAfterSearchIndexes)
-                try database.execute(
-                    sql: """
-                        UPDATE clipboard_entries
-                        SET preview_text = ?, edited_at = ?,
-                            thumbnail_payload_id = NULL
-                        WHERE id = ?
-                        """,
-                    arguments: [
-                        Self.boundedPreviewText(text),
-                        date.timeIntervalSince1970,
-                        storedID,
-                    ]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_representations
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_file_members
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_entry_facets
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_duplicate_candidates
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try database.execute(
-                    sql: """
-                        DELETE FROM clipboard_derived_jobs
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [storedID]
-                )
-                try faultInjector.check(.logicalDeletionAfterEntries)
-                try database.execute(
-                    sql: """
-                        INSERT INTO clipboard_representations(
-                            entry_id, item_index, representation_index,
-                            kind, type_identifier, text_value
-                        ) VALUES (?, 0, 0, 'text',
-                                  'public.utf8-plain-text', ?)
-                        """,
-                    arguments: [storedID, text]
-                )
-                for facet in facets {
-                    try database.execute(
-                        sql: """
-                            INSERT INTO clipboard_entry_facets(entry_id, facet)
-                            VALUES (?, ?)
-                            """,
-                        arguments: [storedID, facet.rawValue]
-                    )
-                }
-                try Self.insertSearchField(
-                    value: text,
-                    kind: "exactText",
-                    index: 0,
-                    rankingGroup: Self.searchRankingGroup(for: "exactText"),
-                    entryID: storedID,
-                    into: database,
-                    faultInjector: faultInjector
-                )
-                try database.execute(
-                    sql: """
-                        INSERT INTO clipboard_duplicate_candidates(
-                            fingerprint, entry_id, canonical_byte_count,
-                            created_at
-                        ) VALUES (?, ?, ?, ?)
-                        """,
-                    arguments: [
-                        identity.fingerprint,
-                        storedID,
-                        identity.canonicalByteCount,
-                        date.timeIntervalSince1970,
-                    ]
-                )
-                try database.execute(
-                    sql: """
-                        UPDATE clipboard_retention_state
-                        SET retention_started_at = ?
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [date.timeIntervalSince1970, storedID]
-                )
-
-                var payloadPaths: [String] = []
-                for payload in payloads {
-                    let payloadID: String = payload["id"]
-                    try database.execute(
-                        sql: """
-                            DELETE FROM clipboard_payloads
-                            WHERE id = ?
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_representations
-                                  WHERE payload_id = ?
-                              )
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_entries
-                                  WHERE thumbnail_payload_id = ?
-                              )
-                              AND NOT EXISTS (
-                                  SELECT 1 FROM clipboard_file_members
-                                  WHERE payload_id = ?
-                              )
-                            """,
-                        arguments: [
-                            payloadID,
-                            payloadID,
-                            payloadID,
-                            payloadID,
-                        ]
-                    )
-                    if database.changesCount == 1 {
-                        payloadPaths.append(payload["relative_path"])
-                    }
-                }
-                try faultInjector.check(.logicalDeletionAfterPayloadRows)
-                try Self.bumpHistoryRevision(in: database)
-                try Self.bumpSearchIndexGeneration(in: database)
-                try faultInjector.check(.databaseTransaction)
-                return TextEditResult(
-                    outcome: MutationApplyResult(
-                        outcome: .updated(
-                            try Self.entry(
-                                from: try requiredEntryRow(
-                                    storedID,
-                                    in: database
-                                ),
-                                in: database
-                            )
-                        ),
-                        didMutate: true
-                    ),
-                    payloadPaths: payloadPaths
-                )
-            }
-        } catch let error as ClipboardHistoryModuleError {
-            throw error
-        } catch {
-            throw ClipboardHistoryModuleError.storageFailure
+        guard try isLiveEntry(storedID, at: date, in: database) else {
+            return TextEditResult(
+                outcome: MutationApplyResult(
+                    outcome: .notFound,
+                    didMutate: false
+                ),
+                payloadPaths: []
+            )
         }
-        cancelDerivedJobs(for: [storedID])
-        await enqueueReclamation(for: result.payloadPaths)
-        return result.outcome
+        let itemCount =
+            try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM clipboard_items
+                    WHERE entry_id = ?
+                    """,
+                arguments: [storedID]
+            ) ?? 0
+        let exactTextCount =
+            try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM clipboard_representations
+                    WHERE entry_id = ?
+                      AND type_identifier = 'public.utf8-plain-text'
+                      AND text_value IS NOT NULL
+                    """,
+                arguments: [storedID]
+            ) ?? 0
+        guard itemCount == 1, exactTextCount >= 1 else {
+            throw ClipboardHistoryModuleError.invalidTextEdit
+        }
+
+        let payloads = try Row.fetchAll(
+            database,
+            sql: """
+                SELECT DISTINCT payload.id, payload.relative_path
+                FROM clipboard_payloads AS payload
+                WHERE payload.id IN (
+                    SELECT payload_id
+                    FROM clipboard_representations
+                    WHERE entry_id = ?
+                      AND payload_id IS NOT NULL
+                    UNION
+                    SELECT thumbnail_payload_id
+                    FROM clipboard_entries
+                    WHERE id = ?
+                      AND thumbnail_payload_id IS NOT NULL
+                    UNION
+                    SELECT payload_id
+                    FROM clipboard_file_members
+                    WHERE entry_id = ?
+                      AND payload_id IS NOT NULL
+                )
+                ORDER BY payload.id
+                """,
+            arguments: [storedID, storedID, storedID]
+        )
+
+        try Self.deleteSearchFields(
+            forEntryID: storedID,
+            from: database,
+            faultInjector: faultInjector
+        )
+        try faultInjector.check(.logicalDeletionAfterSearchIndexes)
+        try database.execute(
+            sql: """
+                UPDATE clipboard_entries
+                SET preview_text = ?, edited_at = ?,
+                    thumbnail_payload_id = NULL
+                WHERE id = ?
+                """,
+            arguments: [
+                Self.boundedPreviewText(text),
+                date.timeIntervalSince1970,
+                storedID,
+            ]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_representations
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_file_members
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_entry_facets
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_duplicate_candidates
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_derived_jobs
+                WHERE entry_id = ?
+                """,
+            arguments: [storedID]
+        )
+        try faultInjector.check(.logicalDeletionAfterEntries)
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_representations(
+                    entry_id, item_index, representation_index,
+                    kind, type_identifier, text_value
+                ) VALUES (?, 0, 0, 'text',
+                          'public.utf8-plain-text', ?)
+                """,
+            arguments: [storedID, text]
+        )
+        for facet in facets {
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_entry_facets(entry_id, facet)
+                    VALUES (?, ?)
+                    """,
+                arguments: [storedID, facet.rawValue]
+            )
+        }
+        try Self.insertSearchField(
+            value: text,
+            kind: "exactText",
+            index: 0,
+            rankingGroup: Self.searchRankingGroup(for: "exactText"),
+            entryID: storedID,
+            into: database,
+            faultInjector: faultInjector
+        )
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_duplicate_candidates(
+                    fingerprint, entry_id, canonical_byte_count,
+                    created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+            arguments: [
+                identity.fingerprint,
+                storedID,
+                identity.canonicalByteCount,
+                date.timeIntervalSince1970,
+            ]
+        )
+        try database.execute(
+            sql: """
+                UPDATE clipboard_retention_state
+                SET retention_started_at = ?
+                WHERE entry_id = ?
+                """,
+            arguments: [date.timeIntervalSince1970, storedID]
+        )
+
+        var payloadPaths: [String] = []
+        for payload in payloads {
+            let payloadID: String = payload["id"]
+            try database.execute(
+                sql: """
+                    DELETE FROM clipboard_payloads
+                    WHERE id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_representations
+                          WHERE payload_id = ?
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_entries
+                          WHERE thumbnail_payload_id = ?
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM clipboard_file_members
+                          WHERE payload_id = ?
+                      )
+                    """,
+                arguments: [
+                    payloadID,
+                    payloadID,
+                    payloadID,
+                    payloadID,
+                ]
+            )
+            if database.changesCount == 1 {
+                payloadPaths.append(payload["relative_path"])
+            }
+        }
+        try faultInjector.check(.logicalDeletionAfterPayloadRows)
+        try Self.bumpHistoryRevision(in: database)
+        try Self.bumpSearchIndexGeneration(in: database)
+        try faultInjector.check(.databaseTransaction)
+        return TextEditResult(
+            outcome: try Self.entryMutationResult(from: requiredEntryRow(storedID, in: database),
+                in: database, didMutate: true),
+            payloadPaths: payloadPaths
+        )
+    }
+
+    nonisolated func refreshingTextEditResult(
+        _ result: TextEditResult, entryID: ClipboardHistoryEntryID, in database: Database
+    ) throws -> TextEditResult {
+        guard result.outcome.didMutate else { return result }
+        let row = try requiredEntryRow(entryID.value.uuidString.lowercased(), in: database)
+        return TextEditResult(outcome: try Self.entryMutationResult(from: row, in: database, didMutate: true),
+            payloadPaths: result.payloadPaths)
     }
 
     nonisolated func isLiveEntry(
@@ -1236,7 +1244,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func protectionState(
+    func protectionState(
         for entryID: String,
         in database: Database
     ) throws -> Bool {
@@ -1252,7 +1260,7 @@ extension ClipboardHistoryModule {
     }
 
     @discardableResult
-    private func recomputeProtection(
+    func recomputeProtection(
         for entryID: String,
         in database: Database
     ) throws -> Bool {
@@ -1284,7 +1292,7 @@ extension ClipboardHistoryModule {
         return isProtected
     }
 
-    private func resetRetentionStart(
+    func resetRetentionStart(
         for entryID: String,
         to date: Date,
         in database: Database
@@ -1346,12 +1354,20 @@ extension ClipboardHistoryModule {
         let payload = ConfirmationPayload(
             operation: operation,
             revision: try Self.historyRevision(in: database),
-            entryIDs: entryIDs.sorted()
+            entryIDs: entryIDs.sorted(),
+            sharedScope: try {
+                guard case .clear = operation else { return [] }
+                return try Self.syncDeletionScope(entryIDs: entryIDs, in: database)
+            }()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return ClipboardHistoryDestructivePreview(
             affectedCount: payload.entryIDs.count,
+            sharedAffectedCount: try {
+                guard case .clear = operation else { return 0 }
+                return try Self.sharedDeletionCount(entryIDs: entryIDs, in: database)
+            }(),
             token: ClipboardHistoryConfirmationToken(
                 data: try encoder.encode(payload)
             )
@@ -1628,14 +1644,14 @@ private struct ConfirmationApplyResult {
     let didMutate: Bool
 }
 
-private struct TextEditResult {
+struct TextEditResult {
     let outcome: ClipboardHistoryModule.MutationApplyResult
     let payloadPaths: [String]
 }
 
 private struct TagAssignmentMutationResult: Sendable {
-    let assignment: ClipboardHistoryTagAssignment
-    let didMutate: Bool
+    let definition: ClipboardHistoryTagDefinition
+    let mutation: ClipboardHistoryModule.MutationApplyResult
 }
 
 private struct TagDefinitionMutationResult: Sendable {
@@ -1657,4 +1673,5 @@ private struct ConfirmationPayload: Codable {
     let operation: ConfirmationOperation
     let revision: Int64
     let entryIDs: [String]
+    let sharedScope: [String]
 }

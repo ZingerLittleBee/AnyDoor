@@ -14,6 +14,12 @@ struct ClipboardCardView: View {
     var onPluginAction:
         ((NativePluginID, PluginClipboardAction, PluginClipboardPayload) -> Void)?
     var onRevealInFinder: (() -> Void)?
+    var onOpenFiles: (() -> Void)?
+    var onSaveFiles: (() -> Void)?
+    var onAssociateFile: ((UUID) -> Void)?
+    var onReassociateFile: ((ClipboardHistoryFileLocationSelection) -> Void)?
+    var onSetFileLocationPaused: ((ClipboardHistoryFileLocationSelection, Bool) -> Void)?
+    var onRevealLinkedLocation: ((URL) -> Void)?
     var onToggleTag: ((String) -> Void)?
     var onNewTag: (() -> Void)?
     var onIgnoreSource: (() -> Void)?
@@ -31,6 +37,15 @@ struct ClipboardCardView: View {
             Divider()
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ClipboardSyncFileControls(entry: entry, presentation: presentation)
+                .padding(.horizontal, 8)
+            if let status = entry.syncFileStatusText {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(8)
+            }
         }
         .frame(width: 230, height: 230)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -45,9 +60,11 @@ struct ClipboardCardView: View {
         .overlay {
             RightClickMenu(makeMenu: makeContextMenu)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.presentationTitle)
-        .task(id: entry.id) {
+        .task(id: presentation.materializationIdentity(for: entry)) {
+            previewMaterialization = nil
+            hostMaterialization = nil
             async let preview = presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
@@ -58,8 +75,10 @@ struct ClipboardCardView: View {
                 purpose: .hostAction,
                 recordsFailure: false
             )
-            previewMaterialization = await preview
-            hostMaterialization = await host
+            let (loadedPreview, loadedHost) = await (preview, host)
+            guard !Task.isCancelled else { return }
+            previewMaterialization = loadedPreview
+            hostMaterialization = loadedHost
         }
     }
 
@@ -77,8 +96,8 @@ struct ClipboardCardView: View {
         if hostMaterialization?.editableText != nil, let onEdit {
             menu.addItem(
                 ClosureMenuItem(
-                    title: L(.clipboardActionEdit),
-                    systemImage: "pencil",
+                    title: L(entry.hasTextConflict ? .clipboardTextConflict : .clipboardActionEdit),
+                    systemImage: entry.hasTextConflict ? "arrow.triangle.2.circlepath" : "pencil",
                     handler: onEdit
                 )
             )
@@ -115,6 +134,15 @@ struct ClipboardCardView: View {
                     handler: onRevealInFinder
                 )
             )
+        }
+        if entry.facets.contains(.file) {
+            if let onOpenFiles {
+                menu.addItem(ClosureMenuItem(title: L(.clipboardActionOpenFiles), systemImage: "arrow.up.forward.app", handler: onOpenFiles))
+            }
+            if let onSaveFiles {
+                menu.addItem(ClosureMenuItem(title: L(.clipboardActionSaveFiles), systemImage: "square.and.arrow.down", handler: onSaveFiles))
+            }
+            if let locations = makeLinkedLocationsMenu() { menu.addItem(locations) }
         }
         if let onIgnoreSource,
             let bundleID = entry.source.bundleIdentifier
@@ -157,6 +185,83 @@ struct ClipboardCardView: View {
         return menu
     }
 
+    private func makeLinkedLocationsMenu() -> NSMenuItem? {
+        guard !entry.linkedFileLocations.isEmpty else { return nil }
+        let parent = NSMenuItem(title: L(.clipboardLinkedFileLocations), action: nil, keyEquivalent: "")
+        let menu = NSMenu()
+        let objectIDs = entry.linkedFileLocations.map(\.objectID).reduce(into: [UUID]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        for objectID in objectIDs {
+            let locations = entry.linkedFileLocations.filter { $0.objectID == objectID }
+            let destination: NSMenu
+            if objectIDs.count > 1 {
+                let name = entry.syncFiles.first { $0.id == objectID }?.displayName ?? locations.first?.url.lastPathComponent ?? ""
+                let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+                destination = NSMenu()
+                item.submenu = destination
+                menu.addItem(item)
+            } else { destination = menu }
+            for location in locations {
+                let kind: L10n.Key = switch location.kind {
+                case .original: .clipboardLinkedFileOriginal
+                case .workingCopy: .clipboardLinkedFileWorkingCopy
+                case .associated: .clipboardLinkedFileAssociated
+                }
+                let item = NSMenuItem(title: L(kind) + ": " + location.url.path, action: nil, keyEquivalent: "")
+                item.toolTip = location.url.path
+                let actions = NSMenu()
+                let status = NSMenuItem(title: location.trackingStatusText, action: nil, keyEquivalent: "")
+                status.isEnabled = false
+                actions.addItem(status)
+                actions.addItem(.separator())
+                let selection = ClipboardHistoryFileLocationSelection(entryID: entry.id,
+                    locationID: location.id, expectedRevision: location.revision)
+                if location.applicationUpdateVersionID != nil {
+                    actions.addItem(ClosureMenuItem(title: L(.clipboardApplicationUpdateTitle), systemImage: "arrow.down.app") {
+                        Task { await presentation.beginApplicationUpdate(selection) }
+                    })
+                }
+                if location.trackingActions.contains(.pause), let onRevealLinkedLocation {
+                    actions.addItem(ClosureMenuItem(title: L(.clipboardActionRevealInFinder), systemImage: "folder") {
+                        onRevealLinkedLocation(location.url)
+                    })
+                }
+                for action in location.trackingActions {
+                    switch action {
+                    case .reassociate:
+                        if let onReassociateFile {
+                            actions.addItem(ClosureMenuItem(title: L(action.titleKey), systemImage: action.systemImage) {
+                                onReassociateFile(selection)
+                            })
+                        }
+                    case .pause, .resume, .retry:
+                        if let onSetFileLocationPaused {
+                            actions.addItem(ClosureMenuItem(title: L(action.titleKey), systemImage: action.systemImage) {
+                                onSetFileLocationPaused(selection, action == .pause)
+                            })
+                        }
+                    }
+                }
+                item.submenu = actions
+                destination.addItem(item)
+            }
+            if entry.syncFiles.contains(where: { $0.id == objectID && $0.hasConflict }) || locations.contains(where: { $0.state == .conflict }) {
+                destination.addItem(ClosureMenuItem(title: L(.clipboardFileConflictTitle), systemImage: "arrow.triangle.2.circlepath") {
+                    Task { await presentation.beginFileConflict(entryID: entry.id, objectID: objectID) }
+                })
+            }
+            if let onAssociateFile {
+                destination.addItem(.separator())
+                destination.addItem(ClosureMenuItem(title: L(.clipboardLinkedFileAssociate), systemImage: "link") {
+                    onAssociateFile(objectID)
+                })
+            }
+        }
+        parent.submenu = menu
+        return parent
+    }
+
     private func makeTagSubmenu() -> NSMenuItem? {
         guard let onToggleTag, let onNewTag else { return nil }
         let parent = NSMenuItem(
@@ -170,7 +275,7 @@ struct ClipboardCardView: View {
         )
         let submenu = NSMenu()
         for tag in presentation.tags {
-            let item = ClosureMenuItem(title: tag.displayName) {
+            let item = ClosureMenuItem(title: presentation.tagTitle(tag.id)) {
                 onToggleTag(tag.id)
             }
             item.state = entry.tagIDs.contains(tag.id) ? .on : .off
@@ -201,6 +306,15 @@ struct ClipboardCardView: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer()
+            if entry.hasTextConflict, let onEdit {
+                Button(action: onEdit) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+                .help(L(.clipboardTextConflict))
+                .accessibilityLabel(L(.clipboardTextConflict))
+            }
             if entry.isFavorite {
                 Image(systemName: "star.fill")
                     .font(.system(size: 10))

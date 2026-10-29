@@ -48,6 +48,7 @@ not fresh runtime verification of the operating system.
 | Script Plugins | [PRD](prds/2026-07-21-script-plugin-runtime.md), [JavaScriptCore runtime](adr/0008-script-plugins-run-on-javascriptcore.md), [capability sandbox](adr/0009-capabilities-are-the-script-plugin-sandbox.md) |
 | Quicklinks | [PRD](prds/2026-07-09-quicklinks.md), [template semantics](adr/0001-untyped-quicklink-template.md) |
 | Image Conversion | [PRD](prds/2026-07-06-image-conversion.md), [target size](prds/2026-07-10-image-target-size-compression.md), [technical design](designs/2026-07-10-image-target-size-compression.md), [ImageIO](adr/0002-imageio-for-target-size-compression.md), [metadata policy](adr/0003-target-size-metadata-policy.md), [preview reuse](adr/0004-exact-preview-reuses-final-candidate.md) |
+| Clipboard Sync | [User guide](clipboard-sync.md), [specification](prds/2026-10-28-clipboard-icloud-sync.md), [runtime boundaries](agents/architecture.md#clipboard-sync), [encryption](adr/0026-encrypt-clipboard-sync-end-to-end.md), [linked files](adr/0027-track-linked-clipboard-files-bidirectionally.md), [tag ownership](adr/0028-move-tag-sync-out-of-config-sync.md), [acceptance evidence](testing/clipboard-sync-signing.md) |
 | Config Sync | [User guide](config-sync.md), [CRDT decision](adr/0010-crdt-sync-over-dumb-storage.md) |
 
 The [ADR directory](adr/) contains the remaining decisions. The indexes link current references without

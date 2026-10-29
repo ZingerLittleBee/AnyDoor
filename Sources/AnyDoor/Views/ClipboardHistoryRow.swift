@@ -22,6 +22,8 @@ struct ClipboardHistoryRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            ClipboardSyncFileControls(entry: entry, presentation: presentation)
+                .frame(maxWidth: 220)
             Spacer(minLength: 8)
             Text(relativeTimestamp)
                 .font(.caption)
@@ -34,12 +36,14 @@ struct ClipboardHistoryRow: View {
             isSelected ? Color.accentColor.opacity(0.18) : .clear,
             in: .rect(cornerRadius: 6)
         )
-        .task(id: entry.id) {
-            preview = await presentation.materialization(
+        .task(id: presentation.materializationIdentity(for: entry)) {
+            let loaded = await presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
                 recordsFailure: false
             )
+            guard !Task.isCancelled else { return }
+            preview = loaded
         }
     }
 
@@ -92,6 +96,7 @@ struct ClipboardHistoryRow: View {
     }
 
     private var subtitleText: String? {
+        if let status = entry.syncFileStatusText { return status }
         guard let text = entry.previewText else { return nil }
         let lineCount = text.split(whereSeparator: \.isNewline).count
         return lineCount > 1

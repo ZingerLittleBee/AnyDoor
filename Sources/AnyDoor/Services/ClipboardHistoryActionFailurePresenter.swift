@@ -11,6 +11,21 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
 
     init(_ failure: ClipboardHistoryActionFailure) {
         switch failure {
+        case .previewChanged:
+            titleKey = .clipboardToastPreviewChanged
+            details = []
+        case .syncFilesPending:
+            titleKey = .clipboardSyncFilesPending
+            details = []
+        case .fileExportCollision:
+            titleKey = .clipboardFileExportCollision
+            details = []
+        case .invalidFileAssociation:
+            titleKey = .clipboardLinkedFileInvalid
+            details = []
+        case .fileLocationAlreadyAssociated:
+            titleKey = .clipboardLinkedFileAlreadyAssociated
+            details = []
         case .fileReferencesUnavailable(_, let count):
             titleKey = .clipboardToastFileMissing
             details = [.unavailable(count: count)]

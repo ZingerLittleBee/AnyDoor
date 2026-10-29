@@ -25,6 +25,19 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         @Sendable (
             ClipboardHistoryMaterializationRequest
         ) async throws -> ClipboardHistoryMaterialization
+    let requestSyncFileDownload: @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void
+    let requestFileConflictDownload: @Sendable (ClipboardHistoryFileConflictPlan, UUID) async throws -> Void
+    let resolveFileConflict: @Sendable (ClipboardHistoryFileConflictPlan, ClipboardHistoryFileConflictChoice) async throws -> UUID
+    let linkedFileLocations: @Sendable (ClipboardHistoryEntryID) async throws -> [ClipboardHistoryLinkedFileLocation]
+    let applicationUpdatePlan: @Sendable (ClipboardHistoryFileLocationSelection) async throws -> ClipboardHistoryApplicationUpdatePlan
+    let requestApplicationUpdateDownload: @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void
+    let applyApplicationUpdate: @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void
+    let fileConflictPlan: @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan
+    let retrySyncFileTransfer: @Sendable () async -> Void
+    let exportFiles: @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL]
+    let associateFileLocation: @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation
+    let reassociateFileLocation: @Sendable (ClipboardHistoryFileLocationReassociation) async throws -> ClipboardHistoryLinkedFileLocation
+    let setFileLocationPaused: @Sendable (ClipboardHistoryFileLocationSelection, Bool) async throws -> Void
     let tagDefinitions:
         @Sendable () async throws -> [ClipboardHistoryTagDefinition]
     let sourceSummaries:
@@ -90,13 +103,27 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         materialize = { request in
             try await module.materialize(request)
         }
+        requestSyncFileDownload = { entryID, objectID, versionID in
+            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID, waitForSync: false)
+        }
+        requestFileConflictDownload = { try await module.requestFileConflictDownload($0, versionID: $1) }
+        resolveFileConflict = { try await module.resolveFileConflict($0, choosing: $1) }
+        fileConflictPlan = { try await module.fileConflictPlan(entryID: $0, objectID: $1) }
+        linkedFileLocations = { try await module.linkedFileLocations(for: $0) }
+        applicationUpdatePlan = { try await module.applicationUpdatePlan($0) }
+        requestApplicationUpdateDownload = { try await module.requestApplicationUpdateDownload($0) }
+        applyApplicationUpdate = { try await module.applyApplicationUpdate($0) }
+        retrySyncFileTransfer = { await module.retrySync() }
+        exportFiles = { entryID, destinations in
+            try await module.exportFiles(entryID, to: destinations)
+        }
+        associateFileLocation = { try await module.associateFileLocation($0) }
+        reassociateFileLocation = { try await module.reassociateFileLocation($0) }
+        setFileLocationPaused = { try await module.setFileLocationPaused($0, paused: $1) }
         createTagDefinition = { name, entryID in
             let assignment = try await module.createTagDefinition(
                 named: name,
                 assigningTo: entryID
-            )
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
             )
             return assignment
         }
@@ -105,16 +132,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
                 id: id,
                 to: name
             )
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
-            )
             return definition
         }
         deleteTagDefinition = { id in
             let update = try await module.deleteTagDefinition(id: id)
-            try await ClipboardHistoryPortableSettings.persist(
-                module.tagDefinitions()
-            )
             return update
         }
         legacyFileRestorePlan = { entryID in
@@ -187,6 +208,41 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome = { _ in
                 throw ClipboardHistoryModuleError.operationUnavailable
             },
+        requestSyncFileDownload: @escaping @Sendable (ClipboardHistoryEntryID, UUID, UUID) async throws -> Void = { _, _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        requestFileConflictDownload: @escaping @Sendable (ClipboardHistoryFileConflictPlan, UUID) async throws -> Void = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        resolveFileConflict: @escaping @Sendable (ClipboardHistoryFileConflictPlan, ClipboardHistoryFileConflictChoice) async throws -> UUID = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        fileConflictPlan: @escaping @Sendable (ClipboardHistoryEntryID, UUID) async throws -> ClipboardHistoryFileConflictPlan = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        linkedFileLocations: @escaping @Sendable (ClipboardHistoryEntryID) async throws -> [ClipboardHistoryLinkedFileLocation] = { _ in [] },
+        applicationUpdatePlan: @escaping @Sendable (ClipboardHistoryFileLocationSelection) async throws -> ClipboardHistoryApplicationUpdatePlan = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        requestApplicationUpdateDownload: @escaping @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        applyApplicationUpdate: @escaping @Sendable (ClipboardHistoryApplicationUpdatePlan) async throws -> Void = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        retrySyncFileTransfer: @escaping @Sendable () async -> Void = {},
+        exportFiles: @escaping @Sendable (ClipboardHistoryEntryID, [URL]) async throws -> [URL] = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        associateFileLocation: @escaping @Sendable (ClipboardHistoryFileLocationAssociation) async throws -> ClipboardHistoryLinkedFileLocation = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        reassociateFileLocation: @escaping @Sendable (ClipboardHistoryFileLocationReassociation) async throws -> ClipboardHistoryLinkedFileLocation = { _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
+        setFileLocationPaused: @escaping @Sendable (ClipboardHistoryFileLocationSelection, Bool) async throws -> Void = { _, _ in
+            throw ClipboardHistoryModuleError.operationUnavailable
+        },
         retrySearchIndex:
             @escaping @Sendable () async throws
                 -> ClipboardHistorySearchIndexStatus = {
@@ -198,6 +254,19 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.count = count
         self.apply = apply
         self.materialize = materialize
+        self.requestSyncFileDownload = requestSyncFileDownload
+        self.requestFileConflictDownload = requestFileConflictDownload
+        self.resolveFileConflict = resolveFileConflict
+        self.fileConflictPlan = fileConflictPlan
+        self.linkedFileLocations = linkedFileLocations
+        self.applicationUpdatePlan = applicationUpdatePlan
+        self.requestApplicationUpdateDownload = requestApplicationUpdateDownload
+        self.applyApplicationUpdate = applyApplicationUpdate
+        self.retrySyncFileTransfer = retrySyncFileTransfer
+        self.exportFiles = exportFiles
+        self.associateFileLocation = associateFileLocation
+        self.reassociateFileLocation = reassociateFileLocation
+        self.setFileLocationPaused = setFileLocationPaused
         self.tagDefinitions = tagDefinitions
         self.sourceSummaries = sourceSummaries
         self.createTagDefinition = createTagDefinition
@@ -246,6 +315,7 @@ struct ClipboardHistoryPresentationSource: Equatable, Identifiable {
 }
 
 enum ClipboardHistoryActionFailure: Equatable {
+    case previewChanged
     case operationUnavailable
     case entryNotFound
     case storeUnavailable
@@ -256,6 +326,10 @@ enum ClipboardHistoryActionFailure: Equatable {
         entryID: ClipboardHistoryEntryID,
         count: Int
     )
+    case syncFilesPending(entryID: ClipboardHistoryEntryID, count: Int)
+    case fileExportCollision
+    case invalidFileAssociation
+    case fileLocationAlreadyAssociated
     case fileCollectionRequiresRestore(
         entryID: ClipboardHistoryEntryID,
         ownedCount: Int,
@@ -289,6 +363,14 @@ enum ClipboardHistoryActionFailure: Equatable {
                 entryID: entryID,
                 count: count
             )
+        case .syncFilesPending(let entryID, let count):
+            self = .syncFilesPending(entryID: entryID, count: count)
+        case .fileExportCollision:
+            self = .fileExportCollision
+        case .invalidFileAssociation:
+            self = .invalidFileAssociation
+        case .fileLocationAlreadyAssociated:
+            self = .fileLocationAlreadyAssociated
         case .fileCollectionRequiresRestore(
             let entryID,
             let ownedCount,
@@ -308,6 +390,7 @@ enum ClipboardHistoryActionFailure: Equatable {
         case .invalidTextEdit:
             self = .invalidTextEdit
         case .resetFailed,
+             .invalidFileExport,
              .invalidConfirmation,
              .unsupportedLegacyTransferVersion,
              .legacyMigrationFailed,
@@ -319,6 +402,15 @@ enum ClipboardHistoryActionFailure: Equatable {
             self = .unknown
         }
     }
+}
+
+enum ClipboardApplicationUpdateNotice: Equatable {
+    case applied, changed, unavailable, applyFailed, downloadPending, downloadFailed
+    case blocked(ClipboardHistoryApplicationUpdateState)
+}
+
+enum ClipboardFileConflictNotice: Equatable {
+    case changed, unavailable, resolutionFailed, submitted, downloadPending, downloadFailed
 }
 
 @MainActor
@@ -357,6 +449,9 @@ final class ClipboardHistoryPresentationModel {
     /// Least-recently-used first. Kept in step with `materializationCache` by
     /// `cacheMaterialization` / `pruneMaterializations`.
     private var materializationOrder: [MaterializationKey] = []
+    private(set) var materializationGeneration: UInt64 = 0
+    private var entryMaterializationGenerations: [ClipboardHistoryEntryID: UInt64] = [:]
+    private var unlistedMaterializationGeneration: UInt64 = 0
     /// Whether an entry's host-action materialization had exact text on every
     /// item, which is what the ⌥↵ hint offers. Kept apart from the bounded
     /// cache, which the wall's mounted cards churn, and recorded whatever
@@ -368,6 +463,18 @@ final class ClipboardHistoryPresentationModel {
     private(set) var query = ClipboardHistoryQuery()
     private(set) var selectedID: ClipboardHistoryEntryID?
     private(set) var contentState: ClipboardHistoryContentState = .loading
+    private(set) var applicationUpdatePlan: ClipboardHistoryApplicationUpdatePlan?
+    private(set) var applicationUpdateNotice: ClipboardApplicationUpdateNotice?
+    private(set) var applicationUpdateSelection: ClipboardHistoryFileLocationSelection?
+    private(set) var isPerformingApplicationUpdateAction = false
+    private var applicationUpdateGeneration = 0
+    var hasFileActionSheet: Bool { applicationUpdateSelection != nil || fileConflictEntryID != nil }
+    private(set) var fileConflictNotice: ClipboardFileConflictNotice?
+    private(set) var fileConflictEntryID: ClipboardHistoryEntryID?
+    private(set) var fileConflictPlan: ClipboardHistoryFileConflictPlan?
+    private(set) var isPerformingFileConflictAction = false
+    private var fileConflictObjectID: UUID?
+    private var fileConflictGeneration = 0
     private(set) var actionFailure: ClipboardHistoryActionFailure?
     private(set) var tags: [ClipboardHistoryTagDefinition] = []
     private(set) var sources: [ClipboardHistoryPresentationSource] = []
@@ -397,7 +504,14 @@ final class ClipboardHistoryPresentationModel {
         self.operations = operations
     }
 
+    func materializationIdentity(for entry: ClipboardHistoryEntry) -> String {
+        entry.filePresentationIdentity + ":" + String(entry.materializationRevision)
+            + ":" + String(materializationGeneration)
+            + ":" + String(entryMaterializationGenerations[entry.id, default: 0])
+    }
+
     func reload() async {
+        invalidateAllMaterializations()
         await loadFirstPage(preservingSelection: true)
     }
 
@@ -412,6 +526,7 @@ final class ClipboardHistoryPresentationModel {
     /// published in one step, keeping the selection by id. Changes that land
     /// while a refresh runs coalesce into one more pass.
     func refreshForStoreChange() async {
+        invalidateUnlistedMaterializations()
         guard !isRefreshingForStoreChange else {
             storeChangePending = true
             return
@@ -516,6 +631,264 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    func beginApplicationUpdate(_ selection: ClipboardHistoryFileLocationSelection) async {
+        dismissFileConflict()
+        dismissApplicationUpdate()
+        applicationUpdateSelection = selection
+        await refreshApplicationUpdate()
+    }
+
+    func refreshApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, applicationUpdateNotice != .applied else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        await loadApplicationUpdate(generation: generation)
+        guard generation == applicationUpdateGeneration else { return }
+        isPerformingApplicationUpdateAction = false
+    }
+
+    private func loadApplicationUpdate(generation: Int) async {
+        guard let selection = applicationUpdateSelection else { return }
+        do {
+            let locations = try await operations.linkedFileLocations(selection.entryID)
+            guard generation == applicationUpdateGeneration else { return }
+            guard let location = locations.first(where: { $0.id == selection.locationID }) else {
+                throw ClipboardHistoryApplicationUpdateError.stalePlan
+            }
+            let current = ClipboardHistoryFileLocationSelection(entryID: selection.entryID,
+                locationID: location.id, expectedRevision: location.revision)
+            let plan = try await operations.applicationUpdatePlan(current)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdateSelection = current
+            applicationUpdatePlan = plan
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdatePlan = nil
+            applicationUpdateNotice = .unavailable
+        }
+    }
+
+    func dismissApplicationUpdate() {
+        applicationUpdateGeneration += 1
+        applicationUpdatePlan = nil
+        applicationUpdateNotice = nil
+        applicationUpdateSelection = nil
+        isPerformingApplicationUpdateAction = false
+    }
+
+    func downloadApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, let plan = applicationUpdatePlan,
+              plan.state == .requiresDownload else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        do {
+            try await operations.requestApplicationUpdateDownload(plan)
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            if applicationUpdatePlan?.state == .requiresDownload { applicationUpdateNotice = .downloadPending }
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdateNotice = (error as? ClipboardHistoryApplicationUpdateError) == .stalePlan
+                || (error as? ClipboardHistoryModuleError) == .operationUnavailable ? .changed : .downloadFailed
+        }
+        isPerformingApplicationUpdateAction = false
+    }
+
+    func applyApplicationUpdate() async {
+        guard !isPerformingApplicationUpdateAction, let plan = applicationUpdatePlan, plan.state == .ready else { return }
+        let generation = applicationUpdateGeneration
+        isPerformingApplicationUpdateAction = true
+        applicationUpdateNotice = nil
+        do {
+            try await operations.applyApplicationUpdate(plan)
+            guard generation == applicationUpdateGeneration else { return }
+            applicationUpdatePlan = nil
+            applicationUpdateNotice = .applied
+            invalidateMaterializations(for: plan.entryID)
+            await refreshForStoreChange()
+        } catch {
+            guard generation == applicationUpdateGeneration else { return }
+            await loadApplicationUpdate(generation: generation)
+            guard generation == applicationUpdateGeneration else { return }
+            switch error as? ClipboardHistoryApplicationUpdateError {
+            case .stalePlan: applicationUpdateNotice = .changed
+            case .running: applicationUpdateNotice = .blocked(.running)
+            case .identityUncertain: applicationUpdateNotice = .blocked(.identityUncertain)
+            case .localChanges: applicationUpdateNotice = .blocked(.localChanges)
+            case nil where (error as? ClipboardHistoryModuleError) == .operationUnavailable:
+                applicationUpdateNotice = .changed
+            default: applicationUpdateNotice = .applyFailed
+            }
+        }
+        guard generation == applicationUpdateGeneration else { return }
+        isPerformingApplicationUpdateAction = false
+    }
+
+    func beginFileConflict(entryID: ClipboardHistoryEntryID, objectID: UUID) async {
+        dismissApplicationUpdate()
+        dismissFileConflict()
+        fileConflictEntryID = entryID
+        fileConflictObjectID = objectID
+        await refreshFileConflict()
+    }
+
+    func dismissFileConflict() {
+        fileConflictGeneration += 1
+        fileConflictEntryID = nil
+        fileConflictObjectID = nil
+        fileConflictPlan = nil
+        fileConflictNotice = nil
+        isPerformingFileConflictAction = false
+    }
+
+    func refreshFileConflict() async {
+        guard !isPerformingFileConflictAction, fileConflictNotice != .submitted else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        await loadFileConflict(generation: generation)
+        guard fileConflictGeneration == generation else { return }
+        isPerformingFileConflictAction = false
+    }
+
+    func resolveFileConflict(choosing choice: ClipboardHistoryFileConflictChoice) async {
+        guard !isPerformingFileConflictAction, let plan = fileConflictPlan,
+              plan.ancestryComplete,
+              plan.candidates.contains(where: { $0.id == choice && $0.availability == .available }) else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        do {
+            _ = try await operations.resolveFileConflict(plan, choice)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = nil
+            fileConflictNotice = .submitted
+            invalidateMaterializations(for: plan.entryID)
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictNotice = (error as? ClipboardHistoryFileConflictError) == .stalePlan ? .changed : .resolutionFailed
+        }
+        isPerformingFileConflictAction = false
+    }
+
+    func downloadFileConflictVersion(_ versionID: UUID) async {
+        guard !isPerformingFileConflictAction, let plan = fileConflictPlan,
+              plan.candidates.contains(where: { $0.id == .version(versionID) && $0.availability == .requiresDownload }) else { return }
+        let generation = fileConflictGeneration
+        isPerformingFileConflictAction = true
+        fileConflictNotice = nil
+        do {
+            try await operations.requestFileConflictDownload(plan, versionID)
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            if let candidate = fileConflictPlan?.candidates.first(where: { $0.id == .version(versionID) }),
+               candidate.availability != .available {
+                fileConflictNotice = .downloadPending
+            }
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            await loadFileConflict(generation: generation)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictNotice = (error as? ClipboardHistoryFileConflictError) == .stalePlan ? .changed : .downloadFailed
+        }
+        isPerformingFileConflictAction = false
+    }
+
+    private func loadFileConflict(generation: Int) async {
+        guard let entryID = fileConflictEntryID, let objectID = fileConflictObjectID else { return }
+        do {
+            let plan = try await operations.fileConflictPlan(entryID, objectID)
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = plan
+        } catch {
+            guard fileConflictGeneration == generation else { return }
+            fileConflictPlan = nil
+            fileConflictNotice = .unavailable
+        }
+    }
+
+    @discardableResult
+    func transferSyncFile(_ file: ClipboardHistorySyncFileSummary, entryID: ClipboardHistoryEntryID) async -> ClipboardHistoryActionFailure? {
+        actionFailure = nil
+        do {
+            if file.uploadPending {
+                await operations.retrySyncFileTransfer()
+            } else {
+                try await operations.requestSyncFileDownload(entryID, file.id, file.versionID)
+            }
+            invalidateMaterializations(for: entryID)
+            return nil
+        } catch {
+            let failure = ClipboardHistoryActionFailure(error)
+            actionFailure = failure
+            return failure
+        }
+    }
+
+    func exportFiles(_ entryID: ClipboardHistoryEntryID, to destinations: [URL]) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.exportFiles(entryID, destinations)
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func associateFileLocation(_ request: ClipboardHistoryFileLocationAssociation) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.associateFileLocation(request)
+            invalidateMaterializations(for: request.entryID)
+            await refreshForStoreChange()
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func reassociateFileLocation(_ request: ClipboardHistoryFileLocationReassociation) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.reassociateFileLocation(request)
+            invalidateMaterializations(for: request.selection.entryID)
+            await refreshForStoreChange()
+            return true
+        } catch {
+            let failure = ClipboardHistoryActionFailure(error)
+            invalidateMaterializations(for: request.selection.entryID)
+            await refreshForStoreChange()
+            actionFailure = failure
+            return false
+        }
+    }
+
+    func setFileLocationPaused(_ selection: ClipboardHistoryFileLocationSelection, paused: Bool) async -> Bool {
+        actionFailure = nil
+        do {
+            try await operations.setFileLocationPaused(selection, paused)
+            invalidateMaterializations(for: selection.entryID)
+            await refreshForStoreChange()
+            return true
+        } catch {
+            let failure = ClipboardHistoryActionFailure(error)
+            invalidateMaterializations(for: selection.entryID)
+            await refreshForStoreChange()
+            actionFailure = failure
+            return false
+        }
+    }
+
     func createTagDefinition(
         named name: String,
         assigningTo entryID: ClipboardHistoryEntryID
@@ -530,7 +903,14 @@ final class ClipboardHistoryPresentationModel {
             replaceEntry(assignment.entry)
             return true
         } catch {
-            actionFailure = ClipboardHistoryActionFailure(error)
+            let failure = ClipboardHistoryActionFailure(error)
+            // Creation can commit before its display reply discovers a
+            // concurrent deletion. Read current definitions without restoring
+            // either the stale assignment or a subsequently deleted tag.
+            if let current = try? await operations.tagDefinitions() {
+                tags = current
+            }
+            actionFailure = failure
             return false
         }
     }
@@ -567,7 +947,11 @@ final class ClipboardHistoryPresentationModel {
                     facets: entry.facets,
                     isFavorite: entry.isFavorite,
                     tagIDs: entry.tagIDs.subtracting([id]),
-                    source: entry.source
+                    source: entry.source,
+                    materializationRevision: entry.materializationRevision,
+                    hasTextConflict: entry.hasTextConflict,
+                    syncFiles: entry.syncFiles,
+                    linkedFileLocations: entry.linkedFileLocations
                 )
             }
             return true
@@ -892,6 +1276,7 @@ final class ClipboardHistoryPresentationModel {
         guard requestRevision == revision, requestQuery == query else {
             return
         }
+        invalidateChangedMaterializations(in: rebasedEntries)
         entries = rebasedEntries
         nextCursor = cursor
         totalCount = refreshedCount
@@ -968,12 +1353,14 @@ final class ClipboardHistoryPresentationModel {
             let outcome = try await operations.apply(mutation)
             switch outcome {
             case .updated(let entry):
+                var payloadChanged = mutation.changesPayload
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    payloadChanged = payloadChanged || materializationIdentity(for: entries[index]) != materializationIdentity(for: entry)
                     entries[index] = entry
                 }
                 invalidateMaterializations(
                     for: entry.id,
-                    payloadChanged: mutation.changesPayload
+                    payloadChanged: payloadChanged
                 )
                 if Self.requiresRefetch(for: mutation, query: query) {
                     await loadFirstPage(preservingSelection: true)
@@ -1015,6 +1402,18 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    func previewMaterialization(for entryID: ClipboardHistoryEntryID) async -> ClipboardHistoryMaterialization? {
+        for _ in 0..<2 {
+            guard !Task.isCancelled else { return nil }
+            let value = await materialization(for: entryID, purpose: .fullPreview)
+            guard !Task.isCancelled else { return nil }
+            if let value { return value }
+            if actionFailure != nil { return nil }
+        }
+        actionFailure = .previewChanged
+        return nil
+    }
+
     func materialization(
         for entryID: ClipboardHistoryEntryID,
         purpose: ClipboardHistoryMaterializationPurpose,
@@ -1027,6 +1426,10 @@ final class ClipboardHistoryPresentationModel {
             return cached
         }
         let requestRevision = revision
+        let requestMaterializationGeneration = materializationGeneration
+        let requestEntryGeneration = entryMaterializationGenerations[entryID, default: 0]
+        let requestWasUnlisted = !entries.contains { $0.id == entryID }
+        let requestUnlistedGeneration = unlistedMaterializationGeneration
         if recordsFailure {
             actionFailure = nil
         }
@@ -1037,6 +1440,11 @@ final class ClipboardHistoryPresentationModel {
                     purpose: purpose
                 )
             )
+            guard !usesCache || (requestMaterializationGeneration == materializationGeneration
+                && requestEntryGeneration == entryMaterializationGenerations[entryID, default: 0]
+                && (!requestWasUnlisted || requestUnlistedGeneration == unlistedMaterializationGeneration)) else {
+                return nil
+            }
             if usesCache, requestRevision == revision {
                 cacheMaterialization(value, for: key)
             }
@@ -1048,7 +1456,10 @@ final class ClipboardHistoryPresentationModel {
             }
             return value
         } catch {
-            if recordsFailure, requestRevision == revision {
+            if recordsFailure, requestRevision == revision,
+               (!usesCache || (requestMaterializationGeneration == materializationGeneration
+                && requestEntryGeneration == entryMaterializationGenerations[entryID, default: 0]
+                && (!requestWasUnlisted || requestUnlistedGeneration == unlistedMaterializationGeneration))) {
                 actionFailure = ClipboardHistoryActionFailure(error)
             }
             return nil
@@ -1104,6 +1515,7 @@ final class ClipboardHistoryPresentationModel {
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
+        invalidateUnlistedMaterializations()
         // This load reads the store after any change announced so far.
         storeChangePending = false
         firstPageTask?.cancel()
@@ -1165,6 +1577,7 @@ final class ClipboardHistoryPresentationModel {
             }
             let status = result.status
             guard status.availability == .ready else {
+                invalidateAllMaterializations()
                 entries = []
                 selectedID = nil
                 contentState = .unavailable(status.reason)
@@ -1189,6 +1602,7 @@ final class ClipboardHistoryPresentationModel {
             }
             switch loadedPage.state {
             case .ready:
+                invalidateChangedMaterializations(in: loadedPage.entries)
                 entries = loadedPage.entries
                 nextCursor = loadedPage.nextCursor
                 pagingState = loadedPage.nextCursor == nil
@@ -1199,6 +1613,7 @@ final class ClipboardHistoryPresentationModel {
                 let currentIDs = Set(entries.map(\.id))
                 pruneMaterializations { currentIDs.contains($0) }
             case .indexing:
+                invalidateChangedMaterializations(in: [])
                 entries = []
                 selectedID = nil
                 nextCursor = nil
@@ -1206,6 +1621,7 @@ final class ClipboardHistoryPresentationModel {
                 totalCount = nil
                 contentState = .indexing
             case .failed(let failure):
+                invalidateChangedMaterializations(in: [])
                 entries = []
                 selectedID = nil
                 nextCursor = nil
@@ -1219,6 +1635,7 @@ final class ClipboardHistoryPresentationModel {
             // the current revision came from below, and nothing else would
             // settle this load.
             guard requestRevision == revision else { return }
+            invalidateAllMaterializations()
             entries = []
             selectedID = nil
             nextCursor = nil
@@ -1254,9 +1671,39 @@ final class ClipboardHistoryPresentationModel {
         for entryID: ClipboardHistoryEntryID,
         payloadChanged: Bool = true
     ) {
-        pruneMaterializations(keepsEligibility: !payloadChanged) {
+        guard payloadChanged else { return }
+        entryMaterializationGenerations[entryID, default: 0] &+= 1
+        pruneMaterializations {
             $0 != entryID
         }
+    }
+
+    private func invalidateAllMaterializations() {
+        materializationGeneration &+= 1
+        entryMaterializationGenerations.removeAll()
+        pruneMaterializations { _ in false }
+    }
+
+    private func invalidateChangedMaterializations(in incoming: [ClipboardHistoryEntry]) {
+        invalidateUnlistedMaterializations()
+        let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, materializationIdentity(for: $0)) })
+        let incomingIDs = Set(incoming.map(\.id))
+        for id in previous.keys where !incomingIDs.contains(id) {
+            invalidateMaterializations(for: id)
+        }
+        for entry in incoming {
+            if let identity = previous[entry.id], identity != materializationIdentity(for: entry) {
+                invalidateMaterializations(for: entry.id)
+            }
+        }
+    }
+
+    /// Unlisted requests have no published content token to compare. Keep
+    /// their conservative invalidation separate from visible card identity.
+    private func invalidateUnlistedMaterializations() {
+        unlistedMaterializationGeneration &+= 1
+        let listedIDs = Set(entries.map(\.id))
+        pruneMaterializations { listedIDs.contains($0) }
     }
 
     private func cacheMaterialization(
@@ -1282,16 +1729,14 @@ final class ClipboardHistoryPresentationModel {
     }
 
     /// Keeps what is cached for the entries `isKept` accepts and drops the
-    /// rest, along with their plain-text eligibility unless `keepsEligibility`.
+    /// rest, along with their plain-text eligibility.
     private func pruneMaterializations(
-        keepsEligibility: Bool = false,
         keeping isKept: (ClipboardHistoryEntryID) -> Bool
     ) {
         materializationCache = materializationCache.filter {
             isKept($0.key.entryID)
         }
         materializationOrder.removeAll { !isKept($0.entryID) }
-        guard !keepsEligibility else { return }
         plainTextEligibility = plainTextEligibility.filter { isKept($0.key) }
     }
 
@@ -1313,9 +1758,9 @@ final class ClipboardHistoryPresentationModel {
         }) else {
             return
         }
+        let payloadChanged = materializationIdentity(for: entries[index]) != materializationIdentity(for: entry)
         entries[index] = entry
-        // Only tag creation replaces an entry, and a tag is no payload.
-        invalidateMaterializations(for: entry.id, payloadChanged: false)
+        invalidateMaterializations(for: entry.id, payloadChanged: payloadChanged)
     }
 
     private static func sourceName(

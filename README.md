@@ -101,8 +101,14 @@ when you need them.
 - Search the full retained history, including copied text, OCR, decoded QR
   values, file names and paths, and colors; narrow results by content type,
   source app, tag, or favorites.
-- History is encrypted at rest with a device-only key kept in the macOS
-  Keychain. The key is never synced or included in a backup.
+- Local history is encrypted at rest with a device-only key kept in the macOS
+  Keychain. That local key is never synced or included in a backup.
+- Optional iCloud Clipboard Sync shares history matching selected tags across
+  Macs using the same Apple Account. Enable it separately on each Mac. Files,
+  folders, and application packages use complete versions; each version above
+  5,000,000 bytes requires an explicit download, and application replacement
+  requires Apply Update. See the [Clipboard Sync guide](docs/clipboard-sync.md)
+  for linked copies, conflicts, privacy, and recovery.
 - Optional on-device Automatic Image Text Indexing makes text in newly
   captured images searchable; QR codes in new images are indexed
   automatically.
@@ -281,8 +287,8 @@ records: [docs/plugins.md](docs/plugins.md).
   picker, keyword, Open With override, hotkey, and visibility; drag to reorder.
 - **Clipboard** tab: history monitoring, paste behavior (auto-paste or copy
   only), retention with favorite / tag protection, automatic image text
-  indexing, source-app and Universal Clipboard exclusions, storage usage,
-  and history clearing.
+  indexing, source-app and Universal Clipboard exclusions, selected-tag iCloud
+  Clipboard Sync, storage usage, and history clearing.
 - **Screenshot** tab: save location, filename template, auto-save /
   auto-copy, timer-delay presets, quick-access overlay timeout, and
   recording options.

@@ -6,6 +6,20 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Optional, end-to-end encrypted iCloud Clipboard Sync for selected tags, with
+  separate activation on every Mac, complete files/folders/application packages,
+  per-version downloads above 5,000,000 bytes, linked-file conflicts, and explicit
+  application updates. See the [Clipboard Sync guide](docs/clipboard-sync.md).
+
+### Changed
+
+- Move automatic clipboard-tag sharing from Config Sync to selected-tag Clipboard
+  Sync. Keep local identities and memberships, and retain tags in explicit manual
+  backups. Older clients and historical sync files may still contain previously
+  shared plaintext tag names; upgrading does not erase those copies.
+
 ## [4.2.11] - 2026-10-29
 
 ### Changed

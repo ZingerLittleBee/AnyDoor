@@ -3,6 +3,20 @@ import XCTest
 @testable import AnyDoor
 
 final class ClipboardWallDismissalPolicyTests: XCTestCase {
+    func testApplicationUpdateSheetKeepsWallOpenDuringItsConfirmation() {
+        XCTAssertFalse(ClipboardWallDismissalPolicy.shouldDismissAfterResigningKey(
+            hasTextWindow: false, hasQuickLook: false,
+            isOpening: false, openedOverAnotherApp: true, hasApplicationUpdateSheet: true
+        ))
+    }
+
+    func testFileConflictSheetKeepsWallOpenWhenOpeningACandidate() {
+        XCTAssertFalse(ClipboardWallDismissalPolicy.shouldDismissAfterResigningKey(
+            hasTextWindow: false, hasQuickLook: false,
+            isOpening: false, openedOverAnotherApp: true, hasFileConflictSheet: true
+        ))
+    }
+
     func testQuickLookFocusTransferKeepsWallOpen() {
         XCTAssertFalse(ClipboardWallDismissalPolicy.shouldDismissAfterResigningKey(
             hasTextWindow: false, hasQuickLook: true,

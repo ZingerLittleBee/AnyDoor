@@ -20,6 +20,18 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 }
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
+    case pageNativeFileFacts
+    case entryNativeFileFacts
+    case nativeFileDisplayProbe
+    case linkedFileObservationBeforeContentRead
+    case syncOperationPreparation
+    case syncFilePreservationAfterCopy
+    case syncFileCleanupBeforeRemoval
+    case syncFileRejoinBeforeStaging
+    case syncFileVerificationSegment
+    case fileConflictAfterBranchFreeze
+    case fileConflictBeforeStaging
+    case fileConflictAfterStaging
     case diskFull
     case payloadWrite
     case payloadAuthentication
@@ -58,19 +70,36 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case storeRelocationAfterDisplacement
     case storeRelocationBeforeAdoption
     case storeRelocationAfterAdoption
+    case syncFileBeforePublication
+    case syncWorkingOutputAfterOwnership
+    case syncWorkingOutputDuringConstruction
+    case workingOutputRemovalAfterUnlink
+    case workingOutputRemovalAfterCheckpoint
+    case syncFileTreeBeforeMetadata
+    case syncFileTreeBeforeFreezeVerification
+    case syncFileTreeBeforeOutputVerification
+    case syncFileAfterPublication
+    case linkedFileAfterReplacement
+    case linkedFileBeforeReplacement
+    case linkedFileAfterNameExchange
+    case linkedFileBeforeRecoveryCommit
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {
     private let shouldFail: @Sendable (ClipboardHistoryFaultPoint) -> Bool
+    let nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting
 
-    init(points: Set<ClipboardHistoryFaultPoint> = []) {
+    init(points: Set<ClipboardHistoryFaultPoint> = [], nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting = .live) {
         shouldFail = { points.contains($0) }
+        self.nativeDisplayWaiting = nativeDisplayWaiting
     }
 
     init(
+        nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting = .live,
         shouldFail: @escaping @Sendable (ClipboardHistoryFaultPoint) -> Bool
     ) {
         self.shouldFail = shouldFail
+        self.nativeDisplayWaiting = nativeDisplayWaiting
     }
 
     func check(_ point: ClipboardHistoryFaultPoint) throws {

@@ -12,10 +12,20 @@ enum ClipboardHistoryPortableKeys {
 
 @MainActor
 enum ClipboardHistoryPortableSettings {
-    static func persist(
-        _ definitions: [ClipboardHistoryTagDefinition],
-        to defaults: UserDefaults = .standard
-    ) throws {
+    static func legacyTagPreference(from defaults: UserDefaults) throws -> ClipboardHistoryLegacyTagPreference {
+        guard let value = defaults.object(forKey: ClipboardHistoryPortableKeys.customTags) else {
+            return .init(format: .json, data: Data("[]".utf8))
+        }
+        if let json = value as? String {
+            return .init(format: .json, data: Data(json.utf8))
+        }
+        // UserDefaults values are property lists. Preserve their type and value
+        // rather than replacing a malformed legacy setting with empty bytes.
+        return .init(format: .propertyList, data: try PropertyListSerialization.data(
+            fromPropertyList: value, format: .binary, options: 0))
+    }
+
+    static func encode(_ definitions: [ClipboardHistoryTagDefinition]) throws -> String {
         let tags = definitions.map {
             ClipboardTag(id: $0.id, name: $0.displayName)
         }
@@ -23,31 +33,10 @@ enum ClipboardHistoryPortableSettings {
         guard let json = String(data: data, encoding: .utf8) else {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        defaults.set(json, forKey: ClipboardHistoryPortableKeys.customTags)
-        NotificationCenter.default.post(
-            name: .portableConfigDidChange,
-            object: nil
-        )
+        return json
     }
 
-    static func reconcile(
-        module: ClipboardHistoryModule,
-        defaults: UserDefaults = .standard
-    ) async throws {
-        let definitions = try definitions(from: defaults)
-        _ = try await module.replaceTagDefinitions(with: definitions)
-    }
-
-    static func definitions(
-        from defaults: UserDefaults
-    ) throws -> [ClipboardHistoryTagDefinition] {
-        guard
-            let json = defaults.string(
-                forKey: ClipboardHistoryPortableKeys.customTags
-            )
-        else {
-            return []
-        }
+    static func definitions(from json: String) throws -> [ClipboardHistoryTagDefinition] {
         let tags = try JSONDecoder().decode(
             [ClipboardTag].self,
             from: Data(json.utf8)

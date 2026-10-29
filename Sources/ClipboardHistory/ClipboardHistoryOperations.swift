@@ -6,6 +6,16 @@ extension ClipboardHistoryModule {
     struct MutationApplyResult: Sendable {
         let outcome: ClipboardHistoryMutationOutcome
         let didMutate: Bool
+        let displaySnapshot: ClipboardHistoryPageDisplaySnapshot?
+        let displayRevision: Int64
+
+        init(outcome: ClipboardHistoryMutationOutcome, didMutate: Bool,
+            displaySnapshot: ClipboardHistoryPageDisplaySnapshot? = nil, displayRevision: Int64 = 0) {
+            self.outcome = outcome
+            self.didMutate = didMutate
+            self.displaySnapshot = displaySnapshot
+            self.displayRevision = displayRevision
+        }
     }
 
     public func capture(
@@ -20,8 +30,8 @@ extension ClipboardHistoryModule {
     public func page(
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor? = nil
-    ) throws -> ClipboardHistoryPage {
-        try indexedPage(query, after: cursor)
+    ) async throws -> ClipboardHistoryPage {
+        try await indexedPage(query, after: cursor)
     }
 
     public func sourceSummaries() throws
@@ -34,6 +44,7 @@ extension ClipboardHistoryModule {
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {
         let database = try await writableDatabase()
+        let epoch = storeEpoch
         let result: MutationApplyResult
         switch mutation {
         case .delete(let entryID):
@@ -56,7 +67,7 @@ extension ClipboardHistoryModule {
         if result.didMutate {
             publishMutation()
         }
-        return result.outcome
+        return try await resolveMutationDisplay(result, in: database, epoch: epoch)
     }
 
     public func materialize(
@@ -68,6 +79,7 @@ extension ClipboardHistoryModule {
         if mustWaitForWriteTurn, try resolvesFileReferences(request) {
             try await waitForWriteTurn()
         }
+        try await recoverLocalLinkedFileApplications(entryID: request.entryID)
         return try materialize(request, in: requiredDatabase())
     }
 
@@ -276,6 +288,7 @@ extension ClipboardHistoryModule {
         for entryID: ClipboardHistoryEntryID,
         from database: DatabasePool
     ) throws -> [Int: ClipboardHistoryMaterializedFileReference] {
+        let synchronized = try materializeSyncFileReferences(for: entryID, in: database)
         let storedID = entryID.value.uuidString.lowercased()
         let rows = try database.read { database in
             try Row.fetchAll(
@@ -291,7 +304,7 @@ extension ClipboardHistoryModule {
                 arguments: [storedID]
             )
         }
-        guard !rows.isEmpty else { return [:] }
+        guard !rows.isEmpty else { return synchronized }
         let ownedCount = rows.count {
             ($0["reference_provenance"] as String) == "legacyOwned"
         }
@@ -316,6 +329,7 @@ extension ClipboardHistoryModule {
         var resolved: [ResolvedFile] = []
         var unavailableCount = 0
         for row in rows {
+            if synchronized[row["item_index"]] != nil { continue }
             guard let bookmark: Data = row["bookmark_data"],
                 let identityData: Data = row["identity_data"]
             else {
@@ -419,7 +433,7 @@ extension ClipboardHistoryModule {
             }
             try Self.bumpSearchIndexGeneration(in: database)
         }
-        return Dictionary(
+        let originals = Dictionary(
             uniqueKeysWithValues: resolved.map { file in
                 (
                     file.itemIndex,
@@ -431,6 +445,7 @@ extension ClipboardHistoryModule {
                 )
             }
         )
+        return originals.merging(synchronized) { _, workingCopy in workingCopy }
     }
 
     public func performMaintenance(
@@ -604,8 +619,12 @@ extension ClipboardHistoryModule {
         else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
         monitoringRequested = false
         monitoringEnabled = false
+        await stopLegacyTagImport()
+        await suspendSync()
         await captureMonitor?.setEnabled(false)
         await stopMaintenanceTask()
         await stopDerivedJobScheduler()
@@ -713,6 +732,7 @@ extension ClipboardHistoryModule {
                         payloadPaths: []
                     )
                 }
+                try Self.recordExplicitSyncDeletion(entryIDs: [storedID], in: database)
                 let paths = try logicallyDelete(
                     entryIDs: [storedID],
                     in: database

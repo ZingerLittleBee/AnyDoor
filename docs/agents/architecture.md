@@ -82,6 +82,540 @@ store. A failed move reports `.storeRelocationFailed` (Retry only, never Reset) 
 the pre-v2 sweeps as a contract. **Keep the AnyDoor.store path when changing ModelConfiguration**,
 otherwise unrelated user data appears "lost".
 
+### Clipboard Sync
+
+`ClipboardHistoryModule` owns local participation, selected tags, encrypted outbox,
+remote inbox, and imported history in its existing SQLCipher store. The additive
+`v14_clipboard_sync` migration keeps those records separate from local content and
+leaves the device-only history master key unchanged. Ordered entry envelopes
+preserve supported standard representations; ordinary files use independent
+encrypted version descriptors and bodies. `v15_clipboard_sync_tags` adds per-tag
+revisions, selected associations, merge aliases, and account-specific enrollment
+guards; `v19_clipboard_sync_files` stores file versions and ordered membership.
+Versioned edits, conflict resolution, complete files/directories/application
+packages, and the shared content lifecycle implement the
+[Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md).
+
+Selected definitions and associations use independent encrypted operations;
+unselected names and memberships remain local. Before importing an entry operation,
+the same writer transaction snapshots local membership differences for that
+subject, including edits made during a provider await. Tag-state and merge
+operations retain their required global snapshot; file-body/version operations
+do not scan unrelated memberships. Initial content snapshots seed
+associations without overwriting later operations. Same-name tags remain distinct
+in Settings, history filters, and card menus. Explicit merge previews disclose the
+newly eligible local history and reject stale confirmation; persistent aliases
+prevent old snapshots from recreating merged identities. Independent operations
+converge by a persisted logical revision and operation identity, not delivery order.
+A merge uses the smallest existing ID as the canonical identity, so overlapping
+merges converge without cycles. A remote merge never grants permission to move
+retained history between Apple Accounts; Settings exposes explicit local enrollment.
+Losing the final selected tag records an encrypted withdrawal in
+`v21_clipboard_sync_withdrawal`; another selected tag keeps the entry shared.
+Acknowledged withdrawal uses the same conditional cleanup ledger as permanent
+deletion to purge cloud content while retaining local history and minimal opaque
+association state. Local copies still follow tag-protection and retention rules.
+Explicit tag selection, reassignment, or a confirmed merge can rejoin the original
+shared identity. A rejoin checkpoint carries the original text ancestry and
+independent metadata/membership revisions, so retained offline edits use the
+existing conflict workflow and stale snapshots cannot restore old associations.
+Tag rename/replay alone never authorizes rejoining. Publication checks preserve
+independent deletion, saved-edit, account, and reset exclusions. Settings reports
+the local withdrawal/rejoin counts and the shared scope of selection changes.
+
+The initial encrypted entry envelope retains every supported item and standard
+representation in order: exact text and links, rich text bytes, standard colors,
+owned PNGs and thumbnails, and file descriptors. It validates the complete
+structure and aggregate capture limits before making it usable. Owned assets are
+published with the local authenticated payload store before SQL references commit;
+failed publication cannot leave a shorter mixed entry. Legacy text envelopes use
+the same writer. Search fields are rebuilt locally, and receiving an entry neither
+starts image recognition nor changes capture preferences or recent-use order.
+
+Outgoing preparation uses stable-key continuation and one entry or immutable
+operation per commit. Payload reads, thumbnail derivation, encoding, and sealing
+run outside the module actor and database writer. Each commit renews its write
+turn and validates the current account, epoch, key, publication authority, and
+pending revision. Tag definitions and memberships recheck only the affected tag
+or entry/tag pair after preparation. Entry and rejoin snapshots use the history
+revision conservatively, so unrelated mutations can require preparing them again.
+Off revokes admission and drains the owned preparation task before returning.
+Revision-only comparisons use readers, including stale-preparation continuations
+during a search-index rebuild; this retains the existing write-turn contract.
+
+The additive `v17_clipboard_sync_content` migration owns independent favorite,
+OCR, and QR registers. Local changes persist their intent in the same transaction
+as the history mutation. Lamport counters with immutable operation IDs converge
+across restart and reordering, including metadata received before its entry. An
+initial snapshot never replaces a newer register. Recognition results refer to
+the initial content record and apply only while its bitmap remains; a late result
+cannot restore content removed by a text edit. Preferences, jobs, search-index rows,
+and local recency never travel in these metadata operations.
+
+The additive `v18_clipboard_sync_versions` journal records immutable versions and
+parent relationships in SQLCipher before a local edit can be acknowledged. Edits
+and resolutions share the same account, epoch and shared identity as the original
+entry. Receiving an ancestor or duplicate does not restore old text; concurrent
+heads preserve each local working text until an explicit choice creates a result
+with all displayed heads as parents. The wall shows a conflict action and the
+existing text panel presents the full alternatives. The editor carries the basis
+it displayed, keeps a failed save open, and never silently rebases an old draft.
+Text edits retain favorite/tag/provenance state and local recency. The v14 upgrade
+can replay the initial encrypted operation to recover ancestry while preserving
+an edit whose original upload chunks have already been reclaimed.
+
+The additive `v22_clipboard_sync_deletion` journal binds explicit deletion to an
+account, epoch, and shared identity. Only the explicitly confirmed bulk-clear IDs
+publish deletions; automatic retention remains local. Clear confirmations bind the
+shared identity set as well as the local revision, and disclose their cross-device
+scope. A deletion preserves each maximal unacknowledged local text branch as an
+independent history entry in the same transaction. A durable, dismissible Settings
+notice identifies those copies; their publication exclusion survives tag selection,
+account changes, and notice dismissal.
+
+Deleted identities fence initial content, edits, metadata, and membership replay.
+Authenticated content receipts drive bounded, conditional remote cleanup after
+the tombstone is published. The native adapter preserves the tombstone and control,
+removes chunks before their manifest, and distinguishes a missing deletion target
+from missing authority. Interrupted cleanup retries from its SQLCipher journal.
+A control conflict imports fresh lifecycle authority before retrying an upload.
+File bodies and version events use these same receipts and lifecycle authority;
+deletion never removes original or independently exported files.
+
+Every device starts disabled. Constructing the production services does not access
+CloudKit or the synchronizable Keychain. The host resumes stored consent only
+after legacy migration reports ready, and suspends work before store replacement
+or termination. Settings uses typed module commands and status; it cannot bypass
+migration readiness. Import writes history directly, preserves capture provenance,
+and never captures from or writes to the system pasteboard.
+
+The native adapter checks the actual signed capabilities before using the
+production private database. A separate immutable, account-scoped synchronizable
+Keychain item supplies application encryption; the cloud control record chooses
+one key identity by compare-and-swap. Missing keys wait, and previously observed
+control state is never silently recreated. Account changes revoke local
+participation. Metadata discovery excludes asset bodies; explicit downloads fetch
+the encrypted chunks. Remote tag selection does not authorize republishing
+history associated with another account; that requires explicit local tag
+selection for the new account. Durable operation identities, ciphertext, inbox receipts,
+and control fencing make retry and restart safe without sharing the local store
+or local-history key. See [release provisioning](../releasing.md) for the signed
+capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
+for isolated real-store coverage; those tests do not establish live iCloud delivery.
+
+Native response identities accept only the checked concrete owner or
+`CKCurrentUserDefaultName` for the exact account-scoped zone and record name.
+Fetch/save/delete callback keys are normalized to requested keys, including partial
+failures; returned control system fields are preserved for the next atomic CAS.
+Change and zone callbacks validate identities even after an ordinary provider
+failure. An observed identity mismatch cannot be replaced by a later successful
+callback or treated as an ordinary network retry. This compatibility does not
+weaken the separate concrete-account, key, epoch, or cancellation checks.
+
+`ClipboardHistorySyncFiles` prepares currently accessible file and directory content
+before staging an entry envelope. Source paths and bookmarks remain local.
+An initially unavailable original retains its captured identity for Retry and
+relaunch. Restored access publishes a new immutable child version of the same
+object; a different object at the old path does not qualify for recovery.
+Each top-level file at or below 5,000,000 original bytes downloads automatically;
+larger versions require an exact-version download action. Uploads are automatic
+for eligible files of any size. A previously complete local version remains
+usable until the requested replacement is ready. Preview, copy, Open, and Reveal
+never authorize a pending download.
+Manual download commands may return after durable exact-version consent with
+`waitForSync: false`. The owned sync task prioritizes the request at its next
+outgoing checkpoint; it does not preempt an active provider call.
+The `v30_clipboard_sync_file_retries` journal isolates damaged or locally inaccessible
+file downloads from independent sharing and deletion. An unresolved file keeps its
+visible failure and previous complete bytes. Automatic retries wait 30 seconds,
+including across restart; explicit Retry can retry immediately. Account, key,
+control, provider backoff, and database failures still stop the pass.
+Corrupt encrypted content records persist consecutive failures in the same retry
+journal. Their download/authentication/decode delay grows from 30 to 60, 120, 240,
+480, and at most 900 seconds; change discovery continues. Explicit Retry can
+attempt immediately, and successful import retires the counter with its receipt.
+Other verified retirement events in the page can apply, but an unreadable record
+may contain deletion or sharing authority: its cursor remains unacknowledged and
+outgoing publication stays blocked until that unknown authority is resolved.
+Directory/package/symlink content is not flattened into an ordinary file.
+Directories use the same version graph, transport, exact download consent, and
+Linked Location ownership as files. Their threshold includes every synchronized
+data fork, resource fork, and portable extended-attribute value in the complete
+object. Path names and framing overhead have a separate encoded byte count.
+Metadata discovery skips file-body assets; only an authenticated entry descriptor
+authorizes a version download. Normal paste and host actions require every file
+member to be available and never silently return a subset.
+
+`ClipboardSyncFileTransfer` freezes coordinated source reads into 4 MiB
+authenticated encrypted segments, with no whole-file allocation or application
+size ceiling. Data and resource forks stream through fixed buffers; Darwin's
+ordinary extended-attribute API requires one complete value at a time. Such
+values use fallible allocation and retain the platform limit, rather than
+claiming a 4 MiB peak for arbitrary metadata. `ClipboardSyncFilePublication` verifies the full segment sequence,
+length, and digest before a second bounded pass builds a visible working file.
+The earlier bounded small-file envelope shares the same candidate publication
+boundary. These paths publish into the visible
+`~/Documents/AnyDoor/Clipboard/` working root, under account/object/version folders,
+with no-follow directory traversal, a synced ordinary pending output, and atomic
+non-overwriting publication. This visible working location is the plaintext
+exception; encrypted transfer/outbox storage has no plaintext download cache.
+The v23 transfer journal persists per-version consent, completed bytes, failures,
+and upload operation ownership across relaunch. Retry authenticates cached units
+and fetches missing or damaged units. Card and list controls display progress and
+typed failures. Completed upload metadata remains available to withdrawal cleanup,
+including segment ranges whose remote manifest was never committed. Final file
+publication rechecks account, active epoch, local generation, and live membership.
+The version descriptor is durable before publication, so interrupted publication
+retries only adopt identical complete bytes and refuse an unrelated existing file.
+Missing or replaced working files are unavailable, not a complete-looking path.
+
+The additive `v32_working_output_recovery` journal owns only exact generated
+Receiving paths, with a durable reservation before creation, pinned native
+identity, and an encrypted complete-output fingerprint. A store-local advisory
+lease excludes active constructors in this and other processes from recovery.
+The additive `v34_working_output_members` journal records native identities when
+each member is created, and snapshots after each 4 MiB of actual writing and when
+its content and metadata finish. It
+stores no sync key or plaintext content. An already authorized receive can replay
+the same authenticated version using its current key and encrypted transfer
+cache, require the exact created-member set, an unchanged durable snapshot for
+every member, and a matching construction prefix,
+then reclaim that partial before retrying. Data and resource-fork tails may be
+short, but every retained byte and portable attribute must match the source.
+Its stable empty `working-output.lock` is a store artifact during legacy
+migration and relocation. Store replacement holds an exclusive lease, including
+when an older store has not created the sidecar yet, and accepts only an empty
+regular file without following links. Pending output ownership makes an
+otherwise entry-empty store nonempty for adoption and blocks legacy replacement;
+confirming a history entry count does not discard external recovery notices.
+On startup or a local recovery query, unchanged proven candidates can be removed;
+missing exact paths retire ownership without following renamed or published
+files. Recovery never deletes by filename pattern or reclaims retained
+`AnyDoor update` outputs.
+
+Off and startup do not obtain sync keys to replay an incomplete construction.
+They retain it for a later authorized receive or review. A changed member,
+replacement identity, extra member, unavailable replay, or creation interrupted
+before native identity persistence remains an ordinary readable output for review.
+`workingOutputRecoveries` exposes that exact path across Off and restart. Keep
+File explicitly leaves its bytes alone and relinquishes ownership; users can
+inspect or remove it through Finder. One pending reservation per version directory
+prevents repeated failures from accumulating new partials. Existing review notices
+use cheap path/identity checks on refresh, rather than hashing their contents
+again; an incomplete candidate is replayed only by an authorized receive. An
+unavailable inspection can be retried by a later authorized receive using the
+original ownership proof, including older unavailable notices. Failed native
+reads do not establish modification. A detected mismatch permanently leaves that
+candidate for review, even if a later inspection cannot access it. Snapshot equality
+protects timestamp-only edits and same-inode truncation to another valid source
+prefix. Each parent directory is updated in the child's creation transaction.
+Writes between progress checkpoints, and a crash between a native metadata change
+and its durable snapshot, remain conservative. Progress costs
+O(content bytes / 4 MiB + members) database transactions, with no extra file fsync.
+This is local recovery, with no cloud deletion, new download consent, or
+automatic re-enablement of sync. Unverified outputs never materialize as complete
+history, and encrypted background stores still contain no plaintext file cache.
+
+After an output passes its complete ownership or authenticated-prefix proof,
+cleanup persists a removal manifest before deleting members. Each successful
+member deletion records the remaining set and the directly affected parent's
+snapshot before cancellation is observed. A later transient failure or restart
+can resume from that durable removal progress without acquiring another sync key.
+Recovery still requires the exact remaining set, identities, and snapshots;
+extra, replaced, or modified members remain for review. A crash after a native
+unlink but before its progress transaction remains conservative: recovery does
+not infer ownership from a missing member or relax directory timestamps. Native
+mutation and snapshot capture are not atomic with concurrent external edits.
+
+`ClipboardFileTree` extends that transfer with typed, canonical tree framing.
+The temporary inventory and path-validation tables use SQLCipher, including
+member identities, sorting, and metadata descriptions. A header never contains
+all attribute values: each attribute has its own bounded descriptor and value
+stream. No plaintext archive or whole-tree JSON is staged. The old raw
+`segmentsV1` and bounded inline envelopes retain their original decoding rules.
+Migration v27 retries previously unsupported local directories as new child
+versions without rewriting an advertised descriptor.
+
+Portable tree content includes ordinary rwx/executable permissions, modification
+times, symlink targets, logical resource forks, FinderInfo, quarantine, and
+ordinary extended attributes (including attributes on symlinks). Compression
+backing, file-provider/storage attributes, machine security/identity attributes,
+ACL principals, ownership IDs, and filesystem flags are not copied. In particular,
+UF_TRACKED is never assigned. Hard-linked regular paths become independent
+regular files with identical content; symbolic links remain links and their
+targets are never traversed. Unsupported special nodes and invalid paths fail
+the complete version instead of producing a partial tree.
+
+`ClipboardFileTreeDecoding` validates the authenticated stream before ordinary
+construction. Creation and final metadata use pinned directory/file descriptors;
+inode checks reject substituted parents and files. Per-member witnesses and a
+separate root-metadata digest protect nested saves and same-length root-attribute
+changes across a whole-tree rename. Long proof reads run outside the module actor,
+main database write transaction, and revocable mutation gate. The final gate
+admits only the short name exchange. Its already-persisted replacement journal
+retains both visible roots during post-exchange checking or interrupted rollback.
+An unchanged prepared replacement remains owned by that exact application journal
+and is revalidated for reuse, so repeated native exchange failures do not create
+another complete tree. A newer selected version cannot reuse an older intent.
+Application packages still require a fresh explicit Apply Update action. Unknown
+editor replacements require revision-bound reassociation, which retires the old
+journal without inferring a swap outcome or deleting either visible output.
+An unresolved journal exposes the existing Retry/Reassociate actions through
+unavailable tracking status; it does not make the saved working bytes unavailable.
+Reassociating the exact journal replacement preserves its authenticated base when
+its bytes and the current complete, single-head version graph still agree. A
+moved installed replacement therefore does not conflict with itself. An edited,
+different-identity or superseded candidate retains the old base for reconciliation.
+FSEvents subtree notifications request full reconciliation, including dropped
+event batches; vnode observation continues to own root identity and moves.
+Top-level vnode handles share a process-wide budget of 64, including handles
+awaiting cancellation cleanup. One module-owned five-second task rotates through
+at most sixteen unobserved locations, even when provider polling is disabled.
+These inspections use local account/epoch and generation admission; only changed
+observations request automatic sync, which retains provider authority checks and
+retry deadlines. Unchanged or unavailable locations do not poll the provider.
+Overflow polling keeps a five-minute, handle-free metadata hint from the last
+content proof. An unchanged ordinary file skips its body read; directory hints
+include every descendant's native snapshot, never just the root stamp. Hints
+expire and are cleared on suspension or removal. Native events, ordinary sync
+reconciliation, explicit refresh and publication still verify complete content.
+Inventory traversal checks cancellation between members; a blocked individual
+native call still has no guaranteed cancellation deadline.
+A frozen local version and its originating location's new base commit in one
+transaction after rechecking the location revision, identity, and prior base.
+Pausing or reassociating the location during freezing therefore cannot publish
+an edit that its origin fails to adopt; explicit Refresh uses the same boundary.
+
+Real temporary-directory coverage is in
+[directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),
+[recursive observation tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryTreeObservationTests.swift),
+and [malformed-stream/conflict tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectoryBoundaryTests.swift).
+These isolated provider-boundary tests do not establish signed two-Mac delivery.
+History exposes file status, Open, Reveal in Finder, and Save As. Exported copies
+remain independent and do not create Linked Locations.
+
+History pages first capture SQL-only display plans. Native availability and
+application checks run on one dedicated serial Dispatch queue, outside database
+transactions and Swift's cooperative executor. Identical database/page snapshots
+share in-flight work, with independent waiter cancellation; cancelled queued work
+is discarded. Each waiter has a two-second display budget on an independent timer.
+A blocked native call cannot be interrupted, but cannot create additional native
+workers or hold a display response indefinitely. On timeout or repeated unrelated
+revision changes, the caller rereads the current SQL snapshot and uses only known
+display hints; uninspected identities remain unavailable. Store identity and
+cancellation checks still apply. SQL-only pages return their coherent snapshot
+without retrying on unrelated transfer revisions. Favorite and tag mutations
+commit and notify before optional native display work; responses use current SQL
+metadata and already-resolved display hints, never new native reads inside the
+writer.
+A malformed stored file descriptor marks only that display item unavailable;
+file actions still validate its authoritative descriptor and live identity.
+Linked Location rows with invalid identifiers or unknown kind/state values remain
+stored but are omitted from display and observation. They grant no action or
+materialization authority, including through an older file-reference fallback.
+If a tag creation commits before its entry is concurrently deleted, the Host
+refreshes current tag definitions even though the assignment can no longer be
+returned. A concurrently deleted entry or tag is never restored from the old
+creation result.
+
+Application packages use that same authenticated tree and aggregate, per-version
+download policy. Receiving a version does not replace an associated application.
+The additive `v28_clipboard_sync_application_updates` migration persists explicit
+Apply Update plans bound to account, epoch/key, entry, location revision and
+identity, actual base, selected version, and file-graph revision. Downloading
+requires a fresh plan before Apply; it grants no replacement permission. A folder
+containing a real application also needs Apply because exchanging its root would
+replace that application. Classification never follows external symbolic links.
+
+`ClipboardApplicationRunningGuard` uses native [NSWorkspace.runningApplications](https://developer.apple.com/documentation/appkit/nsworkspace/runningapplications)
+on the main run loop, including KVO for background/LSUIElement applications.
+It retains matched `NSRunningApplication` instances and compares actual package
+and executable identities, rather than treating a shared bundle ID or reusable
+PID as identity. Running or unprovable identities refuse Apply. After long tree
+verification, a synchronous main-thread refresh surrounds the existing final
+authority gate and short exchange. This is an observation boundary, not an OS
+lock excluding every possible concurrent process launch. No application is
+terminated. In-flight explicit updates are excluded from background journal
+recovery; interrupted exchanges retain the existing complete-root recovery rules.
+
+[Application tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationUpdateTests.swift),
+[download/migration tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationBoundaryTests.swift),
+and [recovery tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryApplicationRecoveryTests.swift)
+use disposable AppKit packages, inside-out ad-hoc signing, real native launches,
+and normal fixture-owned exits. Strict signature checks after receive/Apply never
+re-sign the received package. Unsigned packages remain supported. The production
+[Apply sheet](../../Sources/AnyDoor/Views/ClipboardApplicationUpdateSheet.swift)
+uses these module actions and retains the previous linked version until explicit
+success; GUI interaction and signed two-Mac iCloud delivery are separate evidence.
+
+The additive `v24_clipboard_linked_locations` migration records the original,
+managed working copy, and explicitly associated ordinary files with their actual
+base version, resource identity, and dirty/conflict state. Dispatch filesystem
+events are hints; resume and synchronization reconcile saved bytes using bounded
+reads. Observation stops with local sync participation. Publication reuses the
+shared entry authority before and after I/O and the single file-version transfer
+path, so ignored or withdrawn entries cannot restart uploads through a watcher.
+Remote versions apply only over the recorded unchanged base. A durable replacement
+journal and atomic name exchange preserve interrupted replacements and later saves;
+dirty locations retain their bytes and expose a pending conflict. Visible verified
+replacement files beside a linked location are ordinary working output, not a
+plaintext download cache. Successful exchange and recovery keep the displaced
+output beside the linked location because an editor can still save through its
+old file descriptor after verification. History exposes Linked Locations and Associate File;
+normal materialization prefers the stable linked location after completeness checks.
+The final exchange uses a revocable generation gate and a serialized database
+authority check after file hashing. Off revokes the gate before waiting for work
+to exit; deletion/withdrawal/reset transactions cannot race the last eligibility
+read. No long file hashing or provider I/O holds that final mutation gate.
+Shutdown cancels and drains owned sync work before completing termination. File
+loops check cancellation, but an individual synchronous filesystem call or native
+file-coordination request has no guaranteed completion deadline. The app does not
+abandon a writer that could still publish after shutdown; stalled-volume quit
+behavior remains outside the isolated test evidence.
+
+The additive `v26_clipboard_sync_file_conflicts` migration persists displayed
+choices, resolution journals, and version retention pins. File ancestry must be
+complete and acyclic before selecting or installing a descendant; missing parents
+can arrive later, while cyclic events are rejected. The conflict sheet binds a
+choice to its account/epoch, exact heads, and every participating location's
+revision, identity, actual edited base, and saved digest. Confirmation freezes
+each dirty location as its own version against that base, then atomically stages
+those branches and one causal merge through the existing encrypted transfer path.
+Saved changes or new heads invalidate the displayed choice. Existing final
+replacement admission still controls every physical linked-file update.
+
+Every complete conflicting head at or below 5,000,000 bytes is obtained
+automatically, including non-current heads. Larger candidates require explicit
+per-version download consent. Candidate transfers use their own completion cursor
+and preserve existing working-file availability. An explicit candidate download
+authorizes only that object/version and publishes
+an ordinary verified file under the visible working root's `Conflict Versions`
+directory. It does not select the candidate or move the last complete version.
+Choosing an available old large version does not fetch unchosen newer bodies.
+Preparing journals retain authenticated encrypted segments across restart;
+staged journals reuse the same operation IDs. If a later save invalidates an
+interrupted choice, its previously frozen branches remain selectable and can be
+restored from retained local ciphertext. A new resolution includes these retained
+branches as well as current dirty bytes. Pins remain until the result is committed
+and every recorded linked location has durably installed it; superseded proposals
+do not trigger eager body deletion. History exposes review, Open, explicit
+Download, Refresh, Cancel, and Use This Version. A saved choice can still await
+upload or linked-file application. Independent exports remain independent.
+
+The additive `v29_clipboard_sync_file_lifecycle` migration retains object ownership
+before member cascades, including historical bodies, incomplete uploads, and
+prepared conflict versions. Withdrawal purges their cloud records through the
+shared conditional cleanup ledger while retaining local working files. Explicit
+rejoin carries the complete file DAG under the original object identity. A
+separate restoration journal tracks current transfer progress without rewriting
+historical acknowledgements. Retained authenticated ciphertext can restore the
+same immutable version; missing ciphertext requires a newly encrypted version
+with the proven linked base as its parent.
+
+Remote deletion inspects saved local work even when observation was stopped.
+Unpublished frozen branches and newer saved bytes become independent visible
+copies with the existing preserved-edit notice and permanent automatic-publication
+exclusion. Copy publication survives restart, and inaccessible sources remain
+pending. Only after owned work is preserved can a durable local cleanup intent
+remove the corresponding encrypted `SyncTransfers` directories. Original files,
+linked working files, independently exported copies, and replacement backups
+are never transfer-cache targets. A locally completed name exchange can finish
+its journal while sync is off, so retained history remains materializable without
+reactivating cloud access. File, directory, and package bodies share these rules.
+Cloud Reset captures these same ownership and preservation intents before retiring
+the outbox. It reclaims partial encrypted transfers after preserving unpublished
+work, keeps local history and visible files, and cannot authorize a late response
+or old-account queue to restart publication.
+
+The additive `v16_clipboard_sync_recovery` migration persists the last actionable
+account/key failure and the provider's retry deadline in the encrypted store.
+Relaunch preserves that deadline, and Retry cannot bypass it. Transient connecting
+and transfer phases are not treated as completed work after restart. Native
+nonrecoverable provider/request errors and incompatible versions retain distinct
+failures and stop automatic admission, including polling, file observations, and
+resume after restart. Explicit user commands may retry once, including commands
+queued during a failing pass; Off revokes that intent. Provider retry deadlines
+still take precedence. A permanent rejection outranks conflict/batch siblings
+inside a partial CloudKit failure; retryable wrappers retain the longest supplied
+delay.
+Request-size limits, unique-constraint rejections, managed-account restrictions,
+and unrecognized provider errors pause unchanged automatic requests. Known URL
+connectivity failures remain retryable, and cancellation remains cancellation.
+The authenticated content envelope names exactly one top-level operation; mixed
+known and unknown cases are corruption. Additional fields inside a known payload
+retain normal Codable forward compatibility.
+Authenticated content with an unknown operation name and controls with an unknown
+explicit protocol version report unsupportedVersion. Invalid JSON, malformed known
+content, and authentication failures remain corruptData. A future control version
+does not bypass account identity checks or authorize replacing the collection.
+Account changes persist disabled participation and its reason; an old enabled flag or
+retained key cannot bind a new account. Unresolved manual activation is only
+retained within the current runtime generation, so a restart before account
+binding may require explicit activation again rather than authorizing an
+unobserved account.
+
+Missing key material and unavailable Keychain services remain waiting states;
+they do not establish that Passwords & Keychain sync is disabled. Interaction
+restrictions, explicit access denial, and integrity/recovery failures are shown
+separately. Settings links to Apple's recovery guidance and never replaces a key
+or deletes cloud content to repair access. Disabled devices perform no ordinary sync account or key work. An explicitly
+confirmed, unfinished cloud clear resumes its account-scoped cleanup; active runs revalidate the concrete account after awaited service
+responses and use polling/Retry to observe restored access. See the
+[account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
+for the boundary between deterministic fault tests and signed evidence.
+
+A previously observed collection whose control read confirms absence exposes
+`canRecoverMissingCloudCollection`, including while Off and after relaunch.
+[Missing collection recovery](../../Sources/ClipboardHistory/ClipboardHistoryMissingCloudCollectionRecovery.swift)
+uses a separate opaque account/control confirmation and rechecks absence before
+retiring local publication authority. It preserves the shared key, local history,
+unpublished frozen versions and later saved files, then stores a fresh-epoch
+candidate with participation Off and all Sync Tags deselected. No unknown remote
+records are cleared. Only a later explicit On and fresh tag selection can create
+and publish the new collection. A returning control or changed account rejects
+stale confirmation. Recovered epochs remain durably retired even when an old
+control returns after recovery or races the next creation; another device's new
+epoch may still win, including a fresh device's different key. A recovered device
+loads and verifies that winning key before accepting the new control; a missing
+key remains waiting without discarding its recovery candidate. An affected
+unfinished clear becomes superseded, never reported as successfully cleared.
+
+A Mac that remained offline throughout deletion and recreation can still hold an
+established control for the previous key. An observed active replacement with both
+a different key and a different, non-retired epoch exposes
+`canRecoverReplacedCloudCollection`. Its
+separate confirmation binds the account, previous local control, and observed
+replacement control; confirmation rechecks all three before retiring only local
+publication authority. The replacement's cloud records are not cleared or changed.
+Recovery preserves local history and saved work, leaves participation Off, and
+requires explicit activation and tag selection. Activation loads and verifies the
+replacement key before joining; a missing key remains waiting. A key change within
+the same epoch remains an integrity failure, and retired epochs cannot be joined.
+
+Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
+An interrupted clear for account A does not prevent explicit participation or
+an independent clear in account B. Only the current account can resume its
+journal; switching accounts never retargets a prior confirmation. The typed
+confirmation binds the visible account and collection; execution revalidates the
+current system account. The permanent control record first moves by atomic CAS
+to a resetting epoch, then each bounded metadata-only cleanup page deletes
+content and advances that same control in one atomic operation. Control, zone,
+shared key, local history, tag definitions, and memberships remain intact.
+Only confirmed stopped authority completes the clear. Ambiguous responses replay
+from durable progress; a newer manually activated epoch supersedes the old clear
+without touching newer content or claiming observed completion.
+
+Offline peers revoke participation and retire old publication queues when they
+observe retirement or another epoch. Manual activation reuses the existing key,
+creates a new active epoch by CAS, and requires fresh tag selection for local
+backfill. Reset preserves independent local-only and cross-account exclusion records.
+Its own retained-entry exclusions prevent remote tag selection from publishing
+pre-reset copies; explicit local selection or confirmed merge can authorize them
+again through the shared content-publication predicate. Cloud tag states, aliases,
+and queued merges retire with the old collection; local tags and memberships stay. Settings exposes preparation, confirmed deletion progress, interruption,
+and completion even while ordinary sync is off. See
+[cloud-reset evidence](../testing/clipboard-sync-signing.md#cloud-reset-evidence).
+
 ### Launch-time SwiftData seeding/migration
 
 `AppDelegate.applicationDidFinishLaunching` runs idempotent `BuiltinPreferenceSeeder` (one
@@ -819,8 +1353,7 @@ writes that key), and `BackupService.reconcileLiveRuntime()` re-reads settings i
 CommandPaletteService / LocalizationManager / HyperKeyService / ScheduledShutdownService /
 CaptureSettings / TranslationSettings, adopts the imported installed-plugin set through
 `PluginRegistry.reconcileAfterImport()` (real install/uninstall lifecycle, so plugin surfaces appear
-or disappear), re-applies the imported clipboard custom tags and monitoring settings to the history
-module, rebuilds QuicklinkStore and PanelStore, and refreshes hotkey snapshots so changes apply
+or disappear), refreshes clipboard monitoring settings, rebuilds QuicklinkStore and PanelStore, and refreshes hotkey snapshots so changes apply
 without relaunch. Backup has no storage protocol: `SyncSettingsView` writes the `BackupCodec` JSON
 atomically to the NSSavePanel URL and reads the NSOpenPanel URL directly (a missing file reads as
 empty data, so `BackupCodec.decode` reports the failure). Automatic multi-device Config Sync
@@ -828,6 +1361,31 @@ empty data, so `BackupCodec.decode` reports the failure). Automatic multi-device
 `SyncSnapshotMapping`), `SyncSettingsRegistry`, and `BackupService.reconcileLiveRuntime()` but not
 backup semantics; its storage seam is the `SyncTransport` protocol (`SyncFolderTransport`,
 `SyncWebDAVTransport`).
+
+Clipboard tag definitions remain portable through explicit Config Backup only.
+Automatic Config Sync excludes `clipboard.customTags` from local capture,
+retained local documents, and incoming peer documents, including tombstones;
+unknown settings from newer clients otherwise remain forward-compatible.
+It rewrites its own state file on the next successful sync without mutating
+other devices' files. Runtime refresh never reads tag definitions from preferences;
+clipboard monitoring rules still refresh. The active plaintext tag mirror is
+retired before the lifecycle reports ready or resumes monitoring/sync. Its one-time
+transaction adds missing definitions while preserving current encrypted identities
+and memberships; only a successful import permits deleting the preference. An
+encrypted completion marker rejects replay after restart, and failures retain the
+source for retry. A committed completion marker and retained recovery format are
+read before writer admission, so an already-completed import does not wait for
+an unrelated index rebuild. A first import still rechecks and writes the marker
+in its atomic transaction. New tag mutations never refresh a mirror. The atomic legacy import runs in
+a module-owned utility worker so WAL reads remain responsive; ordinary writers
+wait for its turn. Close, retry and reset cancel and drain that worker, and store
+migration joins it before replacing the pool. Store transitions reject new imports
+until replacement finishes. Lifecycle readiness still waits for durable import.
+Manual export builds current definitions in memory from the module. Manual restore directly replaces
+definitions through the module, preserving memberships of retained IDs and removing
+those of removed IDs; missing backup fields leave tags unchanged. Distinct IDs with
+the same name round-trip without merging. See
+[ADR-0028](../adr/0028-move-tag-sync-out-of-config-sync.md).
 
 ### Backup reconciliation errors are not swallowed
 

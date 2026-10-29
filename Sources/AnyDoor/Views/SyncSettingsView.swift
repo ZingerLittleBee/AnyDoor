@@ -45,6 +45,10 @@ struct SyncSettingsView: View {
             .font(.callout)
             .foregroundStyle(.secondary)
 
+            LocalizedText(.settingsConfigSyncTagMigrationNotice)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
             Toggle(isOn: syncEnabledBinding) {
                 LocalizedText(.settingsConfigSyncEnable)
             }
@@ -198,7 +202,7 @@ struct SyncSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button { exportConfig() } label: {
+                Button { Task { await exportConfig() } } label: {
                     LocalizedText(.settingsSyncExportButton)
                 }
                 Button { importConfig() } label: {
@@ -220,19 +224,20 @@ struct SyncSettingsView: View {
         BackupService(context: modelContext, defaults: .standard)
     }
 
-    private func exportConfig() {
+    private func exportConfig() async {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "AnyDoor-Backup.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let snapshot = try makeService().exportSnapshot()
+            let snapshot = try await makeService().exportCurrentSnapshot()
             let data = try BackupCodec.encode(snapshot)
             // Synchronous on purpose: the modal panel already blocked the main
             // thread, and the backup file is small.
             try data.write(to: url, options: .atomic)
-            statusMessage = L(.settingsSyncExportSuccess)
-            isError = false
+            let omittedTags = snapshot.omittedSections.contains(.clipboardTags)
+            statusMessage = L(omittedTags ? .settingsSyncExportTagsOmitted : .settingsSyncExportSuccess)
+            isError = omittedTags
         } catch {
             logger.error("Export failed: \(error)")
             statusMessage = L(.settingsSyncExportFailed, error.localizedDescription)
@@ -264,6 +269,14 @@ struct SyncSettingsView: View {
                                       summary.preferencesUpdated,
                                       summary.quicklinksUpdated + summary.quicklinksInserted)
                     isError = false
+                } catch let error as BackupImportPartialFailure {
+                    logger.error("Import completed without clipboard tags: \(error.clipboardTagsError)")
+                    var messages = [L(.settingsSyncImportTagsNotRestored)]
+                    if let runtimeError = error.runtimeError {
+                        messages.append(L(.settingsSyncImportRuntimePartialFailure, runtimeError.localizedDescription))
+                    }
+                    statusMessage = messages.joined(separator: "\n")
+                    isError = true
                 } catch let error as PluginImportReconciliationError {
                     logger.error("Import completed with plugin failures: \(error)")
                     statusMessage = L(
