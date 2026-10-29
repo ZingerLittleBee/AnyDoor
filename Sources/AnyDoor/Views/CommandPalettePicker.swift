@@ -851,10 +851,13 @@ private struct CommandPaletteRow: View {
     /// state is visible right on the icon without a trailing switch.
     private var symbolTile: some View {
         let tile = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let pointSize = SymbolOpticalCentering.balancedPointSize(
+            symbol: entry.symbol, pointSize: 14, side: 13.5, maxSide: 16
+        )
         return Image(systemName: entry.symbol)
-            .font(.system(size: 14))
+            .font(.system(size: pointSize))
             .foregroundStyle(glyphStyle)
-            .opticallyCentered(symbol: entry.symbol, pointSize: 14)
+            .opticallyCentered(symbol: entry.symbol, pointSize: pointSize)
             .frame(width: Self.iconSize, height: Self.iconSize)
             .background {
                 if isToggleOn {
