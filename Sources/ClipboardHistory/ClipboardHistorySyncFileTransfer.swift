@@ -138,7 +138,7 @@ enum ClipboardSyncFileTransfer {
         }
         guard sameSnapshot(before, after), sameSnapshot(after, atPath),
               try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
-            throw ClipboardSyncServiceError.accessDenied
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
         try syncDirectory(directory)
         succeeded = true

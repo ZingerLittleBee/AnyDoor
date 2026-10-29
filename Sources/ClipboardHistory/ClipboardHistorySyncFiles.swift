@@ -186,13 +186,19 @@ extension ClipboardHistoryModule {
             guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let objectID = UUID()
             let versionID = UUID()
-            let frozen: ClipboardSyncFrozenFile?
+            var frozen: ClipboardSyncFrozenFile?
+            var sourceFailure: Error?
             if sampled.state == .pendingUpload, let url = sampled.url,
                let bookmark = sampled.bookmark, let identity = source.identity {
-                frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
-                    directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
-                    account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
-            } else { frozen = nil }
+                do {
+                    frozen = try await ClipboardSyncFileTransfer.freeze(url: url, bookmark: bookmark, identity: identity,
+                        directory: storeRoot.appendingPathComponent("SyncTransfers/Uploads/\(versionID.uuidString)"),
+                        account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
+                } catch {
+                    guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
+                    sourceFailure = error
+                }
+            }
             var stored = false
             defer { if !stored, let frozen { try? FileManager.default.removeItem(at: frozen.upload.directory) } }
             try await admitSyncFilePublication(generation, account: account, control: control, services: services)
@@ -208,7 +214,8 @@ extension ClipboardHistoryModule {
                 objectID: objectID, versionID: versionID, displayName: source.name,
                 originalByteCount: frozen?.originalByteCount ?? sampled.byteCount,
                 contentDigest: frozen?.contentDigest ?? sampled.bytes.map { Data(SHA256.hash(data: $0)) },
-                body: frozen?.upload.record ?? body?.record, state: frozen == nil ? sampled.state : .available,
+                body: frozen?.upload.record ?? body?.record,
+                state: sourceFailure != nil ? .sourceUnavailable : (frozen == nil ? sampled.state : .available),
                 bodyFormat: frozen?.bodyFormat, kind: frozen?.kind, encodedByteCount: frozen?.encodedByteCount
             )
             stored = try syncWrite { database in
@@ -227,6 +234,10 @@ extension ClipboardHistoryModule {
                     """, arguments: [account.identifier, control.epoch.uuidString, source.entryID,
                         source.itemIndex, source.representationIndex, objectID.uuidString, versionID.uuidString])
                 return true
+            }
+            if stored, let sourceFailure {
+                try recordSyncFileFailure(sourceFailure, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
+                try deferSyncFileWork(.source(objectID), error: sourceFailure, account: account, control: control, generation: generation)
             }
         }
         // Retry the captured identity once its initial descriptor is staged.
@@ -259,12 +270,20 @@ extension ClipboardHistoryModule {
         }
         for (objectID, parent, source) in retryable {
             try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+            let work = ClipboardSyncFileWork.source(objectID)
+            guard try !shouldDeferSyncFileWork(work, account: account, control: control) else { continue }
             guard try syncFileRead({ try syncFileSourceIsEligible(source, account: account, in: $0) }) else { continue }
             let sampled = await Task.detached(priority: .utility) { ClipboardSyncFileIO.sample(source) }.value
             try admitSync(generation)
             guard sampled.state == .available || sampled.state == .pendingUpload,
                   let url = sampled.url, let identity = source.identity else { continue }
-            _ = try await publishFileVersion(sourceURL: url, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
+            do {
+                _ = try await publishFileVersion(sourceURL: url, objectID: objectID, parents: [parent], expectedSourceIdentity: identity)
+                try syncWrite { try completeSyncFileWork(work, account: account, control: control, in: $0) }
+            } catch {
+                guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
+                try deferSyncFileWork(work, error: error, account: account, control: control, generation: generation)
+            }
         }
     }
 
