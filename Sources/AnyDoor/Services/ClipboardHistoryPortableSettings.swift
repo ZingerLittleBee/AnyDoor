@@ -12,10 +12,17 @@ enum ClipboardHistoryPortableKeys {
 
 @MainActor
 enum ClipboardHistoryPortableSettings {
-    static func legacyTagData(from defaults: UserDefaults) -> Data {
-        guard let value = defaults.object(forKey: ClipboardHistoryPortableKeys.customTags) else { return Data("[]".utf8) }
-        guard let json = value as? String else { return Data() }
-        return Data(json.utf8)
+    static func legacyTagPreference(from defaults: UserDefaults) throws -> ClipboardHistoryLegacyTagPreference {
+        guard let value = defaults.object(forKey: ClipboardHistoryPortableKeys.customTags) else {
+            return .init(format: .json, data: Data("[]".utf8))
+        }
+        if let json = value as? String {
+            return .init(format: .json, data: Data(json.utf8))
+        }
+        // UserDefaults values are property lists. Preserve their type and value
+        // rather than replacing a malformed legacy setting with empty bytes.
+        return .init(format: .propertyList, data: try PropertyListSerialization.data(
+            fromPropertyList: value, format: .binary, options: 0))
     }
 
     static func encode(_ definitions: [ClipboardHistoryTagDefinition]) throws -> String {

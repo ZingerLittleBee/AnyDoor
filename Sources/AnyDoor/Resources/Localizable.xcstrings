@@ -10338,6 +10338,34 @@
         }
       }
     },
+    "settings.clipboard.legacyTags.export": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Export Original Tags…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "导出原始标签…" } }
+      }
+    },
+    "settings.clipboard.legacyTags.exportMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The exported file contains the original tag preference without encryption. Save it somewhere private. It is for manual recovery, not a Config Backup." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "导出的文件包含未加密的原始标签偏好。请保存到私密位置。此文件供手动恢复使用，并非配置备份。" } }
+      }
+    },
+    "settings.clipboard.legacyTags.exported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Original tag data exported. The encrypted copy remains available here." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已导出原始标签数据。加密副本仍保留在此处。" } }
+      }
+    },
+    "settings.clipboard.legacyTags.preserved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Some previous tag settings could not be read. Their original data is preserved in encrypted storage. Your current history and tags are available; export the original data to recover missing names manually." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "部分旧标签设置无法读取。原始数据已保存在加密存储中。当前历史和标签仍可使用；可导出原始数据并手动恢复缺失的名称。" } }
+      }
+    },
     "settings.clipboard.operationFailed": {
       "extractionState": "manual",
       "localizations": {

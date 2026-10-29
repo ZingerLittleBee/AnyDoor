@@ -465,6 +465,10 @@ enum L10n {
         case settingsClipboardRetentionAffected = "settings.clipboard.retention.affected"
         case settingsClipboardMigrating = "settings.clipboard.state.migrating"
         case settingsClipboardMigrationFailed = "settings.clipboard.state.migrationFailed"
+        case settingsClipboardLegacyTagsPreserved = "settings.clipboard.legacyTags.preserved"
+        case settingsClipboardLegacyTagsExport = "settings.clipboard.legacyTags.export"
+        case settingsClipboardLegacyTagsExportMessage = "settings.clipboard.legacyTags.exportMessage"
+        case settingsClipboardLegacyTagsExported = "settings.clipboard.legacyTags.exported"
         case settingsClipboardMigrationBlocked =
             "settings.clipboard.state.migrationBlocked"
         case settingsClipboardDiscardAndMigrate =
