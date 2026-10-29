@@ -33,8 +33,21 @@ extension ClipboardHistoryModule {
                   WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'preparing')
                 """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]) }) == true { continue }
             guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
-            if !selection.hasConflict, selection.latest.versionID == source.baseVersionID,
-               source.state == .current || !canPublish { continue }
+            if !selection.hasConflict, selection.latest.versionID == source.baseVersionID {
+                if source.state == .current {
+                    if !source.hasPendingApplication {
+                        let cleared = try syncWrite { database in
+                            try Self.completeLinkedSyncFileWork(source.id, in: database)
+                            let cleared = database.changesCount > 0
+                            if cleared { try Self.bumpHistoryRevision(in: database) }
+                            return cleared
+                        }
+                        if cleared { publishMutation() }
+                    }
+                    continue
+                }
+                if !canPublish { continue }
+            }
             let work = ClipboardSyncFileWork.linkedLocation(source.id)
             guard try !shouldDeferSyncFileWork(work, account: account, control: control) else { continue }
             let inspection = Task.detached(priority: .utility) {
