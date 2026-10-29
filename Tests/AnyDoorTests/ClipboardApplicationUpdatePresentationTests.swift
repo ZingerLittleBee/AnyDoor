@@ -7,6 +7,26 @@ import XCTest
 
 @MainActor
 final class ClipboardApplicationUpdatePresentationTests: XCTestCase {
+    func testApplyingUpdatePreservesLoadedHistoryDepthAndSelection() async throws {
+        let fixture = try await makeApplicationFixture()
+        for index in 0..<105 {
+            _ = try await fixture.receiver.capture(.init(source: .unknown, content: .text("history after application \(index)")))
+        }
+        let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
+        await model.reload()
+        await model.loadNextPage()
+        XCTAssertEqual(model.entries.count, 106)
+        model.select(fixture.selection.entryID)
+        await model.beginApplicationUpdate(fixture.selection)
+
+        await model.applyApplicationUpdate()
+
+        XCTAssertEqual(model.applicationUpdateNotice, .applied)
+        XCTAssertEqual(try Data(contentsOf: fixture.workingResource), fixture.update)
+        XCTAssertEqual(model.entries.count, 106)
+        XCTAssertEqual(model.selectedID, fixture.selection.entryID)
+    }
+
     func testDownloadedApplicationNeedsAnExplicitApplyAction() async throws {
         let fixture = try await makeApplicationFixture()
         let model = ClipboardHistoryPresentationModel(module: fixture.receiver)
