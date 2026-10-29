@@ -3,6 +3,22 @@ import AppKit
 /// Owns the native destination choice for a non-overwriting independent export.
 @MainActor
 final class ClipboardFileExportPicker: NSObject, NSOpenSavePanelDelegate {
+    func destinations(for sources: [URL], in directory: URL) throws -> [URL] {
+        var usedNames = Set(try FileManager.default.contentsOfDirectory(atPath: directory.path).map { $0.lowercased() })
+        return sources.map { source in
+            let name = source.lastPathComponent
+            let stem = source.deletingPathExtension().lastPathComponent
+            let ext = source.pathExtension
+            var candidate = name
+            var suffix = 2
+            while !usedNames.insert(candidate.lowercased()).inserted {
+                candidate = ext.isEmpty ? "\(stem) \(suffix)" : "\(stem) \(suffix).\(ext)"
+                suffix += 1
+            }
+            return directory.appendingPathComponent(candidate)
+        }
+    }
+
     func chooseDestination(suggestedName: String) -> URL? {
         let panel = NSSavePanel()
         panel.title = L(.clipboardActionSaveFiles)
