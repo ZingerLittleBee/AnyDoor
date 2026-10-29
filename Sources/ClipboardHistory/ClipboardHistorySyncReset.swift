@@ -24,7 +24,7 @@ extension ClipboardHistoryModule {
         let account = try await services.transport.account()
         guard generation == syncGeneration, store == storeEpoch, availability == .ready else { throw CancellationError() }
         guard try currentSyncAccountID() == account.identifier else { throw ClipboardSyncServiceError.accountChanged }
-        guard let control = try await services.transport.control(for: account) else { throw ClipboardSyncServiceError.missingRemoteState }
+        guard let control = try await observedSyncControl(for: account, generation: generation, services: services) else { throw ClipboardSyncServiceError.missingRemoteState }
         guard try await services.transport.account() == account else { throw ClipboardSyncServiceError.accountChanged }
         guard generation == syncGeneration, store == storeEpoch, availability == .ready else { throw CancellationError() }
         return .init(account: account, control: control)
@@ -185,7 +185,7 @@ extension ClipboardHistoryModule {
         do {
             guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
             try await admitCloudReset(generation, account: journal.account, services: services)
-            guard var control = try await services.transport.control(for: journal.account) else {
+            guard var control = try await observedSyncControl(for: journal.account, generation: generation, services: services) else {
                 throw ClipboardSyncServiceError.missingRemoteState
             }
             try await admitCloudReset(generation, account: journal.account, services: services)

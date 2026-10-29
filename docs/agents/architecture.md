@@ -397,6 +397,18 @@ responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
 
+A previously observed collection whose control read confirms absence exposes
+`canRecoverMissingCloudCollection`, including while Off and after relaunch.
+[Missing collection recovery](../../Sources/ClipboardHistory/ClipboardHistoryMissingCloudCollectionRecovery.swift)
+uses a separate opaque account/control confirmation and rechecks absence before
+retiring local publication authority. It preserves the shared key, local history,
+unpublished frozen versions and later saved files, then stores a fresh-epoch
+candidate with participation Off and all Sync Tags deselected. No unknown remote
+records are cleared. Only a later explicit On and fresh tag selection can create
+and publish the new collection. A returning control or changed account rejects
+stale confirmation; an affected unfinished clear becomes superseded, never
+reported as successfully cleared.
+
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
 An interrupted clear for account A does not prevent explicit participation or
 an independent clear in account B. Only the current account can resume its

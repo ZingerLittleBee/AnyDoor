@@ -9,6 +9,135 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testMissingCollectionRecoverySupersedesInterruptedClearWithoutClaimingCloudDeletion() async throws {
+        let source = try await recoverySource()
+        let clear = try await source.sender.prepareCloudReset()
+        let records = await source.cloud.currentUploads()
+        await source.cloud.removeControl()
+        try await source.sender.clearCloudDataAndStopSync(clear)
+        let pending = await source.sender.syncStatus()
+        XCTAssertFalse(pending.isEnabled)
+        XCTAssertTrue(pending.canRecoverMissingCloudCollection)
+        XCTAssertEqual(pending.cloudReset?.isPending, true)
+        let confirmation = try await source.sender.prepareMissingCloudCollectionRecovery()
+        try await source.sender.recoverMissingCloudCollection(confirmation)
+        let recovered = await source.sender.syncStatus()
+        XCTAssertFalse(recovered.isEnabled)
+        XCTAssertEqual(recovered.cloudReset?.stage, .superseded)
+        XCTAssertFalse(recovered.canRecoverMissingCloudCollection)
+        let retained = await source.cloud.currentUploads()
+        XCTAssertEqual(retained, records)
+        try await source.sender.setSyncEnabled(true)
+        let enabled = await source.sender.syncStatus()
+        XCTAssertTrue(enabled.isEnabled)
+        XCTAssertEqual(enabled.phase, .upToDate)
+        let tags = try await source.sender.syncTags()
+        XCTAssertTrue(tags.allSatisfy { !$0.isSelected })
+    }
+
+    func testMissingCollectionRecoveryRejectsChangedAuthorityAndKeepsRetryUsable() async throws {
+        for changesAccount in [false, true] {
+            let source = try await recoverySource()
+            let account = try await source.cloud.account()
+            let previousControl = try await source.cloud.control(for: account)
+            let previous = try XCTUnwrap(previousControl)
+            await source.cloud.removeControl()
+            await source.sender.retrySync()
+            let confirmation = try await source.sender.prepareMissingCloudCollectionRecovery()
+            if changesAccount { await source.cloud.switchAccount(to: "unrelated-recovery-account") }
+            else { _ = try await source.cloud.createControl(previous, for: account) }
+            do {
+                try await source.sender.recoverMissingCloudCollection(confirmation)
+                XCTFail("Changed authority must reject an old recovery confirmation")
+            } catch ClipboardSyncServiceError.accountChanged {
+                XCTAssertTrue(changesAccount)
+            } catch ClipboardHistoryModuleError.invalidConfirmation {
+                XCTAssertFalse(changesAccount)
+            }
+            let local = try await source.sender.page(.init()).entries
+            XCTAssertEqual(local.count, 1)
+            let tags = try await source.sender.syncTags()
+            XCTAssertTrue(tags.allSatisfy(\.isSelected), "Rejected recovery must not retire local consent")
+            if changesAccount {
+                let other = try await source.cloud.account()
+                let untouched = try await source.cloud.control(for: other)
+                XCTAssertNil(untouched)
+                await source.cloud.switchAccount(to: account.owner)
+                _ = try await source.cloud.createControl(previous, for: account)
+            }
+            await source.sender.retrySync()
+            let retried = await source.sender.syncStatus()
+            XCTAssertEqual(retried.phase, .upToDate, "A rejected command must not leave normal Retry silently suspended")
+        }
+    }
+
+    func testMissingCollectionRecoveryKeepsLocalWorkAndRequiresFreshParticipation() async throws {
+        let cloud = SyncTestCloud()
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("missing-collection-\(UUID())")
+        let module = makeModule(services: services, keyByte: 0xE9, time: 1_000, root: root)
+        let existing = try await module.capture(.init(source: .unknown, content: .text("previously shared")))
+        let tag = try await module.createTagDefinition(named: "Shared", assigningTo: existing.entryID).definition
+        try await module.setSyncTagSelected(tag.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let account = try await cloud.account()
+        let oldControl = try await cloud.control(for: account)
+        let previous = try XCTUnwrap(oldControl)
+        let oldUploads = await cloud.currentUploads()
+        try await module.setSyncEnabled(false)
+        _ = try await module.apply(.editText(existing.entryID, "saved but not uploaded"))
+        let pending = try await module.capture(.init(source: .unknown, content: .text("new local work")))
+        _ = try await module.apply(.setTags(pending.entryID, [tag.id]))
+        await cloud.removeControl()
+        try await module.setSyncEnabled(true)
+        let missing = await module.syncStatus()
+        XCTAssertEqual(missing.phase, .failed(.recoveryRequired))
+        XCTAssertTrue(missing.canRecoverMissingCloudCollection)
+        try await module.setSyncEnabled(false)
+        try await module.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xE9, time: 1_001, root: root)
+        let disabled = await reopened.syncStatus()
+        XCTAssertFalse(disabled.isEnabled)
+        XCTAssertTrue(disabled.canRecoverMissingCloudCollection, "Recovery must remain discoverable while Off after reopen")
+        let confirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation
+        do { confirmation = try await reopened.prepareMissingCloudCollectionRecovery() }
+        catch { XCTFail("Explicit missing-collection recovery must be available: \(error)"); return }
+        try await reopened.recoverMissingCloudCollection(confirmation)
+        let recovered = await reopened.syncStatus()
+        XCTAssertFalse(recovered.isEnabled)
+        XCTAssertFalse(recovered.canRecoverMissingCloudCollection)
+        let choices = try await reopened.syncTags()
+        XCTAssertTrue(choices.allSatisfy { !$0.isSelected })
+        let local = try await reopened.page(.init()).entries
+        XCTAssertEqual(Set(local.map(\.previewText)), Set(["saved but not uploaded", "new local work"]))
+        let retainedUploads = await cloud.currentUploads()
+        XCTAssertEqual(retainedUploads, oldUploads, "Recovery must neither publish nor claim to clear unknown cloud data")
+        let keyCount = await keys.count()
+        XCTAssertEqual(keyCount, 1)
+        await reopened.resumeSync()
+        let absent = try await cloud.control(for: account)
+        XCTAssertNil(absent)
+        try await reopened.closeStoreForTesting()
+        let final = makeModule(services: services, keyByte: 0xE9, time: 1_002, root: root)
+        await final.resumeSync()
+        let beforeEnable = try await cloud.control(for: account)
+        XCTAssertNil(beforeEnable, "A restart cannot consume the user's next On/selection consent")
+        try await final.setSyncEnabled(true)
+        let created = try await cloud.control(for: account)
+        let newControl = try XCTUnwrap(created)
+        XCTAssertNotEqual(newControl.epoch, previous.epoch)
+        XCTAssertEqual(newControl.keyID, previous.keyID)
+        let beforeSelection = await cloud.currentUploads().filter { $0.record.epoch == newControl.epoch && $0.record.kind == .entry }
+        XCTAssertTrue(beforeSelection.isEmpty)
+        try await final.setSyncTagSelected(tag.id, selected: true)
+        let fresh = makeModule(services: services, keyByte: 0xEA, time: 2_000)
+        try await fresh.setSyncEnabled(true)
+        let shared = try await fresh.page(.init()).entries
+        XCTAssertEqual(Set(shared.map(\.previewText)), Set(["saved but not uploaded", "new local work"]))
+        XCTAssertEqual(shared.count, 2)
+    }
+
     @MainActor
     func testUnpublishedWithdrawalRetainsRemoteFileVersionBeforeReactivation() async throws {
         let fixture = try await fileFixture(names: ["Retained.txt"], contents: [Data("old shared file".utf8)])
@@ -254,6 +383,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
             } else { try await fixture.receiver.setSyncEnabled(true) }
             let failure = await fixture.receiver.syncStatus()
             XCTAssertEqual(failure.phase, .failed(.corruptData))
+            XCTAssertFalse(failure.canRecoverMissingCloudCollection)
             let failed = try await fixture.receiver.page(.init()).entries
             XCTAssertNil(failed.first { !$0.syncFiles.isEmpty }?.syncFiles.first?.transferFailure,
                 "An authority failure must not mark valid file bytes corrupt")

@@ -18,7 +18,8 @@ extension ClipboardHistoryModule {
                 let data = try Data.fetchOne(database, sql: "SELECT state FROM clipboard_sync_accounts WHERE id = ?", arguments: [accountID])
                 let state = try data.map { try JSONDecoder().decode(ClipboardSyncAccountState.self, from: $0) }
                 guard settings.enabled else {
-                    return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled, cloudReset: reset, canClearCloudData: state?.control != nil)
+                    return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled, cloudReset: reset, canClearCloudData: state?.control != nil,
+                        canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true)
                 }
                 let uploaded = try Int.fetchOne(database, sql: """
                     SELECT COUNT(DISTINCT subject_id) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
@@ -28,7 +29,8 @@ extension ClipboardHistoryModule {
                 return ClipboardHistorySyncStatus(isEnabled: true,
                     phase: phase,
                     uploadedEntryCount: uploaded, receivedEntryCount: received,
-                    withdrawnEntryCount: try syncWithdrawnCount(accountID: accountID, in: database), lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil)
+                    withdrawnEntryCount: try syncWithdrawnCount(accountID: accountID, in: database), lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil,
+                    canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true)
             }
         } catch {
             return ClipboardHistorySyncStatus(isEnabled: true, phase: .failed(.localStorage))
@@ -297,7 +299,8 @@ extension ClipboardHistoryModule {
                 return try syncAccountState(account, in: database)
             }
             syncAccountBindingGeneration = nil
-            var control = try await services.transport.control(for: account)
+            var control = try await observedSyncControl(for: account, generation: generation, services: services)
+            state.missingControl = nil
             try await admitSync(generation, account: account, services: services)
             if control == nil {
                 guard state.control == nil else { throw ClipboardSyncServiceError.missingRemoteState }
