@@ -13,6 +13,18 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private typealias RecordFetch = @Sendable ([CKRecord.ID], [String]) async throws
         -> [CKRecord.ID: Result<CKRecord, Error>]
 
+    /// External native account and operation submission, kept together so an
+    /// isolated adapter fixture never falls through to the signed live service.
+    struct NativeOperations: Sendable {
+        let accountOwner: @Sendable () async throws -> String
+        let add: @Sendable (CKDatabaseOperation) -> Void
+    }
+
+    private struct Database: Sendable {
+        let account: ClipboardSyncAccount
+        let add: @Sendable (CKDatabaseOperation) -> Void
+    }
+
     private static let controlName = "control.v1"
     private static let controlType = "ClipboardSyncControlV1"
     private static let objectType = "ClipboardSyncObjectV1"
@@ -28,21 +40,28 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private var cancellationGeneration = 0
     private var operations: [UUID: CKDatabaseOperation] = [:]
     private let recordReader: RecordReader?
+    private let nativeOperations: NativeOperations?
 
-    init(recordReader: RecordReader? = nil) {
+    init(recordReader: RecordReader? = nil, nativeOperations: NativeOperations? = nil) {
         self.recordReader = recordReader
+        self.nativeOperations = nativeOperations
     }
 
     func account() async throws -> ClipboardSyncAccount {
         let generation = cancellationGeneration
-        let container = try checkedContainer()
         do {
-            let status = try await container.accountStatus()
-            try checkCancellation(generation)
-            guard status == .available else {
-                throw ClipboardSyncServiceError.accountUnavailable
+            let owner: String
+            if let nativeOperations {
+                owner = try await nativeOperations.accountOwner()
+            } else {
+                let container = try checkedContainer()
+                let status = try await container.accountStatus()
+                try checkCancellation(generation)
+                guard status == .available else {
+                    throw ClipboardSyncServiceError.accountUnavailable
+                }
+                owner = try await container.userRecordID().recordName
             }
-            let owner = try await container.userRecordID().recordName
             try checkCancellation(generation)
             let account = ClipboardSyncAccount(
                 container: ClipboardSyncNativeConfiguration.container,
@@ -143,7 +162,10 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             }
         }
         try checkCancellation(generation)
-        guard !fetched.deletedRecordIDs.contains(controlID(account)) else {
+        guard fetched.deletedRecordIDs.allSatisfy({ Self.ownsZone($0.zoneID, account: account) }) else {
+            throw ClipboardSyncServiceError.accountChanged
+        }
+        guard !fetched.deletedRecordIDs.contains(where: { Self.sameRecord($0, controlID(account), account: account) }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
         // A retained zone includes deletion history from completed resets. A
@@ -151,7 +173,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         var requiresAuthorityRefresh = !fetched.deletedRecordIDs.isEmpty
         var records: [ClipboardSyncRemoteRecord] = []
         for record in fetched.records {
-            guard record.recordID.zoneID == zoneID(account) else {
+            guard Self.ownsZone(record.recordID.zoneID, account: account) else {
                 throw ClipboardSyncServiceError.accountChanged
             }
             switch record.recordType {
@@ -382,7 +404,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             try checkCancellation(generation)
             var ids: [CKRecord.ID] = []
             for record in fetched.records {
-                guard record.recordID.zoneID == zoneID(account) else { throw ClipboardSyncServiceError.accountChanged }
+                guard Self.ownsZone(record.recordID.zoneID, account: account) else { throw ClipboardSyncServiceError.accountChanged }
                 switch record.recordType {
                 case Self.controlType:
                     _ = try decodeControl(record, account: account)
@@ -616,20 +638,24 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         return created
     }
 
-    private func checkedDatabase(for expected: ClipboardSyncAccount) async throws -> CKDatabase {
+    private func checkedDatabase(for expected: ClipboardSyncAccount) async throws -> Database {
         let generation = cancellationGeneration
         try ClipboardSyncNativeConfiguration.validate(expected)
         let observed = try await account()
         try checkCancellation(generation)
         guard observed == expected else { throw ClipboardSyncServiceError.accountChanged }
-        return try checkedContainer().privateCloudDatabase
+        if let nativeOperations { return Database(account: expected, add: nativeOperations.add) }
+        let database = try checkedContainer().privateCloudDatabase
+        return Database(account: expected, add: { database.add($0) })
     }
 
     private func recordFetcher(for account: ClipboardSyncAccount) async throws -> RecordFetch {
         try Task.checkCancellation()
         try ClipboardSyncNativeConfiguration.validate(account)
         if let recordReader {
-            return { ids, keys in try await recordReader(account, ids, keys) }
+            return { ids, keys in
+                try Self.normalizedRecords(try await recordReader(account, ids, keys), requested: ids, account: account)
+            }
         }
         // Bind once per entry point, as before, rather than repeating native
         // account discovery for every bounded batch in an ordinary download.
@@ -644,6 +670,52 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
 
     private func zoneID(_ account: ClipboardSyncAccount) -> CKRecordZone.ID {
         CKRecordZone.ID(zoneName: "ClipboardSyncV1-\(account.identifier)", ownerName: account.owner)
+    }
+
+    /// CloudKit accepts both names for the checked private-database owner. The
+    /// concrete account identity remains part of the zone and domain authority.
+    private nonisolated static func ownsZone(_ zone: CKRecordZone.ID, account: ClipboardSyncAccount) -> Bool {
+        zone.zoneName == "ClipboardSyncV1-\(account.identifier)"
+            && (zone.ownerName == account.owner || zone.ownerName == CKCurrentUserDefaultName)
+    }
+
+    private nonisolated static func sameRecord(_ lhs: CKRecord.ID, _ rhs: CKRecord.ID,
+        account: ClipboardSyncAccount) -> Bool {
+        lhs.recordName == rhs.recordName && ownsZone(lhs.zoneID, account: account) && ownsZone(rhs.zoneID, account: account)
+    }
+
+    /// Index callbacks by the requested identity, accepting only the known
+    /// current-owner alias. Never rewrite a returned record's CAS system fields.
+    private nonisolated static func normalizedResults<Value>(_ results: [CKRecord.ID: Value],
+        requested: [CKRecord.ID], account: ClipboardSyncAccount) throws -> [CKRecord.ID: Value] {
+        guard requested.allSatisfy({ ownsZone($0.zoneID, account: account) }) else {
+            throw ClipboardSyncServiceError.accountChanged
+        }
+        let byName = Dictionary(grouping: requested, by: \.recordName)
+        guard byName.values.allSatisfy({ $0.count == 1 }), results.count == requested.count else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        var normalized: [CKRecord.ID: Value] = [:]
+        for (id, value) in results {
+            guard ownsZone(id.zoneID, account: account) else { throw ClipboardSyncServiceError.accountChanged }
+            guard let target = byName[id.recordName]?.first, normalized[target] == nil else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            normalized[target] = value
+        }
+        return normalized
+    }
+
+    private nonisolated static func normalizedRecords(_ results: [CKRecord.ID: Result<CKRecord, Error>],
+        requested: [CKRecord.ID], account: ClipboardSyncAccount) throws -> [CKRecord.ID: Result<CKRecord, Error>] {
+        let normalized = try normalizedResults(results, requested: requested, account: account)
+        for (id, result) in normalized {
+            if case .success(let record) = result {
+                guard ownsZone(record.recordID.zoneID, account: account) else { throw ClipboardSyncServiceError.accountChanged }
+                guard sameRecord(record.recordID, id, account: account) else { throw ClipboardSyncServiceError.corruptData }
+            }
+        }
+        return normalized
     }
 
     private func controlID(_ account: ClipboardSyncAccount) -> CKRecord.ID {
@@ -722,7 +794,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func decodeControl(_ record: CKRecord, account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
-        guard record.recordType == Self.controlType, record.recordID == controlID(account),
+        guard record.recordType == Self.controlType, Self.sameRecord(record.recordID, controlID(account), account: account),
               (record["protocolVersion"] as? NSNumber)?.intValue == 1,
               record["accountID"] as? String == account.identifier,
               let key = record["keyID"] as? String, let keyID = UUID(uuidString: key),
@@ -747,7 +819,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             unarchiver.requiresSecureCoding = true
             defer { unarchiver.finishDecoding() }
             guard let decoded = CKRecord(coder: unarchiver),
-                  decoded.recordID == controlID(account), decoded.recordType == Self.controlType
+                  Self.sameRecord(decoded.recordID, controlID(account), account: account), decoded.recordType == Self.controlType
             else { throw ClipboardSyncServiceError.corruptData }
             record = decoded
         } else {
@@ -765,7 +837,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
 
     private func commitBatch(
         _ content: [CKRecord], control: ClipboardSyncControl,
-        account: ClipboardSyncAccount, database: CKDatabase
+        account: ClipboardSyncAccount, database: Database
     ) async throws -> ClipboardSyncControl {
         let generation = cancellationGeneration
         try validateControl(control, account: account)
@@ -779,7 +851,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func completedCommit(
-        _ expected: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount, database: CKDatabase
+        _ expected: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount, database: Database
     ) async throws -> ClipboardSyncControl? {
         let generation = cancellationGeneration
         let id = CKRecord.ID(recordName: expected.recordID, zoneID: zoneID(account))
@@ -814,7 +886,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func fetchOptionalRecord(
-        _ id: CKRecord.ID, desiredKeys: [String], database: CKDatabase
+        _ id: CKRecord.ID, desiredKeys: [String], database: Database
     ) async throws -> CKRecord? {
         try await fetchOptionalRecord(id, desiredKeys: desiredKeys) { ids, keys in
             try await self.fetchRecords(ids, desiredKeys: keys, database: database)
@@ -847,13 +919,13 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func fetchRecords(
-        _ ids: [CKRecord.ID], desiredKeys: [String], database: CKDatabase
+        _ ids: [CKRecord.ID], desiredKeys: [String], database: Database
     ) async throws -> [CKRecord.ID: Result<CKRecord, Error>] {
         let operation = CKFetchRecordsOperation(recordIDs: ids)
         operation.desiredKeys = desiredKeys
         let results = OSAllocatedUnfairLock(initialState: [CKRecord.ID: Result<CKRecord, Error>]())
         operation.perRecordResultBlock = { id, result in results.withLock { $0[id] = result } }
-        return try await run(operation, database: database) { continuation in
+        let fetched: [CKRecord.ID: Result<CKRecord, Error>] = try await run(operation, database: database) { continuation in
             operation.fetchRecordsResultBlock = { outcome in
                 let collected = results.withLock { $0 }
                 if collected.count == ids.count {
@@ -866,9 +938,10 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                 }
             }
         }
+        return try Self.normalizedRecords(fetched, requested: ids, account: database.account)
     }
 
-    private func saveAtomically(_ records: [CKRecord], deleting ids: [CKRecord.ID] = [], database: CKDatabase) async throws -> [CKRecord.ID: CKRecord] {
+    private func saveAtomically(_ records: [CKRecord], deleting ids: [CKRecord.ID] = [], database: Database) async throws -> [CKRecord.ID: CKRecord] {
         let operation = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: ids)
         operation.savePolicy = .ifServerRecordUnchanged
         operation.isAtomic = true
@@ -896,13 +969,15 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
                         operationError: operationError) { throw error }
                     try outcome.get()
                     guard collected.count == records.count, deleted.count == ids.count else { throw ClipboardSyncServiceError.corruptData }
-                    continuation.resume(returning: try collected.mapValues { try $0.get() })
+                    _ = try Self.normalizedResults(deleted, requested: ids, account: database.account)
+                    let normalized = try Self.normalizedRecords(collected, requested: records.map(\.recordID), account: database.account)
+                    continuation.resume(returning: try normalized.mapValues { try $0.get() })
                 } catch { continuation.resume(throwing: error) }
             }
         }
     }
 
-    private func ensureZone(_ id: CKRecordZone.ID, database: CKDatabase) async throws {
+    private func ensureZone(_ id: CKRecordZone.ID, database: Database) async throws {
         let generation = cancellationGeneration
         let operation = CKModifyRecordZonesOperation(recordZonesToSave: [CKRecordZone(zoneID: id)])
         let zone = OSAllocatedUnfairLock<Result<CKRecordZone, Error>?>(initialState: nil)
@@ -917,7 +992,8 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             }
         }
         try checkCancellation(generation)
-        guard saved.zoneID == id, saved.capabilities.contains(.atomic) else {
+        guard Self.ownsZone(saved.zoneID, account: database.account), Self.ownsZone(id, account: database.account),
+              saved.capabilities.contains(.atomic) else {
             throw ClipboardSyncServiceError.capabilityUnavailable
         }
     }
@@ -938,7 +1014,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     }
 
     private func fetchChanges(
-        _ id: CKRecordZone.ID, token: CKServerChangeToken?, database: CKDatabase
+        _ id: CKRecordZone.ID, token: CKServerChangeToken?, database: Database
     ) async throws -> NativeChanges {
         let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         configuration.previousServerChangeToken = token
@@ -987,7 +1063,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     /// Operations are registered before submission and remain retained until
     /// their final callback. Cancellation does not release asset files early.
     private func run<Value: Sendable>(
-        _ operation: CKDatabaseOperation, database: CKDatabase,
+        _ operation: CKDatabaseOperation, database: Database,
         configure: (CheckedContinuation<Value, Error>) -> Void
     ) async throws -> Value {
         try Task.checkCancellation()
