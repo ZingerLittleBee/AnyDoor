@@ -23,6 +23,11 @@ public struct ClipboardHistoryLegacyTagPreference: Equatable, Sendable {
     }
 }
 
+struct ClipboardHistoryLegacyTagImportResult: Sendable {
+    let didMutate: Bool
+    let recoveryFormat: ClipboardHistoryLegacyTagPreference.Format?
+}
+
 extension ClipboardHistoryModule {
     /// One-time import of the retired preferences mirror. Current encrypted
     /// identities and memberships are authoritative; stale mirrors cannot
@@ -32,27 +37,60 @@ extension ClipboardHistoryModule {
     public func importLegacyTagDefinitions(
         _ source: ClipboardHistoryLegacyTagPreference
     ) async throws -> ClipboardHistoryLegacyTagPreference.Format? {
-        _ = try await writableDatabase()
-        let result = try syncWrite { database in
+        guard legacyTagImportStoreTransitions == 0 else { throw ClipboardHistoryModuleError.operationUnavailable }
+        let pool = try await writableDatabase()
+        guard legacyTagImportStoreTransitions == 0 else { throw ClipboardHistoryModuleError.operationUnavailable }
+        let epoch = storeEpoch
+        let faults = faultInjector
+        let worker = Task.detached(priority: .utility) {
+            try Self.importLegacyTags(source, in: pool, faultInjector: faults)
+        }
+        legacyTagImportTask = worker
+        defer { if legacyTagImportTask == worker { legacyTagImportTask = nil } }
+        let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        guard epoch == storeEpoch, database === pool else { throw ClipboardHistoryModuleError.storeUnavailable }
+        if result.didMutate { publishMutation() }
+        return result.recoveryFormat
+    }
+
+    func stopLegacyTagImport() async {
+        guard let worker = legacyTagImportTask else { return }
+        worker.cancel()
+        _ = try? await worker.value
+        if legacyTagImportTask == worker { legacyTagImportTask = nil }
+    }
+
+    private static func importLegacyTags(_ source: ClipboardHistoryLegacyTagPreference, in pool: DatabasePool,
+        faultInjector: ClipboardHistoryFaultInjector) throws -> ClipboardHistoryLegacyTagImportResult {
+        try Task.checkCancellation()
+        return try pool.write { database in
             let imported = try Bool.fetchOne(database, sql: """
                 SELECT integer_value FROM clipboard_maintenance_metadata WHERE key = 'legacyTagDefaultsImported'
                 """) ?? false
             guard !imported else {
-                return (false, try Self.legacyTagRecoveryFormat(in: database))
+                return .init(didMutate: false, recoveryFormat: try legacyTagRecoveryFormat(in: database))
             }
             // Validate the complete input before writing any definitions. Only
             // input errors take the preservation path; SQL failures still throw.
             if let tags = Self.validLegacyTags(from: source) {
                 for tag in tags {
+                    try Task.checkCancellation()
                     try database.execute(sql: """
                         INSERT INTO clipboard_tag_definitions(id, display_name, display_order)
                         VALUES (?, ?, COALESCE((SELECT MAX(display_order) + 1 FROM clipboard_tag_definitions), 0))
                         ON CONFLICT(id) DO NOTHING
                         """, arguments: [tag.id, tag.name.trimmingCharacters(in: .whitespacesAndNewlines)])
                 }
-                for id in try String.fetchAll(database, sql: "SELECT DISTINCT entry_id FROM clipboard_entry_tags") {
-                    _ = try recomputeProtection(for: id, in: database)
-                }
+                try database.execute(sql: """
+                    UPDATE clipboard_retention_state SET is_protected = (
+                        SELECT entry.is_favorite = 1 OR EXISTS (
+                            SELECT 1 FROM clipboard_entry_tags AS assignment
+                            JOIN clipboard_tag_definitions AS definition ON definition.id = assignment.tag_id
+                            WHERE assignment.entry_id = entry.id)
+                        FROM clipboard_entries AS entry WHERE entry.id = clipboard_retention_state.entry_id)
+                    WHERE entry_id IN (SELECT DISTINCT entry_id FROM clipboard_entry_tags)
+                    """)
             } else {
                 try database.execute(sql: """
                     INSERT INTO clipboard_legacy_tag_recovery(id, format, original_value) VALUES (1, ?, ?)
@@ -62,10 +100,9 @@ extension ClipboardHistoryModule {
             try Self.bumpHistoryRevision(in: database)
             try Self.bumpSearchIndexGeneration(in: database)
             try faultInjector.check(.databaseTransaction)
-            return (true, try Self.legacyTagRecoveryFormat(in: database))
+            try Task.checkCancellation()
+            return .init(didMutate: true, recoveryFormat: try legacyTagRecoveryFormat(in: database))
         }
-        if result.0 { publishMutation() }
-        return result.1
     }
 
     /// Reads retained input only for an explicit recovery/export action. Normal

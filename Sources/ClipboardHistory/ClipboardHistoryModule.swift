@@ -89,6 +89,8 @@ public actor ClipboardHistoryModule {
     nonisolated let derivedJobBootstrap =
         ClipboardHistoryDerivedJobBootstrap()
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    var legacyTagImportTask: Task<ClipboardHistoryLegacyTagImportResult, Error>?
+    var legacyTagImportStoreTransitions = 0
     private var nextWriteTurn = 0
     private var currentWriteTurn = 0
     private var writeTurnWaiters: [CheckedContinuation<Void, Never>] = []
@@ -402,6 +404,9 @@ public actor ClipboardHistoryModule {
 
     public func retry() async {
         guard let keyStore else { return }
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
+        await stopLegacyTagImport()
         await stopMaintenanceTask()
         await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
@@ -527,11 +532,11 @@ extension ClipboardHistoryModule {
 
     /// Whether `waitForWriteTurn()` would suspend right now.
     var mustWaitForWriteTurn: Bool {
-        searchIndexRebuildTask != nil || nextWriteTurn != currentWriteTurn
+        searchIndexRebuildTask != nil || legacyTagImportTask != nil || nextWriteTurn != currentWriteTurn
     }
 
-    /// Suspends until no search index rebuild is in flight and every writer
-    /// that arrived earlier has had its turn; returns at once otherwise.
+    /// Suspends until no owned legacy import or search index rebuild is in
+    /// flight and every earlier writer has had its turn; returns at once otherwise.
     ///
     /// A rebuild holds the pool's writer for one long transaction, about a
     /// minute on a large store. A synchronous `write` issued on this actor
@@ -554,7 +559,10 @@ extension ClipboardHistoryModule {
         let turn = nextWriteTurn
         nextWriteTurn += 1
         while true {
-            if let rebuild = searchIndexRebuildTask {
+            if let importing = legacyTagImportTask {
+                _ = try? await importing.value
+                if legacyTagImportTask == importing { legacyTagImportTask = nil }
+            } else if let rebuild = searchIndexRebuildTask {
                 _ = await rebuild.value
                 // A retry or reset may have started another one meanwhile.
                 if searchIndexRebuildTask == rebuild {
@@ -589,6 +597,9 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         isClosingStore = true
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
+        await stopLegacyTagImport()
         await suspendSync()
         // The monitor holds this module strongly. Drop it before the first
         // suspension, so a reentrant caller cannot reuse a monitor that is

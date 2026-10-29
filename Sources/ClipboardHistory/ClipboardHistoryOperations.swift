@@ -608,8 +608,11 @@ extension ClipboardHistoryModule {
         else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
         monitoringRequested = false
         monitoringEnabled = false
+        await stopLegacyTagImport()
         await suspendSync()
         await captureMonitor?.setEnabled(false)
         await stopMaintenanceTask()
