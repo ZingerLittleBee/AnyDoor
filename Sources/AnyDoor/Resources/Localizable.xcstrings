@@ -16168,6 +16168,27 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地历史已保留。同步已关闭，尚未选择同步标签。请手动开启剪贴板同步并选择标签以重新共享。" } }
       }
     },
+    "settings.clipboard.sync.replacedCollection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Another sync collection is now in iCloud. Confirm joining it while keeping this Mac's local history and the existing cloud contents." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "iCloud 中现有另一个同步集合。请确认加入，保留此 Mac 的本地历史和现有云端内容。" } }
+      }
+    },
+    "settings.clipboard.sync.replacedCollection.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Join the Replacement Collection" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "加入重建的同步集合" } }
+      }
+    },
+    "settings.clipboard.sync.replacedCollection.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This Mac will retire its previous participation and keep local history, files, and saved changes. Cloud contents will not be changed. Sync will stay off and all Sync Tags will be deselected. Turn Clipboard Sync on to verify the new collection's key, then choose tags to share retained history again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此 Mac 将结束之前的同步参与，保留本地历史、文件和已保存的修改，不改变云端内容。同步保持关闭，所有同步标签将取消选择。之后请开启剪贴板同步以验证新集合的密钥，再选择标签以重新共享保留的历史。" } }
+      }
+    },
     "settings.clipboard.sync.retry": {
       "extractionState": "manual",
       "localizations": {

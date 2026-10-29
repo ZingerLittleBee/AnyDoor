@@ -6,6 +6,61 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistoryMissingCollectionJoinTests: XCTestCase {
+    func testOfflineEstablishedDeviceExplicitlyRecoversWithoutClearingTheReplacement() async throws {
+        let fixture = try await replacementCollection(recover: false)
+        let originalEntries = try await fixture.old.page(.init()).entries
+        let entry = try XCTUnwrap(originalEntries.first)
+        _ = try await fixture.old.apply(.editText(entry.id, "offline saved edit"))
+        let recordsBefore = await fixture.cloud.uploadedRecords()
+
+        await fixture.old.resumeSync()
+        let blocked = await fixture.old.syncStatus()
+        XCTAssertEqual(blocked.phase, .failed(.recoveryRequired))
+        XCTAssertTrue(blocked.canRecoverReplacedCloudCollection)
+        XCTAssertFalse(blocked.canRecoverMissingCloudCollection)
+        try await fixture.old.setSyncEnabled(false)
+        try await fixture.old.closeStoreForTesting()
+        let reopened = makeModule(root: fixture.oldRoot, services: fixture.services, key: 0xA1)
+        let off = await reopened.syncStatus()
+        XCTAssertFalse(off.isEnabled)
+        XCTAssertTrue(off.canRecoverReplacedCloudCollection, "The explicit recovery route survives Off and restart")
+        let confirmation = try await reopened.prepareReplacedCloudCollectionRecovery()
+        let preparedTags = try await reopened.syncTags()
+        XCTAssertTrue(preparedTags.first { $0.id == fixture.oldTagID }?.isSelected == true)
+        await fixture.keys.withhold(fixture.replacement.keyID)
+        try await reopened.recoverReplacedCloudCollection(confirmation)
+        let recovered = await reopened.syncStatus()
+        XCTAssertFalse(recovered.isEnabled)
+        XCTAssertFalse(recovered.canRecoverReplacedCloudCollection)
+        XCTAssertNil(recovered.cloudReset)
+        let retained = try await reopened.page(.init()).entries
+        XCTAssertEqual(retained.map(\.previewText), ["offline saved edit"])
+        let tags = try await reopened.syncTags()
+        XCTAssertTrue(tags.allSatisfy { !$0.isSelected })
+        let unchanged = await fixture.cloud.authoritativeControl()
+        let recordsAfter = await fixture.cloud.uploadedRecords()
+        XCTAssertEqual(unchanged, fixture.replacement)
+        XCTAssertEqual(recordsAfter.map(\.record.recordID), recordsBefore.map(\.record.recordID))
+
+        try await reopened.setSyncEnabled(true)
+        let waiting = await reopened.syncStatus()
+        XCTAssertEqual(waiting.phase, .waitingForKey)
+        XCTAssertFalse(waiting.canClearCloudData, "A missing replacement key cannot become accepted authority")
+        await fixture.keys.withhold(nil)
+        await reopened.retrySync()
+        let joined = await reopened.syncStatus()
+        XCTAssertEqual(joined.phase, .upToDate)
+        let local = try await reopened.page(.init()).entries
+        XCTAssertEqual(Set(local.compactMap(\.previewText)), ["offline saved edit", "fresh collection history"])
+        await fixture.fresh.retrySync()
+        let beforeSelection = try await fixture.fresh.page(.init()).entries
+        XCTAssertEqual(beforeSelection.map(\.previewText), ["fresh collection history"])
+        try await reopened.setSyncTagSelected(fixture.oldTagID, selected: true)
+        await fixture.fresh.retrySync()
+        let shared = try await fixture.fresh.page(.init()).entries
+        XCTAssertEqual(Set(shared.compactMap(\.previewText)), ["offline saved edit", "fresh collection history"])
+    }
+
     func testRecoveredDeviceJoinsFreshCollectionWithoutRepublishingRetainedHistory() async throws {
         for racesCreation in [false, true] {
             let fixture = try await replacementCollection()
@@ -106,15 +161,130 @@ final class ClipboardHistoryMissingCollectionJoinTests: XCTestCase {
         XCTAssertEqual(retained.map(\.previewText), ["retained old history"])
     }
 
-    func testEstablishedDeviceDoesNotAdoptDifferentCollectionKey() async throws {
+    func testEstablishedDeviceDoesNotAutomaticallyAdoptDifferentCollectionKey() async throws {
         let fixture = try await replacementCollection(recover: false)
         try await fixture.old.setSyncEnabled(true)
         let rejected = await fixture.old.syncStatus()
-        XCTAssertEqual(rejected.phase, .failed(.corruptData))
+        XCTAssertEqual(rejected.phase, .failed(.recoveryRequired))
+        XCTAssertTrue(rejected.canRecoverReplacedCloudCollection)
         let retained = try await fixture.old.page(.init()).entries
         XCTAssertEqual(retained.map(\.previewText), ["retained old history"])
         let unchanged = await fixture.cloud.authoritativeControl()
         XCTAssertEqual(unchanged, fixture.replacement)
+    }
+
+    func testEstablishedDeviceRejectsKeyChangesWithinTheSameEpoch() async throws {
+        let fixture = try await replacementCollection(recover: false)
+        let unexpected = ClipboardSyncControl(accountID: fixture.previous.accountID,
+            keyID: fixture.replacement.keyID, keyCheck: fixture.replacement.keyCheck,
+            epoch: fixture.previous.epoch, phase: "active", serverToken: fixture.replacement.serverToken)
+        await fixture.cloud.returnControl(unexpected)
+        try await fixture.old.setSyncEnabled(true)
+        let rejected = await fixture.old.syncStatus()
+        XCTAssertEqual(rejected.phase, .failed(.corruptData))
+        XCTAssertFalse(rejected.canRecoverReplacedCloudCollection)
+        do {
+            _ = try await fixture.old.prepareReplacedCloudCollectionRecovery()
+            XCTFail("A changed key within known authority is not collection replacement")
+        } catch ClipboardHistoryModuleError.operationUnavailable {}
+        let retained = try await fixture.old.page(.init()).entries
+        XCTAssertEqual(retained.map(\.previewText), ["retained old history"])
+    }
+
+    func testReplacementRecoveryRejectsChangedControlsAndProviderFailure() async throws {
+        for change in ["previous", "newer", "token", "key", "provider"] {
+            let fixture = try await replacementCollection(recover: false)
+            await fixture.old.resumeSync()
+            let confirmation = try await fixture.old.prepareReplacedCloudCollectionRecovery()
+            try await fixture.old.setSyncEnabled(false)
+            let records = await fixture.cloud.uploadedRecords()
+            switch change {
+            case "previous": await fixture.cloud.returnControl(fixture.previous)
+            case "newer":
+                await fixture.cloud.returnControl(ClipboardSyncControl(accountID: fixture.replacement.accountID,
+                    keyID: fixture.replacement.keyID, keyCheck: fixture.replacement.keyCheck,
+                    epoch: UUID(), phase: "active", serverToken: nil))
+            case "token", "key":
+                await fixture.cloud.returnControl(ClipboardSyncControl(accountID: fixture.replacement.accountID,
+                    keyID: change == "key" ? UUID() : fixture.replacement.keyID, keyCheck: fixture.replacement.keyCheck,
+                    epoch: fixture.replacement.epoch, phase: "active", serverToken: Data("changed control".utf8)))
+            default: await fixture.cloud.failControlReads()
+            }
+            do {
+                try await fixture.old.recoverReplacedCloudCollection(confirmation)
+                XCTFail("Changed or unavailable remote authority cannot retire local participation")
+            } catch ClipboardHistoryModuleError.invalidConfirmation {
+                XCTAssertNotEqual(change, "provider")
+            } catch ClipboardSyncServiceError.network(retryAfter: _) {
+                XCTAssertEqual(change, "provider")
+            }
+            let tags = try await fixture.old.syncTags()
+            XCTAssertTrue(tags.first { $0.id == fixture.oldTagID }?.isSelected == true)
+            let retained = try await fixture.old.page(.init()).entries
+            XCTAssertEqual(retained.map(\.previewText), ["retained old history"])
+            let current = await fixture.cloud.authoritativeControl()
+            let after = await fixture.cloud.uploadedRecords()
+            XCTAssertEqual(current, fixture.replacement)
+            XCTAssertEqual(after.map(\.record.recordID), records.map(\.record.recordID))
+            let status = await fixture.old.syncStatus()
+            XCTAssertFalse(status.isEnabled)
+            XCTAssertNil(status.cloudReset)
+        }
+    }
+
+    func testReplacementRecoveryRevalidatesAccountAfterKeyAndControlReads() async throws {
+        for changesAfterKey in [true, false] {
+            let fixture = try await replacementCollection(recover: false)
+            await fixture.old.resumeSync()
+            try await fixture.old.setSyncEnabled(false)
+            let confirmation = try await fixture.old.prepareReplacedCloudCollectionRecovery()
+            if changesAfterKey { await fixture.keys.changeAccountOnNextLoad(using: fixture.cloud) }
+            else { await fixture.cloud.changeAccountOnNextControlRead() }
+            do {
+                try await fixture.old.recoverReplacedCloudCollection(confirmation)
+                XCTFail("An account change during confirmation cannot retire the old account")
+            } catch ClipboardSyncServiceError.accountChanged {}
+            let retained = try await fixture.old.page(.init()).entries
+            XCTAssertEqual(retained.map(\.previewText), ["retained old history"])
+            let tags = try await fixture.old.syncTags()
+            XCTAssertTrue(tags.first { $0.id == fixture.oldTagID }?.isSelected == true)
+            let status = await fixture.old.syncStatus()
+            XCTAssertFalse(status.isEnabled)
+            XCTAssertNil(status.cloudReset)
+        }
+    }
+
+    func testReplacementRecoveryRequiresProofOfThePreviouslyTrustedKey() async throws {
+        let fixture = try await replacementCollection(recover: false)
+        await fixture.old.resumeSync()
+        try await fixture.old.setSyncEnabled(false)
+        let confirmation = try await fixture.old.prepareReplacedCloudCollectionRecovery()
+        await fixture.keys.corrupt(fixture.previous.keyID)
+        do {
+            try await fixture.old.recoverReplacedCloudCollection(confirmation)
+            XCTFail("Invalid old key material cannot authorize retirement")
+        } catch ClipboardSyncServiceError.corruptData {}
+        let tags = try await fixture.old.syncTags()
+        XCTAssertTrue(tags.first { $0.id == fixture.oldTagID }?.isSelected == true)
+        let status = await fixture.old.syncStatus()
+        XCTAssertTrue(status.canRecoverReplacedCloudCollection)
+        XCTAssertFalse(status.isEnabled)
+        let unchanged = await fixture.cloud.authoritativeControl()
+        XCTAssertEqual(unchanged, fixture.replacement)
+    }
+
+    func testReplacementRecoveryDoesNotOfferAnAlreadyRetiredEpoch() async throws {
+        let fixture = try await replacementCollection()
+        try await fixture.old.setSyncEnabled(true)
+        await fixture.cloud.returnControl(fixture.previous)
+        await fixture.old.retrySync()
+        let rejected = await fixture.old.syncStatus()
+        XCTAssertEqual(rejected.phase, .failed(.recoveryRequired))
+        XCTAssertFalse(rejected.canRecoverReplacedCloudCollection)
+        do {
+            _ = try await fixture.old.prepareReplacedCloudCollectionRecovery()
+            XCTFail("Explicit replacement recovery cannot resurrect a retired epoch")
+        } catch ClipboardHistoryModuleError.operationUnavailable {}
     }
 
     private struct Fixture {
@@ -220,10 +390,14 @@ private actor RecoveryJoinCloud: ClipboardSyncTransport {
     private var deleted = false
     private var hiddenRead = false
     private var returnedControl: ClipboardSyncControl?
+    private var controlReadsFail = false
+    private var changesAccountOnControlRead = false
 
     func deleteZone() async { deleted = true; await backing.removeControl() }
     func hideNextControlRead() { hiddenRead = true }
     func returnControl(_ control: ClipboardSyncControl?) { returnedControl = control }
+    func failControlReads() { controlReadsFail = true }
+    func changeAccountOnNextControlRead() { changesAccountOnControlRead = true }
     func switchAccount() async { await backing.switchAccount(to: "another-recovery-account") }
     func account() async -> ClipboardSyncAccount { await backing.account() }
     func authoritativeControl() async -> ClipboardSyncControl? {
@@ -233,9 +407,14 @@ private actor RecoveryJoinCloud: ClipboardSyncTransport {
     func uploadedRecords() async -> [ClipboardSyncUpload] { await backing.uploadedRecords() }
 
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
+        if controlReadsFail { throw ClipboardSyncServiceError.network(retryAfter: nil) }
         if let returnedControl { return returnedControl }
         if hiddenRead { hiddenRead = false; return nil }
         let current = await backing.control(for: account)
+        if changesAccountOnControlRead {
+            changesAccountOnControlRead = false
+            await switchAccount()
+        }
         if current == nil, deleted { return try await absent.control(for: account) }
         return current
     }

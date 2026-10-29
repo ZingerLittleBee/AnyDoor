@@ -12,6 +12,8 @@ final class ClipboardSyncSettingsModel {
     private(set) var resetConfirmation: ClipboardHistoryCloudResetConfirmation?
     private(set) var missingCollectionConfirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation?
     private(set) var didRecoverMissingCollection = false
+    private(set) var replacedCollectionConfirmation: ClipboardHistoryReplacedCloudCollectionRecoveryConfirmation?
+    private(set) var didRecoverReplacedCollection = false
 
     private(set) var status = ClipboardHistorySyncStatus()
     private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
@@ -28,7 +30,7 @@ final class ClipboardSyncSettingsModel {
     var recoveryHelpURL: URL? {
         guard status.isEnabled else { return nil }
         switch status.phase {
-        case .failed(.recoveryRequired) where status.canRecoverMissingCloudCollection:
+        case .failed(.recoveryRequired) where status.canRecoverMissingCloudCollection || status.canRecoverReplacedCloudCollection:
             return nil
         case .waitingForKey, .keyLocked, .accessDenied, .failed(.corruptData), .failed(.recoveryRequired):
             return URL(string: "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
@@ -136,6 +138,27 @@ final class ClipboardSyncSettingsModel {
         }
     }
 
+    func prepareReplacedCollectionRecovery() async {
+        guard !isPerformingAction, status.canRecoverReplacedCloudCollection else { return }
+        replacedCollectionConfirmation = nil
+        didRecoverReplacedCollection = false
+        await performAction {
+            replacedCollectionConfirmation = try await module.prepareReplacedCloudCollectionRecovery()
+        }
+    }
+
+    func cancelReplacedCollectionRecovery() { replacedCollectionConfirmation = nil }
+
+    func confirmReplacedCollectionRecovery(_ confirmation: ClipboardHistoryReplacedCloudCollectionRecoveryConfirmation) async {
+        guard !isPerformingAction else { return }
+        replacedCollectionConfirmation = nil
+        didRecoverReplacedCollection = false
+        await performAction {
+            try await module.recoverReplacedCloudCollection(confirmation)
+            didRecoverReplacedCollection = true
+        }
+    }
+
     func confirmReset(_ confirmation: ClipboardHistoryCloudResetConfirmation) async {
         guard !isPerformingAction else { return }
         resetConfirmation = nil
@@ -154,7 +177,10 @@ final class ClipboardSyncSettingsModel {
                 return
             }
             status = currentStatus
-            if status.isEnabled { didRecoverMissingCollection = false }
+            if status.isEnabled {
+                didRecoverMissingCollection = false
+                didRecoverReplacedCollection = false
+            }
             tags = currentTags
             preservedEdits = currentPreservedEdits
             workingOutputRecoveries = currentWorkingOutputRecoveries

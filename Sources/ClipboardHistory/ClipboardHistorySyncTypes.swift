@@ -15,6 +15,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
     public let lastCompletedAt: Date?
     public let canClearCloudData: Bool
     public let canRecoverMissingCloudCollection: Bool
+    public let canRecoverReplacedCloudCollection: Bool
     public let cloudReset: ClipboardHistoryCloudResetStatus?
 
     public init(
@@ -26,7 +27,8 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         lastCompletedAt: Date? = nil,
         cloudReset: ClipboardHistoryCloudResetStatus? = nil,
         canClearCloudData: Bool = false,
-        canRecoverMissingCloudCollection: Bool = false
+        canRecoverMissingCloudCollection: Bool = false,
+        canRecoverReplacedCloudCollection: Bool = false
     ) {
         self.isEnabled = isEnabled
         self.phase = phase
@@ -37,6 +39,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         self.cloudReset = cloudReset
         self.canClearCloudData = canClearCloudData
         self.canRecoverMissingCloudCollection = canRecoverMissingCloudCollection
+        self.canRecoverReplacedCloudCollection = canRecoverReplacedCloudCollection
     }
 }
 
@@ -50,6 +53,13 @@ public struct ClipboardHistoryCloudResetConfirmation: Equatable, Sendable {
 public struct ClipboardHistoryMissingCloudCollectionRecoveryConfirmation: Equatable, Sendable {
     let account: ClipboardSyncAccount
     let previousControl: ClipboardSyncControl
+}
+
+/// Retires only this Mac's old authority after confirming the observed replacement.
+public struct ClipboardHistoryReplacedCloudCollectionRecoveryConfirmation: Equatable, Sendable {
+    let account: ClipboardSyncAccount
+    let previousControl: ClipboardSyncControl
+    let replacementControl: ClipboardSyncControl
 }
 
 public struct ClipboardHistoryCloudResetStatus: Equatable, Sendable {

@@ -170,7 +170,9 @@ struct ClipboardSyncSettingsView: View {
                 .font(.caption)
             }
 
-            if model.status.canRecoverMissingCloudCollection {
+            if model.status.canRecoverReplacedCloudCollection {
+                replacedCollectionControls
+            } else if model.status.canRecoverMissingCloudCollection {
                 LocalizedText(model.missingCollectionHelpKey)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -178,7 +180,7 @@ struct ClipboardSyncSettingsView: View {
                     Task { await model.prepareMissingCollectionRecovery() }
                 }
                 .disabled(!isStoreReady || model.isPerformingAction)
-            } else if model.didRecoverMissingCollection && !model.status.isEnabled {
+            } else if (model.didRecoverMissingCollection || model.didRecoverReplacedCollection) && !model.status.isEnabled {
                 LocalizedText(.settingsClipboardSyncNewCollectionPrepared)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -283,6 +285,28 @@ struct ClipboardSyncSettingsView: View {
             Button(L(.clipboardEditCancel), role: .cancel) { model.cancelMissingCollectionRecovery() }
         } message: { _ in
             LocalizedText(.settingsClipboardSyncNewCollectionExplanation)
+        }
+    }
+
+    @ViewBuilder
+    private var replacedCollectionControls: some View {
+        LocalizedText(.settingsClipboardSyncReplacedCollection)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        Button(L(.settingsClipboardSyncReplacedCollectionAction)) {
+            Task { await model.prepareReplacedCollectionRecovery() }
+        }
+        .disabled(!isStoreReady || model.isPerformingAction)
+        .alert(L(.settingsClipboardSyncReplacedCollectionAction), isPresented: Binding(
+            get: { model.replacedCollectionConfirmation != nil },
+            set: { if !$0 { model.cancelReplacedCollectionRecovery() } }
+        ), presenting: model.replacedCollectionConfirmation) { confirmation in
+            Button(L(.settingsClipboardSyncReplacedCollectionAction)) {
+                Task { await model.confirmReplacedCollectionRecovery(confirmation) }
+            }
+            Button(L(.clipboardEditCancel), role: .cancel) { model.cancelReplacedCollectionRecovery() }
+        } message: { _ in
+            LocalizedText(.settingsClipboardSyncReplacedCollectionExplanation)
         }
     }
 

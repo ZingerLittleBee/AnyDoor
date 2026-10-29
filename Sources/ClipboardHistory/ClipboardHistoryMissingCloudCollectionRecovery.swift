@@ -49,34 +49,38 @@ extension ClipboardHistoryModule {
         try await waitForWriteTurn()
         try admitMissingCloudCollectionRecovery(confirmation, generation: generation, store: store)
         try syncWrite { database in
-            var state = try syncAccountState(confirmation.account, in: database)
-            try retireLocalSyncCollection(accountID: confirmation.account.identifier, in: database)
-            var retiredEpochs = state.retiredEpochs ?? []
-            retiredEpochs.insert(confirmation.previousControl.epoch)
-            state.retiredEpochs = retiredEpochs
-            state.control = nil
-            state.candidate = ClipboardSyncControl(accountID: confirmation.account.identifier,
-                keyID: confirmation.previousControl.keyID, keyCheck: confirmation.previousControl.keyCheck,
-                epoch: UUID(), phase: "active", serverToken: nil)
-            state.cursor = nil
-            state.lastCompletedAt = nil
-            state.missingControl = nil
-            try saveSyncAccount(state, in: database)
-            if var reset = try cloudReset(in: database, accountID: confirmation.account.identifier), reset.status.isPending {
-                reset.stage = .superseded
-                reset.failure = nil
-                reset.retryNotBefore = nil
-                try saveCloudReset(reset, in: database)
-            }
-            try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
-            try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
-            try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL, retry_not_before = NULL WHERE id = 1")
-            try Self.bumpHistoryRevision(in: database)
+            try retireRecoveredCloudCollection(account: confirmation.account, previous: confirmation.previousControl, in: database)
         }
         retired = true
         setSyncPhase(.disabled)
         publishMutation()
         try await resumeSyncFilePreservations()
+    }
+
+    func retireRecoveredCloudCollection(account: ClipboardSyncAccount, previous: ClipboardSyncControl, in database: Database) throws {
+        var state = try syncAccountState(account, in: database)
+        try retireLocalSyncCollection(accountID: account.identifier, in: database)
+        var retiredEpochs = state.retiredEpochs ?? []
+        retiredEpochs.insert(previous.epoch)
+        state.retiredEpochs = retiredEpochs
+        state.control = nil
+        state.candidate = ClipboardSyncControl(accountID: account.identifier,
+            keyID: previous.keyID, keyCheck: previous.keyCheck, epoch: UUID(), phase: "active", serverToken: nil)
+        state.cursor = nil
+        state.lastCompletedAt = nil
+        state.missingControl = nil
+        state.observedReplacementControl = nil
+        try saveSyncAccount(state, in: database)
+        if var reset = try cloudReset(in: database, accountID: account.identifier), reset.status.isPending {
+            reset.stage = .superseded
+            reset.failure = nil
+            reset.retryNotBefore = nil
+            try saveCloudReset(reset, in: database)
+        }
+        try database.execute(sql: "UPDATE clipboard_sync_settings SET enabled = 0 WHERE id = 1")
+        try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
+        try database.execute(sql: "UPDATE clipboard_sync_recovery SET phase = NULL, retry_not_before = NULL WHERE id = 1")
+        try Self.bumpHistoryRevision(in: database)
     }
 
     private func missingCloudCollectionState() throws -> ClipboardSyncAccountState {
@@ -127,12 +131,22 @@ extension ClipboardHistoryModule {
         case .success(let control): missing = control == nil
         case .failure: missing = true
         }
-        try syncWrite { database in
+        let changed = try syncWrite { database in
             var state = try syncAccountState(account, in: database)
-            guard state.control != nil else { return }
+            guard state.control != nil else { return false }
+            let previousMissing = state.missingControl
+            let previousReplacement = state.observedReplacementControl
             state.missingControl = missing ? true : nil
+            if case .success(let control) = result, let control, state.canRecoverReplacement(control) {
+                state.observedReplacementControl = control
+            } else {
+                state.observedReplacementControl = nil
+            }
+            guard previousMissing != state.missingControl || previousReplacement != state.observedReplacementControl else { return false }
             try saveSyncAccount(state, in: database)
+            return true
         }
+        if changed { publishSyncStatus() }
         return try result.get()
     }
 }

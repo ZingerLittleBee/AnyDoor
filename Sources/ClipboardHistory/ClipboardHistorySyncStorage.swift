@@ -9,6 +9,19 @@ struct ClipboardSyncAccountState: Codable, Sendable {
     var lastCompletedAt: Date?
     var missingControl: Bool?
     var retiredEpochs: Set<UUID>?
+    var observedReplacementControl: ClipboardSyncControl?
+
+    var recoverableReplacementControl: ClipboardSyncControl? {
+        guard let replacement = observedReplacementControl, canRecoverReplacement(replacement) else { return nil }
+        return replacement
+    }
+
+    func canRecoverReplacement(_ replacement: ClipboardSyncControl) -> Bool {
+        guard let control else { return false }
+        return replacement.accountID == account.identifier && replacement.phase == "active"
+            && replacement.epoch != control.epoch && retiredEpochs?.contains(replacement.epoch) != true
+            && (replacement.keyID != control.keyID || replacement.keyCheck != control.keyCheck)
+    }
 }
 
 extension ClipboardHistoryModule {

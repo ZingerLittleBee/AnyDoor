@@ -19,7 +19,8 @@ extension ClipboardHistoryModule {
                 let state = try data.map { try JSONDecoder().decode(ClipboardSyncAccountState.self, from: $0) }
                 guard settings.enabled else {
                     return ClipboardHistorySyncStatus(phase: phase == .failed(.accountChanged) ? phase : .disabled, cloudReset: reset, canClearCloudData: state?.control != nil,
-                        canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true)
+                        canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true,
+                        canRecoverReplacedCloudCollection: state?.recoverableReplacementControl != nil)
                 }
                 let uploaded = try Int.fetchOne(database, sql: """
                     SELECT COUNT(DISTINCT subject_id) FROM clipboard_sync_outbox WHERE account_id = ? AND kind = 'entry' AND acknowledged = 1
@@ -30,7 +31,8 @@ extension ClipboardHistoryModule {
                     phase: phase,
                     uploadedEntryCount: uploaded, receivedEntryCount: received,
                     withdrawnEntryCount: try syncWithdrawnCount(accountID: accountID, in: database), lastCompletedAt: state?.lastCompletedAt, cloudReset: reset, canClearCloudData: state?.control != nil,
-                    canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true)
+                    canRecoverMissingCloudCollection: state?.control != nil && state?.missingControl == true,
+                    canRecoverReplacedCloudCollection: state?.recoverableReplacementControl != nil)
             }
         } catch {
             return ClipboardHistorySyncStatus(isEnabled: true, phase: .failed(.localStorage))
@@ -352,6 +354,7 @@ extension ClipboardHistoryModule {
             syncAccountBindingGeneration = nil
             var control = try await observedSyncControl(for: account, generation: generation, services: services)
             state.missingControl = nil
+            state.observedReplacementControl = nil
             try await admitSync(generation, account: account, services: services)
             if control == nil {
                 guard state.control == nil else { throw ClipboardSyncServiceError.missingRemoteState }
@@ -402,7 +405,10 @@ extension ClipboardHistoryModule {
             }
             let activationAuthorized = try cloudActivationAuthorized()
             if let previous = state.control, previous.keyID != control.keyID || previous.keyCheck != control.keyCheck {
-                throw ClipboardSyncServiceError.corruptData
+                // A new collection needs separate local retirement consent.
+                // An unexpected key change within the same epoch remains corruption.
+                throw state.canRecoverReplacement(control)
+                    ? ClipboardSyncServiceError.missingRemoteState : ClipboardSyncServiceError.corruptData
             }
             if control.phase == "resetting" ||
                 (!activationAuthorized && (control.phase != "active" || state.control.map { $0.epoch != control.epoch } == true)) {
@@ -440,6 +446,7 @@ extension ClipboardHistoryModule {
                 try database.execute(sql: "DELETE FROM clipboard_sync_resets WHERE account_id = ?", arguments: [account.identifier])
             }
             state.control = control
+            state.observedReplacementControl = nil
             try syncWrite { try saveSyncAccount(state, in: $0) }
             let loadedKey: Data?
             if let verifiedRecoveryKey { loadedKey = verifiedRecoveryKey }
