@@ -17,11 +17,13 @@ struct ClipboardLinkedFileStamp: Sendable {
     let device: dev_t
     let inode: ino_t
     let size: off_t
+    let permissions: mode_t
     let modified: timespec
     let changed: timespec
 
     init(_ status: stat) {
         device = status.st_dev; inode = status.st_ino; size = status.st_size
+        permissions = status.st_mode & 0o666
         modified = status.st_mtimespec; changed = status.st_ctimespec
     }
 
@@ -108,8 +110,27 @@ enum ClipboardLinkedFileIO {
                 }
                 let before = try inspectCoordinated(destination, expectedIdentity: source.identity)
                 guard before.digest == source.baseDigest else { return nil }
-                let prepared = try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity)
-                guard prepared.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
+                var candidate = try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity)
+                guard candidate.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
+                if before.treeWitness == nil, candidate.treeWitness == nil,
+                   candidate.stamp.permissions != before.stamp.permissions {
+                    // Raw versions carry bytes, not portable tree metadata.
+                    // Retain only the proven destination's ordinary read/write
+                    // bits, without importing ownership, ACLs or execute rights.
+                    let file = open(replacement.url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+                    guard file >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                    defer { close(file) }
+                    var status = stat()
+                    guard fstat(file, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                    guard status.st_dev == candidate.stamp.device, status.st_ino == candidate.stamp.inode,
+                          candidate.stamp.matches(replacement.url) else { throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE) }
+                    guard fchmod(file, before.stamp.permissions) == 0, fsync(file) == 0 else {
+                        throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+                    }
+                    candidate = try inspectCoordinated(replacement.url, expectedIdentity: replacement.identity)
+                    guard candidate.digest == replacement.digest else { throw ClipboardSyncServiceError.corruptData }
+                }
+                let prepared = candidate
                 try Task.checkCancellation()
                 try faultInjector.check(.linkedFileBeforeReplacement)
                 // The durable journal owns both roots before this call. Long

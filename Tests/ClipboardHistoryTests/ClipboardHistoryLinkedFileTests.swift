@@ -654,7 +654,10 @@ actor LinkedFileKeys: ClipboardSyncKeyStoring {
 }
 
 actor LinkedFileCloud: ClipboardSyncTransport {
-    private var identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
+    private var identity: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "linked-file-user")) {
+        identity = account
+    }
     private var currentControl: ClipboardSyncControl?
     func removeControl() { currentControl = nil }
     private var uploads: [ClipboardSyncUpload] = []

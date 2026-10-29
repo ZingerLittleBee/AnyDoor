@@ -416,6 +416,7 @@ enum L10n {
         case clipboardTagChooseIdentity = "clipboard.tag.chooseIdentity"
         case settingsClipboardSyncEnable = "settings.clipboard.sync.enable"
         case settingsClipboardSyncDescription = "settings.clipboard.sync.description"
+        case settingsClipboardSyncWorkingCopies = "settings.clipboard.sync.workingCopies"
         case settingsClipboardSyncBackfill = "settings.clipboard.sync.backfill"
         case settingsClipboardSyncTagCount = "settings.clipboard.sync.tagCount"
         case settingsClipboardSyncNoTags = "settings.clipboard.sync.noTags"

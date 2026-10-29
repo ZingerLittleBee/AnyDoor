@@ -46,7 +46,7 @@ final class ClipboardSyncSettingsModel {
         // is suspended. The module cancels that work before persisting Off.
         guard !enabled || !isPerformingAction else { return }
         await performAction {
-            try await module.setSyncEnabled(enabled)
+            try await module.setSyncEnabled(enabled, waitForSync: false)
         }
     }
 
@@ -55,7 +55,7 @@ final class ClipboardSyncSettingsModel {
             return
         }
         await performAction {
-            try await module.setSyncTagSelected(id, selected: selected)
+            try await module.setSyncTagSelected(id, selected: selected, waitForSync: false)
         }
     }
 
@@ -69,7 +69,7 @@ final class ClipboardSyncSettingsModel {
     func confirmMerge(_ confirmedPreview: ClipboardHistorySyncTagMergePreview? = nil) async {
         guard let preview = confirmedPreview ?? mergePreview, canSelectTag else { return }
         mergePreview = nil
-        await performAction { try await module.mergeSyncTags(preview) }
+        await performAction { try await module.mergeSyncTags(preview, waitForSync: false) }
     }
     func cancelMerge() { mergePreview = nil }
 
@@ -81,7 +81,7 @@ final class ClipboardSyncSettingsModel {
     func retry() async {
         guard !isPerformingAction else { return }
         await performAction {
-            await module.retrySync()
+            await module.retrySync(waitForSync: false)
         }
     }
 

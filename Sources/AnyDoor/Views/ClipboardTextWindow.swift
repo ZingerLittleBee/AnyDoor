@@ -497,7 +497,7 @@ struct ClipboardTextPanelView: View {
             VStack(alignment: .leading, spacing: 16) {
                 LocalizedText(.clipboardTextConflictMessage)
                     .foregroundStyle(.secondary)
-                ForEach(model.conflictVersions) { version in
+                ForEach(Array(model.conflictVersions.enumerated()), id: \.element.id) { number, version in
                     VStack(alignment: .leading, spacing: 8) {
                         Button {
                             model.selectedVersionID = version.id
@@ -510,7 +510,11 @@ struct ClipboardTextPanelView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(model.isSaving)
-                        .accessibilityLabel(L(.clipboardTextConflictSelect))
+                        .accessibilityLabel(
+                            Text(L(.clipboardTextConflictSelect, number + 1))
+                                + Text(", ") + Text(version.editedAt, style: .date)
+                                + Text(", ") + Text(version.editedAt, style: .time)
+                        )
                         .accessibilityValue(model.selectedVersionID == version.id ? L(.clipboardTextConflictSelected) : "")
                         Text(version.text)
                             .textSelection(.enabled)

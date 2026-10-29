@@ -29,6 +29,10 @@ struct ClipboardSyncSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            LocalizedText(.settingsClipboardSyncWorkingCopies)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             if model.tags.isEmpty {
                 LocalizedText(.settingsClipboardSyncNoTags)
                     .foregroundStyle(.secondary)
