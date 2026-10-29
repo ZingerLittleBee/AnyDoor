@@ -430,8 +430,8 @@ extension ClipboardHistoryModule {
                 // not need another full backfill scan for every uploaded record.
                 let revision = try syncWrite { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
-                    try stageSyncBackfill(account: account, control: control, key: key)
-                    stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
+                    stagedRevision = try await stageSyncBackfill(account: account, control: control, key: key,
+                        generation: generation)
                 }
                 let ordinary = try nextSyncUpload(account: account, control: control)
                 let preparedRestoration = ordinary == nil ? try await nextSyncFileRestoration(account: account,

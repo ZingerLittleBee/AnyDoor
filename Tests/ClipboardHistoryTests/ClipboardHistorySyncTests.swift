@@ -11,6 +11,79 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testSyncPayloadPreparationAllowsHistoryWorkAndOffRevokesBeforeDraining() async throws {
+        let armed = OSAllocatedUnfairLock(initialState: false)
+        let barrier = LinkedReplacementBarrier()
+        defer { barrier.release() }
+        let faults = ClipboardHistoryFaultInjector { point in
+            guard point == .payloadAuthentication else { return false }
+            let pause = armed.withLock { value in if value { value = false; return true }; return false }
+            if pause { barrier.pause() }
+            return false
+        }
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0xF6, time: 1_000, faults: faults)
+        try await module.setAutomaticImageTextIndexingEnabled(false)
+        let bitmap = try await module.capture(.init(source: .unknown, content: .bitmap(try makeSyncBitmap(), provenance: .image)))
+        let tag = try await module.createTagDefinition(named: "Prepared", assigningTo: bitmap.entryID).definition
+        try await module.setSyncTagSelected(tag.id, selected: true)
+        await module.awaitDerivedJobsForTesting()
+        armed.withLock { $0 = true }
+        let enable = Task { try await module.setSyncEnabled(true) }
+        addTeardownBlock { barrier.release(); _ = try? await enable.value }
+        for _ in 0..<400 {
+            if barrier.isWaiting { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(barrier.isWaiting, "The real payload authentication must be held during sync preparation")
+        var pageFinished = false
+        let page = Task {
+            let value = try await module.page(.init())
+            pageFinished = true
+            return value
+        }
+        var captureFinished = false
+        let capture = Task {
+            let value = try await module.capture(.init(source: .unknown, content: .text("local work while preparing")))
+            captureFinished = true
+            return value
+        }
+        for _ in 0..<200 {
+            if pageFinished && captureFinished { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(pageFinished, "Payload decryption must not hold the module actor or database writer")
+        XCTAssertTrue(captureFinished, "A local capture must remain available while sync prepares ciphertext")
+        let cancellations = await cloud.cancellationCount()
+        var offFinished = false
+        let off = Task { try await module.setSyncEnabled(false); offFinished = true }
+        var revoked = false
+        for _ in 0..<200 {
+            if await cloud.cancellationCount() > cancellations { revoked = true; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(revoked, "Off must revoke admission before the held preparation completes")
+        XCTAssertFalse(offFinished, "Off must also drain the preparation before returning")
+        barrier.release()
+        try await enable.value
+        _ = try await page.value
+        let local = try await capture.value
+        try await off.value
+        let status = await module.syncStatus()
+        XCTAssertFalse(status.isEnabled)
+        let uploads = await cloud.currentUploads()
+        XCTAssertFalse(uploads.contains { $0.record.kind == .entry }, "Revoked prepared content must not reach the provider")
+        let history = try await module.page(.init()).entries
+        XCTAssertEqual(Set(history.map(\.id)), [bitmap.entryID, local.entryID])
+        try await module.setSyncEnabled(true)
+        let peer = makeModule(services: services, keyByte: 0xF7, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let received = try await peer.page(.init()).entries
+        XCTAssertEqual(received.map(\.id), [bitmap.entryID])
+    }
+
+    @MainActor
     func testEstablishedFileWatcherObservesLocallyWithoutRetryingPermanentProviderFailure() async throws {
         try await assertEstablishedWatcherHonorsProviderAdmission(withBackoff: false)
     }

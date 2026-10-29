@@ -101,9 +101,9 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID]).map { ClipboardSyncTagContent(id: $0["id"], name: $0["display_name"]) }
     }
 
-    func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data) throws {
-        let pool = try requiredDatabase()
-        try pool.write { database in
+    func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws -> Int64 {
+        let revision = try syncWrite { database in
             try stageSyncDeletions(account: account, control: control, key: key, in: database)
             try recordSyncWithdrawals(in: database)
             try stageSyncWithdrawals(account: account, control: control, key: key, in: database)
@@ -111,48 +111,88 @@ extension ClipboardHistoryModule {
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
             try stageSyncMetadata(account: account, control: control, key: key, in: database)
-            let tags = try selectedSyncTags(accountID: account.identifier, in: database)
-            guard !tags.isEmpty else { return }
-            let rows = try Row.fetchCursor(database, SQLRequest<Row>(literal: """
-                SELECT entry.id
-                FROM clipboard_entries AS entry
-                WHERE \(sql: Self.syncEntryEligibility)
-                  AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
-                  AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
-                    WHERE shared.account_id = \(account.identifier) AND shared.epoch = \(control.epoch.uuidString)
-                      AND shared.local_entry_id = entry.id)
-                ORDER BY entry.id
-                """))
-            while let row = try rows.next() {
-                let localID: String = row["id"]
+            return try Self.historyRevision(in: database)
+        }
+        let store = try requiredPayloadStore()
+        var afterID = ""
+        while true {
+            try admitSync(generation)
+            let next = try syncFileRead { database -> (String, Int64, ClipboardSyncEntrySnapshot)? in
+                guard let localID = try String.fetchOne(database, SQLRequest<String>(literal: """
+                    SELECT entry.id FROM clipboard_entries AS entry
+                    WHERE entry.id > \(afterID) AND \(sql: Self.syncEntryEligibility)
+                      AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+                      AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
+                        WHERE shared.account_id = \(account.identifier) AND shared.epoch = \(control.epoch.uuidString)
+                          AND shared.local_entry_id = entry.id)
+                    ORDER BY entry.id LIMIT 1
+                    """)) else { return nil }
                 guard let id = UUID(uuidString: localID) else { throw ClipboardSyncServiceError.corruptData }
+                let tags = try selectedSyncTags(accountID: account.identifier, in: database)
                 let memberships = Set(try String.fetchAll(database,
                     sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?", arguments: [localID]))
-                // A retained local copy can share its old UUID with a newly
-                // imported entry in this epoch. Explicitly publishing that copy
-                // allocates a distinct cloud identity without replacing either.
+                // Retained local copies may need a new cloud identity.
                 let identityInUse = try Bool.fetchOne(database, sql: """
                     SELECT EXISTS(SELECT 1 FROM clipboard_sync_entries
                     WHERE account_id = ? AND epoch = ? AND shared_id = ?)
                     """, arguments: [account.identifier, control.epoch.uuidString, localID]) == true
-                let sharedID = identityInUse ? UUID() : id
-                let content = try syncEntryContent(id: id, sharedID: sharedID, tags: tags.filter { memberships.contains($0.id) },
-                    account: account, control: control, key: key, in: database)
+                let snapshot = try syncEntrySnapshot(id: id, sharedID: identityInUse ? UUID() : id,
+                    tags: tags.filter { memberships.contains($0.id) }, account: account, control: control, key: key, in: database)
+                return (localID, try Self.historyRevision(in: database), snapshot)
+            }
+            guard let (localID, snapshotRevision, snapshot) = next else { break }
+            afterID = localID
+            let preparation = Task.detached(priority: .utility) {
+                let content = try snapshot.materialize(using: store)
+                try Task.checkCancellation()
                 let upload = try ClipboardSyncCodec.seal(.entry(content), account: account, control: control, key: key)
-                try storeSyncUpload(upload, subjectID: sharedID.uuidString.lowercased(), account: account, in: database)
+                return (content, upload)
+            }
+            let content: ClipboardSyncEntryContent
+            let upload: ClipboardSyncUpload
+            do {
+                (content, upload) = try await withTaskCancellationHandler { try await preparation.value }
+                    onCancel: { preparation.cancel() }
+            } catch {
+                try admitSync(generation)
+                // Deletion/edit may reclaim a captured payload while preparation
+                // runs. Its stale snapshot is no longer a storage failure.
+                if try syncFileRead({ try Self.historyRevision(in: $0) }) != snapshotRevision { continue }
+                throw error
+            }
+            try await waitForWriteTurn()
+            try admitSync(generation)
+            try syncWrite { database in
+                guard try Self.historyRevision(in: database) == snapshotRevision,
+                      let context = try syncFileContext(in: database), context.account == account,
+                      context.control.epoch == control.epoch, context.control.keyID == control.keyID,
+                      context.control.phase == "active" else { return }
+                guard try Bool.fetchOne(database, SQLRequest<Bool>(literal: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_entries AS entry
+                    WHERE entry.id = \(localID) AND \(sql: Self.syncEntryEligibility)
+                      AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
+                      AND NOT EXISTS (SELECT 1 FROM clipboard_sync_entries AS shared
+                        WHERE shared.account_id = \(account.identifier) AND shared.epoch = \(control.epoch.uuidString)
+                          AND shared.local_entry_id = entry.id))
+                    """)) == true else { return }
+                let sharedID = content.id.uuidString.lowercased()
+                try storeSyncUpload(upload, subjectID: sharedID, account: account, in: database)
                 try database.execute(sql: """
                     INSERT INTO clipboard_sync_entries(account_id, epoch, shared_id, local_entry_id, record_id, origin)
                     VALUES (?, ?, ?, ?, ?, 'local')
-                    """, arguments: [account.identifier, control.epoch.uuidString, sharedID.uuidString.lowercased(), localID, upload.record.recordID])
-                try Self.rememberSyncFileOwnership(sharedID: sharedID.uuidString.lowercased(), accountID: account.identifier,
+                    """, arguments: [account.identifier, control.epoch.uuidString, sharedID, localID, upload.record.recordID])
+                try Self.rememberSyncFileOwnership(sharedID: sharedID, accountID: account.identifier,
                     epoch: control.epoch.uuidString, in: database)
                 try Self.registerSyncTextRoot(content, record: upload.record, account: account, in: database)
-                try seedSyncMemberships(content.tags, sharedID: sharedID.uuidString.lowercased(), localID: localID,
+                try seedSyncMemberships(content.tags, sharedID: sharedID, localID: localID,
                     account: account, epoch: control.epoch, in: database)
                 try seedSyncEntryMetadata(content, account: account, record: upload.record, in: database)
             }
-            try stageSyncTextEdits(account: account, control: control, key: key, in: database)
         }
+        try admitSync(generation)
+        try syncWrite { try stageSyncTextEdits(account: account, control: control, key: key, in: $0) }
+        // Concurrent intent is deliberately not covered by this pass's witness.
+        return revision
     }
 
     func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,
