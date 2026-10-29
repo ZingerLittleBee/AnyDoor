@@ -1121,9 +1121,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                 panel.canCreateDirectories = true
                 panel.allowsMultipleSelection = false
                 guard panel.runModal() == .OK, let directory = panel.url else { return }
-                var usedNames = Set<String>()
-                destinations = content.fileURLs.map {
-                    directory.appendingPathComponent(uniqueRestoreName($0.lastPathComponent, usedNames: &usedNames))
+                do {
+                    destinations = try ClipboardFileExportPicker().destinations(for: content.fileURLs, in: directory)
+                } catch {
+                    ClipboardHistoryActionFailurePresenter.present(ClipboardHistoryActionFailure(error))
+                    return
                 }
             }
             if !(await state.presentation.exportFiles(entry.id, to: destinations)) { presentActionFailure() }
