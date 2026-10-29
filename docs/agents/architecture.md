@@ -389,6 +389,11 @@ The final exchange uses a revocable generation gate and a serialized database
 authority check after file hashing. Off revokes the gate before waiting for work
 to exit; deletion/withdrawal/reset transactions cannot race the last eligibility
 read. No long file hashing or provider I/O holds that final mutation gate.
+Shutdown cancels and drains owned sync work before completing termination. File
+loops check cancellation, but an individual synchronous filesystem call or native
+file-coordination request has no guaranteed completion deadline. The app does not
+abandon a writer that could still publish after shutdown; stalled-volume quit
+behavior remains outside the isolated test evidence.
 
 The additive `v26_clipboard_sync_file_conflicts` migration persists displayed
 choices, resolution journals, and version retention pins. File ancestry must be
@@ -1266,8 +1271,12 @@ retired before the lifecycle reports ready or resumes monitoring/sync. Its one-t
 transaction adds missing definitions while preserving current encrypted identities
 and memberships; only a successful import permits deleting the preference. An
 encrypted completion marker rejects replay after restart, and failures retain the
-source for retry. New tag mutations never refresh a mirror. Manual export builds
-current definitions in memory from the module. Manual restore directly replaces
+source for retry. New tag mutations never refresh a mirror. The atomic legacy import runs in
+a module-owned utility worker so WAL reads remain responsive; ordinary writers
+wait for its turn. Close, retry and reset cancel and drain that worker, and store
+migration joins it before replacing the pool. Store transitions reject new imports
+until replacement finishes. Lifecycle readiness still waits for durable import.
+Manual export builds current definitions in memory from the module. Manual restore directly replaces
 definitions through the module, preserving memberships of retained IDs and removing
 those of removed IDs; missing backup fields leave tags unchanged. Distinct IDs with
 the same name round-trip without merging. See
