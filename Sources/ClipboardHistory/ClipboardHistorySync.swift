@@ -120,6 +120,7 @@ extension ClipboardHistoryModule {
         syncAccountBindingGeneration = nil
         syncRerunRequested = false
         syncExplicitRerunRequested = false
+        prioritizedSyncFileDownloads.removeAll()
         let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
@@ -463,6 +464,16 @@ extension ClipboardHistoryModule {
             var stagedRevision: Int64?
             var unavailableRestorations: Set<ClipboardSyncFileRestorationIdentity> = []
             while true {
+                if !prioritizedSyncFileDownloads.isEmpty {
+                    let requested = prioritizedSyncFileDownloads
+                    // Drain before suspending so requests admitted during this
+                    // download remain queued for the following checkpoint.
+                    prioritizedSyncFileDownloads.removeAll()
+                    try await receivePendingSyncFiles(account: account, control: control, key: key,
+                        services: services, generation: generation, requestedVersions: requested)
+                    try await waitForWriteTurn()
+                    try admitSync(generation)
+                }
                 // Drain mutations made while a provider request was suspended,
                 // including rejoining during cleanup. An unchanged history does
                 // not need another full backfill scan for every uploaded record.
