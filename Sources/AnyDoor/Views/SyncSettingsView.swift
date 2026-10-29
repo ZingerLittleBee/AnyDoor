@@ -269,6 +269,14 @@ struct SyncSettingsView: View {
                                       summary.preferencesUpdated,
                                       summary.quicklinksUpdated + summary.quicklinksInserted)
                     isError = false
+                } catch let error as BackupImportPartialFailure {
+                    logger.error("Import completed without clipboard tags: \(error.clipboardTagsError)")
+                    var messages = [L(.settingsSyncImportTagsNotRestored)]
+                    if let runtimeError = error.runtimeError {
+                        messages.append(L(.settingsSyncImportRuntimePartialFailure, runtimeError.localizedDescription))
+                    }
+                    statusMessage = messages.joined(separator: "\n")
+                    isError = true
                 } catch let error as PluginImportReconciliationError {
                     logger.error("Import completed with plugin failures: \(error)")
                     statusMessage = L(

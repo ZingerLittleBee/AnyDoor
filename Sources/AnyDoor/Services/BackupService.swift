@@ -5,13 +5,23 @@ import PluginInterface
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.
-struct ImportSummary: Equatable {
+struct ImportSummary: Equatable, Sendable {
     var shortcutsUpdated: Int
     var shortcutsInserted: Int
     var preferencesUpdated: Int
     var quicklinksUpdated: Int
     var quicklinksInserted: Int
     var settingsApplied: Int
+}
+
+struct BackupImportPartialFailure: Error {
+    let summary: ImportSummary
+    let clipboardTagsError: any Error
+    let runtimeError: (any Error)?
+}
+
+enum BackupImportIssue: Error {
+    case clipboardTagsOmitted
 }
 
 /// Gathers local config into a `BackupSnapshot` (export) and merges a snapshot
@@ -142,23 +152,43 @@ final class BackupService {
     /// plugin lifecycle or derived surfaces are still stale.
     @discardableResult
     func restore(_ snapshot: BackupSnapshot) async throws -> ImportSummary {
-        let importedTags: [ClipboardHistoryTagDefinition]?
-        if let value = snapshot.settings[ClipboardHistoryPortableKeys.customTags] {
-            guard case .string(let json) = value else { throw ClipboardHistoryModuleError.invalidTagName }
-            importedTags = try ClipboardHistoryPortableSettings.definitions(from: json)
-        } else {
-            importedTags = nil
-        }
-        if let importedTags {
-            try await restoreClipboardTags(importedTags)
-            defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+        var importedTags: [ClipboardHistoryTagDefinition]?
+        var clipboardTagsError: (any Error)?
+        do {
+            if let value = snapshot.settings[ClipboardHistoryPortableKeys.customTags] {
+                guard case .string(let json) = value else { throw ClipboardHistoryModuleError.invalidTagName }
+                importedTags = try ClipboardHistoryPortableSettings.definitions(from: json)
+            } else if snapshot.omittedSections.contains(.clipboardTags) {
+                throw BackupImportIssue.clipboardTagsOmitted
+            }
+        } catch {
+            clipboardTagsError = error
         }
         var summary = try apply(snapshot)
-        if importedTags != nil { summary.settingsApplied += 1 }
-        try await reconcileRuntime()
+        if let importedTags {
+            do {
+                try await restoreClipboardTags(importedTags)
+                defaults.removeObject(forKey: ClipboardHistoryPortableKeys.customTags)
+                summary.settingsApplied += 1
+            } catch {
+                clipboardTagsError = error
+            }
+        }
+        let runtimeError: (any Error)?
+        do {
+            try await reconcileRuntime()
+            runtimeError = nil
+        } catch {
+            runtimeError = error
+        }
         // Restored rows are portable config the sync engine (if running)
         // must capture; settings writes already fired the defaults notification.
         NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
+        if let clipboardTagsError {
+            throw BackupImportPartialFailure(summary: summary,
+                clipboardTagsError: clipboardTagsError, runtimeError: runtimeError)
+        }
+        if let runtimeError { throw runtimeError }
         return summary
     }
 
