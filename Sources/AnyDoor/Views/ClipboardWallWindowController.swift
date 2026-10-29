@@ -1110,10 +1110,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                   !content.fileURLs.isEmpty else { presentActionFailure(); return }
             let destinations: [URL]
             if content.fileURLs.count == 1, let source = content.fileURLs.first {
-                let panel = NSSavePanel()
-                panel.title = L(.clipboardActionSaveFiles)
-                panel.nameFieldStringValue = source.lastPathComponent
-                guard panel.runModal() == .OK, let url = panel.url else { return }
+                let picker = ClipboardFileExportPicker()
+                guard let url = picker.chooseDestination(suggestedName: source.lastPathComponent) else { return }
                 destinations = [url]
             } else {
                 let panel = NSOpenPanel()
