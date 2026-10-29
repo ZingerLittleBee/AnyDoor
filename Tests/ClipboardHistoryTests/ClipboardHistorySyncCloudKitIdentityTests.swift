@@ -147,6 +147,60 @@ final class ClipboardHistorySyncCloudKitIdentityTests: XCTestCase {
             XCTFail("A callback-free provider failure cannot become missing result corruption")
         } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .network(retryAfter: 120)) }
     }
+
+    func testForeignFailedItemCallbacksCannotBecomeNetworkOrConflictRetries() async throws {
+        for boundary: NativeIdentityFixture.CallbackBoundary in [.fetchedRecordFailure, .savedRecordFailure, .deletedRecordFailure] {
+            for fault: NativeIdentityFixture.IdentityFault in [.callbackOwner, .callbackZone, .callbackName] {
+                let fixture = NativeIdentityFixture(fault: fault, callbackBoundary: boundary)
+                let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+                let observed = try await cloud.control(for: fixture.account)
+                let control = try XCTUnwrap(observed)
+                do {
+                    if boundary == .fetchedRecordFailure {
+                        _ = try await cloud.download(Self.twoChunkRecord(control), for: fixture.account)
+                    } else {
+                        _ = try await cloud.transition(control, to: "resetting", epoch: UUID(), for: fixture.account)
+                    }
+                    XCTFail("A foreign failure callback must be rejected before provider retry classification")
+                } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, fault.expectedFailure, "\(boundary): \(fault)") }
+            }
+        }
+    }
+
+    func testPartialFetchFailureWithKnownOwnerAliasKeepsProviderDelay() async throws {
+        let fixture = NativeIdentityFixture(callbackBoundary: .fetchedRecordFailure)
+        let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+        let observed = try await cloud.control(for: fixture.account)
+        let control = try XCTUnwrap(observed)
+        do {
+            _ = try await cloud.download(Self.twoChunkRecord(control), for: fixture.account)
+            XCTFail("A partial native fetch failure must remain retryable")
+        } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .network(retryAfter: 120)) }
+    }
+
+    func testEarlierProviderFailureCannotHideLaterForeignCallbackIdentity() async throws {
+        for boundary: NativeIdentityFixture.CallbackBoundary in [.changedRecord, .changedZone, .savedZone] {
+            let fixture = NativeIdentityFixture(fault: .callbackOwner, callbackBoundary: boundary, ordinaryFailureFirst: true)
+            let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+            let observed = try await cloud.control(for: fixture.account)
+            let control = try XCTUnwrap(observed)
+            do {
+                if boundary == .savedZone {
+                    let candidate = ClipboardSyncControl(accountID: control.accountID, keyID: control.keyID,
+                        keyCheck: control.keyCheck, epoch: UUID(), phase: "active", serverToken: nil)
+                    _ = try await cloud.createControl(candidate, for: fixture.account)
+                } else {
+                    _ = try await cloud.changes(for: fixture.account, control: control, cursor: nil)
+                }
+                XCTFail("An earlier provider error cannot skip later callback identity validation")
+            } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .accountChanged, "\(boundary)") }
+        }
+    }
+
+    private static func twoChunkRecord(_ control: ClipboardSyncControl) -> ClipboardSyncRemoteRecord {
+        .init(recordID: "two-chunk-fixture", operationID: UUID(), epoch: control.epoch, keyID: control.keyID,
+            kind: .fileBody, chunkCount: 2, encryptedByteCount: 4, digest: Data(repeating: 0x41, count: 32))
+    }
 }
 
 private final class NativeIdentityFixture: Sendable {
@@ -160,7 +214,9 @@ private final class NativeIdentityFixture: Sendable {
             }
         }
     }
-    enum CallbackBoundary: Sendable { case changedRecord, changedZone, savedZone }
+    enum CallbackBoundary: Sendable {
+        case changedRecord, changedZone, savedZone, fetchedRecordFailure, savedRecordFailure, deletedRecordFailure
+    }
 
     let account: ClipboardSyncAccount
     let epoch = UUID()
@@ -169,13 +225,15 @@ private final class NativeIdentityFixture: Sendable {
     private let currentOwner: OSAllocatedUnfairLock<String>
     private let fault: IdentityFault?
     private let callbackBoundary: CallbackBoundary?
+    private let ordinaryFailureFirst: Bool
 
     init(account: ClipboardSyncAccount = ClipboardHistorySyncCloudKitReadTests.account, fault: IdentityFault? = nil,
-         callbackBoundary: CallbackBoundary? = nil) {
+         callbackBoundary: CallbackBoundary? = nil, ordinaryFailureFirst: Bool = false) {
         self.account = account
         self.currentOwner = OSAllocatedUnfairLock(initialState: account.owner)
         self.fault = fault
         self.callbackBoundary = callbackBoundary
+        self.ordinaryFailureFirst = ordinaryFailureFirst
     }
 
     var operations: ClipboardSyncCloudKit.NativeOperations {
@@ -208,6 +266,12 @@ private final class NativeIdentityFixture: Sendable {
     private func add(_ operation: CKDatabaseOperation) {
         switch operation {
         case let fetch as CKFetchRecordsOperation:
+            if callbackBoundary == .fetchedRecordFailure, let ids = fetch.recordIDs, ids.count > 1, let first = ids.first {
+                let failure = CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 120.0])
+                fetch.perRecordResultBlock?(responseID(first, callback: true), .failure(failure))
+                fetch.fetchRecordsResultBlock?(.failure(failure))
+                return
+            }
             for id in fetch.recordIDs ?? [] {
                 let alias = responseID(id, callback: true, applyFault: callbackBoundary == nil)
                 let record = controlRecord(responseID(id, callback: false, applyFault: callbackBoundary == nil))
@@ -218,6 +282,10 @@ private final class NativeIdentityFixture: Sendable {
             XCTAssertEqual(modify.savePolicy, .ifServerRecordUnchanged)
             XCTAssertTrue(modify.isAtomic)
             for record in modify.recordsToSave ?? [] {
+                if callbackBoundary == .savedRecordFailure {
+                    modify.perRecordSaveBlock?(responseID(record.recordID, callback: true), .failure(CKError(.serverRecordChanged)))
+                    continue
+                }
                 savedOwners.withLock { $0.append(record.recordID.zoneID.ownerName) }
                 let concrete = CKRecord.ID(recordName: record.recordID.recordName,
                     zoneID: CKRecordZone.ID(zoneName: record.recordID.zoneID.zoneName, ownerName: account.owner))
@@ -225,10 +293,20 @@ private final class NativeIdentityFixture: Sendable {
                 for key in record.allKeys() { returned[key] = record[key] }
                 modify.perRecordSaveBlock?(concrete, .success(returned))
             }
-            modify.modifyRecordsResultBlock?(.success(()))
+            if callbackBoundary == .deletedRecordFailure, let record = modify.recordsToSave?.first {
+                modify.perRecordDeleteBlock?(responseID(record.recordID, callback: true), .failure(CKError(.zoneBusy)))
+            }
+            if callbackBoundary == .savedRecordFailure || callbackBoundary == .deletedRecordFailure {
+                modify.modifyRecordsResultBlock?(.failure(CKError(.partialFailure)))
+            } else {
+                modify.modifyRecordsResultBlock?(.success(()))
+            }
         case let changes as CKFetchRecordZoneChangesOperation:
             guard let zone = changes.recordZoneIDs?.first else { return XCTFail("Missing requested zone") }
             let requested = CKRecord.ID(recordName: "control.v1", zoneID: zone)
+            if ordinaryFailureFirst {
+                changes.recordWasChangedBlock?(requested, .failure(CKError(.zoneBusy)))
+            }
             if callbackBoundary == .changedRecord {
                 let valid = controlRecord(responseID(requested, callback: false, applyFault: false))
                 changes.recordWasChangedBlock?(responseID(requested, callback: true), .success(valid))
@@ -242,6 +320,9 @@ private final class NativeIdentityFixture: Sendable {
             guard let requested = zones.recordZonesToSave?.first?.zoneID else { return XCTFail("Missing saved zone") }
             let id = CKRecord.ID(recordName: "control.v1", zoneID: requested)
             let valid = CKRecordZone(zoneID: requested)
+            if ordinaryFailureFirst {
+                zones.perRecordZoneSaveBlock?(requested, .failure(CKError(.zoneBusy)))
+            }
             zones.perRecordZoneSaveBlock?(responseID(id, callback: true).zoneID, .success(valid))
             zones.perRecordZoneSaveBlock?(requested, .success(valid))
             zones.modifyRecordZonesResultBlock?(.failure(CKError(.networkFailure)))
