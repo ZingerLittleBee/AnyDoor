@@ -266,6 +266,7 @@ extension ClipboardHistoryModule {
             let page = try await services.transport.changes(for: account, control: control, cursor: state.cursor)
             try await admitSync(generation, account: account, services: services)
             var unavailableContent = false
+            var corruptContent = false
             for record in page.records where record.epoch == control.epoch {
                 // A body is discovered without downloading it. Its encrypted
                 // entry descriptor authorizes a separate version download.
@@ -274,19 +275,37 @@ extension ClipboardHistoryModule {
                 try rememberDiscoveredSyncRecord(record, account: account)
                 if record.kind == .fileBody { continue }
                 guard !((try hasReceivedSyncRecord(record, account: account))) else { continue }
-                let chunks: [Data]
-                do { chunks = try await services.transport.download(record, for: account) }
+                let work = ClipboardSyncFileWork.content(record.operationID)
+                if try shouldDeferSyncFileWork(work, account: account, control: control) {
+                    corruptContent = true
+                    continue
+                }
+                let content: ClipboardSyncContent
+                do {
+                    let chunks = try await services.transport.download(record, for: account)
+                    try await admitSync(generation, account: account, services: services)
+                    content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
+                }
                 catch ClipboardSyncServiceError.recordUnavailable {
                     unavailableContent = true
                     continue
+                } catch ClipboardSyncServiceError.corruptData {
+                    try await admitSync(generation, account: account, services: services)
+                    try deferSyncFileWork(work, error: ClipboardSyncServiceError.corruptData,
+                        account: account, control: control, generation: generation)
+                    corruptContent = true
+                    continue
                 }
-                try await admitSync(generation, account: account, services: services)
-                let content = try ClipboardSyncCodec.open(record, chunks: chunks, account: account, control: control, key: key)
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try importSyncContent(content, record: record, account: account)
+                try syncWrite { try completeSyncFileWork(work, account: account, control: control, in: $0) }
                 if case .deletion = content { try await resumeSyncFilePreservations() }
             }
+            // An unreadable envelope may contain deletion or sharing authority.
+            // Apply other verified retirement events, but do not advance the
+            // cursor or publish while that authority remains unknown.
+            guard !corruptContent else { throw ClipboardSyncServiceError.corruptData }
             // A content operation can disappear after metadata discovery. Apply
             // available retirement events, but do not acknowledge a missing body.
             // The next discovery must confirm its removal instead of hiding loss.

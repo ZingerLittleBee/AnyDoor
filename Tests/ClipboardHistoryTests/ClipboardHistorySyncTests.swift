@@ -4465,6 +4465,65 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(finalCiphertext, originalCiphertext)
     }
 
+    func testCorruptContentRetainsAuthorityFenceAndBackoffAcrossRestart() async throws {
+        for explicitRetry in [false, true] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 2_000))
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("corrupt-content-backoff-\(UUID())")
+            let sender = makeModule(services: services, keyByte: 0xE1, time: 1_000)
+            let receiver = makeModule(services: services, keyByte: 0xE2, time: 2_000, root: root, clock: { clock.withLock { $0 } })
+            let anchor = try await sender.capture(.init(source: .unknown, content: .text("shared anchor")))
+            let unknown = try await sender.capture(.init(source: .unknown, content: .text("unreadable retirement")))
+            let known = try await sender.capture(.init(source: .unknown, content: .text("valid later retirement")))
+            let tag = try await sender.createTagDefinition(named: "Shared", assigningTo: anchor.entryID).definition
+            for id in [unknown.entryID, known.entryID] { _ = try await sender.apply(.setTags(id, [tag.id])) }
+            try await sender.setSyncTagSelected(tag.id, selected: true)
+            try await sender.setSyncEnabled(true)
+            try await receiver.setSyncEnabled(true)
+            try await receiver.setSyncEnabled(false)
+            let added = try await receiver.capture(.init(source: .unknown, content: .text("must wait for unknown authority")))
+            _ = try await receiver.apply(.setTags(added.entryID, [tag.id]))
+            _ = try await sender.apply(.delete(unknown.entryID))
+            await sender.retrySync()
+            let uploads = await cloud.currentUploads()
+            let damaged = try XCTUnwrap(uploads.last { $0.record.kind == .entry }).record.recordID
+            await cloud.damageContentRecord(damaged)
+            _ = try await sender.apply(.delete(known.entryID))
+            await sender.retrySync()
+            try await receiver.setSyncEnabled(true)
+            let failed = await receiver.syncStatus()
+            XCTAssertEqual(failed.phase, .failed(.corruptData))
+            let local = try await receiver.page(.init()).entries
+            XCTAssertTrue(local.contains { $0.id == unknown.entryID })
+            XCTAssertFalse(local.contains { $0.id == known.entryID }, "Other authenticated retirement must still apply")
+            let before = try await sender.page(.init()).entries
+            XCTAssertFalse(before.contains { $0.id == added.entryID }, "An unreadable record may revoke publication authority")
+            let attempts = await cloud.contentDownloadCount(damaged)
+            XCTAssertEqual(attempts, 1)
+            try await receiver.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xE2, time: 2_000, root: root, clock: { clock.withLock { $0 } })
+            await reopened.resumeSync()
+            let afterRestart = await cloud.contentDownloadCount(damaged)
+            XCTAssertEqual(afterRestart, attempts, "Automatic restart must not authenticate the same broken record before its deadline")
+            await cloud.damageContentRecord(nil)
+            if explicitRetry { await reopened.retrySync() }
+            else {
+                clock.withLock { $0 = $0.addingTimeInterval(30) }
+                await reopened.resumeSync()
+            }
+            let complete = await reopened.syncStatus()
+            XCTAssertEqual(complete.phase, .upToDate)
+            let after = try await reopened.page(.init()).entries
+            XCTAssertFalse(after.contains { $0.id == unknown.entryID || $0.id == known.entryID })
+            await sender.retrySync()
+            let peer = try await sender.page(.init()).entries
+            XCTAssertTrue(peer.contains { $0.id == added.entryID })
+            let finalAttempts = await cloud.contentDownloadCount(damaged)
+            XCTAssertEqual(finalAttempts, attempts + 1)
+        }
+    }
+
     func testProviderBackoffAndFailureSurviveRestartWithoutEarlyCloudAccess() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -5067,6 +5126,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
     private var damagesDownload = false
+    private var damagedContentRecord: String?
+    private var contentDownloads: [String: Int] = [:]
+    func damageContentRecord(_ recordID: String?) { damagedContentRecord = recordID }
+    func contentDownloadCount(_ recordID: String) -> Int { contentDownloads[recordID, default: 0] }
     private var damagesFileBody = false
     private var persistentDamagedBody: String?
     private var damagesNextBodyPersistently = false
@@ -5164,6 +5227,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         }
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
+        else { contentDownloads[record.recordID, default: 0] += 1 }
         if record.kind == .fileBody, corruptsControlAfterBody {
             corruptsControlAfterBody = false
             corruptsNextControl = true
@@ -5175,7 +5239,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         guard let upload = records[account.identifier]?.first(where: { $0.record == record }) else {
             throw ClipboardSyncServiceError.missingRemoteState
         }
-        if damagesDownload || (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID {
+        if damagesDownload || (damagesFileBody && record.kind == .fileBody) || persistentDamagedBody == record.recordID
+            || damagedContentRecord == record.recordID {
             damagesDownload = false
             if record.kind == .fileBody { damagesFileBody = false }
             var changed = upload.chunks
