@@ -47,7 +47,7 @@ struct CommandPalettePicker: View {
                 // the search field, its placeholder/caret, and the root list can
                 // neither show through nor accept stray input.
                 backHeader
-                Divider().opacity(0.4)
+                Divider()
                 detailView
             } else {
                 // Argument-input mode carries its own search-field badge (Raycast
@@ -56,7 +56,7 @@ struct CommandPalettePicker: View {
 
                 searchField
 
-                Divider().opacity(0.4)
+                Divider()
 
                 if state.flatEntries.isEmpty {
                     if let scope = state.activeDevToolScope {
@@ -71,16 +71,16 @@ struct CommandPalettePicker: View {
                 }
 
                 if state.isCurrencyContext {
-                    Divider().opacity(0.4)
+                    Divider()
                     footerBar
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.
-        // Driving the whole palette from one surface keeps the search field,
-        // rows, and section headers visually consistent.
-        .adaptivePanelSurface(cornerRadius: 16)
+        // Liquid Glass on macOS 26+; .thickMaterial on earlier systems; black in
+        // Dark Mode. Driving the whole palette from one surface keeps the search
+        // field, rows, and section headers visually consistent.
+        .modifier(CommandPaletteSurface(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
@@ -391,7 +391,7 @@ struct CommandPalettePicker: View {
             VStack(spacing: 0) {
                 loadedDetailScroll(markdown: markdown)
                 if !state.detailActions.isEmpty {
-                    Divider().opacity(0.5)
+                    Divider()
                     HStack(spacing: 8) {
                         Spacer()
                         ForEach(state.detailActions, id: \.id) { action in
@@ -688,6 +688,30 @@ struct CommandPalettePicker: View {
     }
 }
 
+/// The palette's panel surface. In Dark Mode a near-black wash sits between
+/// the glass and the content: bare dark glass lifts to mid gray over bright
+/// windows, which washes out the dividers and secondary text. Light Mode keeps
+/// the plain glass and must not get even a clear background: any layer under
+/// the content turns light Liquid Glass dark behind the black text.
+private struct CommandPaletteSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if colorScheme == .dark {
+            content
+                .background(
+                    Color.black.opacity(0.9),
+                    in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+                .adaptivePanelSurface(cornerRadius: cornerRadius)
+        } else {
+            content.adaptivePanelSurface(cornerRadius: cornerRadius)
+        }
+    }
+}
+
 private struct CommandPaletteRow: View {
     let entry: PanelEntry
     let hyperFlags: Int
@@ -942,7 +966,7 @@ private struct MarkdownBlocksView: View {
                         .fill(Color.primary.opacity(0.06))
                 )
         case .thematicBreak:
-            Divider().opacity(0.5).padding(.vertical, 2)
+            Divider().padding(.vertical, 2)
         case .blockquote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
