@@ -108,6 +108,22 @@ For a waiting sync key, restore iCloud Keychain availability and retry. Existing
 encrypted cloud content is retained. An Apple Account change stops participation;
 sharing retained history with a different account requires explicit authorization.
 
+If AnyDoor confirms that a previously used cloud collection is missing, Clipboard
+Sync settings offers **Start a New Sync Collection**, including while sync is off.
+If the collection may return, use Retry while sync is on or a cloud clear is
+pending. When sync is off without a pending clear, turn it on to check again.
+Starting a new collection asks for
+confirmation and rechecks the current account and missing collection before
+retiring this Mac's previous participation. It preserves local history, files,
+saved changes, and the encryption key. It does not create or clear cloud data at
+that point, and does not claim that an interrupted cloud clear completed.
+
+After recovery, sync stays off and all Sync Tags are deselected. Turn Clipboard
+Sync on and choose tags explicitly to share again. If the old collection returns,
+AnyDoor will not resume sharing it automatically. If the account or collection changes
+before confirmation, recovery fails without reporting success; review the current
+status before trying again.
+
 ## Upgrading from Config Sync tag sharing
 
 Config Sync no longer automatically transfers clipboard tags. Enable Clipboard Sync

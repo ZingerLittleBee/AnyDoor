@@ -16020,8 +16020,43 @@
     },
     "settings.clipboard.sync.reset.superseded" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "A new shared collection is active. The previous clear will not change it. Sync remains off on this Mac; turn it on to join the new collection." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新的共享集合已启用，之前的清空操作不会更改它。此 Mac 的同步仍关闭，请手动开启以加入新集合。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The previous cloud clear has stopped. AnyDoor has not confirmed that its cloud data was cleared." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "之前的云端清理已停止。AnyDoor 尚未确认其云端数据已被清除。" } }
+      }
+    },
+    "settings.clipboard.sync.missingCollection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The previous cloud collection is missing. Retry if it may return, or start a new collection while keeping local history." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "之前的云端同步集合缺失。若集合可能恢复，可重试；也可保留本地历史并开始新的同步集合。" } }
+      }
+    },
+    "settings.clipboard.sync.newCollection.action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Start a New Sync Collection" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "开始新的同步集合" } }
+      }
+    },
+    "settings.clipboard.sync.missingCollection.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The previous cloud collection is missing. Turn Clipboard Sync on to check again, or start a new collection while keeping local history." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "之前的云端同步集合缺失。请开启剪贴板同步以重新检查，或保留本地历史并开始新的同步集合。" } }
+      }
+    },
+    "settings.clipboard.sync.newCollection.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This Mac will stop using the previous collection and keep local history, files, and saved changes. Sync will stay off and all Sync Tags will be deselected. Turn Clipboard Sync on and choose tags to share again. AnyDoor cannot confirm or clear data from the missing collection." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此 Mac 将停止使用之前的集合，保留本地历史、文件和已保存的修改。同步保持关闭，所有同步标签将取消选择。之后请手动开启剪贴板同步并选择标签以重新共享。AnyDoor 无法确认或清除缺失集合中的数据。" } }
+      }
+    },
+    "settings.clipboard.sync.newCollection.prepared": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local history is kept. Sync is off and no Sync Tags are selected. Turn Clipboard Sync on and choose tags to start sharing again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本地历史已保留。同步已关闭，尚未选择同步标签。请手动开启剪贴板同步并选择标签以重新共享。" } }
       }
     },
     "settings.clipboard.sync.retry": {

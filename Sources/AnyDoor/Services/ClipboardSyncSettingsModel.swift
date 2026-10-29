@@ -10,6 +10,8 @@ final class ClipboardSyncSettingsModel {
     @ObservationIgnored private var actionGeneration = 0
 
     private(set) var resetConfirmation: ClipboardHistoryCloudResetConfirmation?
+    private(set) var missingCollectionConfirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation?
+    private(set) var didRecoverMissingCollection = false
 
     private(set) var status = ClipboardHistorySyncStatus()
     private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
@@ -25,6 +27,8 @@ final class ClipboardSyncSettingsModel {
     var recoveryHelpURL: URL? {
         guard status.isEnabled else { return nil }
         switch status.phase {
+        case .failed(.recoveryRequired) where status.canRecoverMissingCloudCollection:
+            return nil
         case .waitingForKey, .keyLocked, .accessDenied, .failed(.corruptData), .failed(.recoveryRequired):
             return URL(string: "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
         default:
@@ -85,6 +89,20 @@ final class ClipboardSyncSettingsModel {
         }
     }
 
+    var offersRetry: Bool {
+        if isResetPending { return operationFailed || status.cloudReset?.failure != nil }
+        guard status.isEnabled else { return false }
+        if operationFailed { return true }
+        switch status.phase {
+        case .disabled, .connecting, .transferring, .upToDate: return false
+        default: return true
+        }
+    }
+
+    var missingCollectionHelpKey: L10n.Key {
+        status.isEnabled || isResetPending ? .settingsClipboardSyncMissingCollection : .settingsClipboardSyncMissingCollectionOff
+    }
+
     var isResetPending: Bool {
         status.cloudReset?.isPending ?? false
     }
@@ -95,6 +113,27 @@ final class ClipboardSyncSettingsModel {
     }
 
     func cancelResetConfirmation() { resetConfirmation = nil }
+
+    func prepareMissingCollectionRecovery() async {
+        guard !isPerformingAction, status.canRecoverMissingCloudCollection else { return }
+        missingCollectionConfirmation = nil
+        didRecoverMissingCollection = false
+        await performAction {
+            missingCollectionConfirmation = try await module.prepareMissingCloudCollectionRecovery()
+        }
+    }
+
+    func cancelMissingCollectionRecovery() { missingCollectionConfirmation = nil }
+
+    func confirmMissingCollectionRecovery(_ confirmation: ClipboardHistoryMissingCloudCollectionRecoveryConfirmation) async {
+        guard !isPerformingAction else { return }
+        missingCollectionConfirmation = nil
+        didRecoverMissingCollection = false
+        await performAction {
+            try await module.recoverMissingCloudCollection(confirmation)
+            didRecoverMissingCollection = true
+        }
+    }
 
     func confirmReset(_ confirmation: ClipboardHistoryCloudResetConfirmation) async {
         guard !isPerformingAction else { return }
@@ -113,6 +152,7 @@ final class ClipboardSyncSettingsModel {
                 return
             }
             status = currentStatus
+            if status.isEnabled { didRecoverMissingCollection = false }
             tags = currentTags
             preservedEdits = currentPreservedEdits
             operationFailed = false
