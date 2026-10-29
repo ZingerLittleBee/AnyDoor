@@ -89,6 +89,8 @@ def runtime_configuration() -> dict[str, str]:
         ):
             raise ProvisioningError("ClipboardSyncNativeConfiguration preflight does not support multiline or raw strings")
     source = tokens.sub(lambda match: re.sub(r"[^\n]", " ", match[0]) if match[0].startswith("/") else match[0], source)
+    if re.search(r"(?m)^\s*#\s*(?:if|elseif|else|endif)\b", source):
+        raise ProvisioningError("ClipboardSyncNativeConfiguration preflight does not support conditional compilation")
     declarations = list(re.finditer(r"(?m)^enum ClipboardSyncNativeConfiguration\s*\{", source))
     if len(declarations) != 1:
         raise ProvisioningError("cannot read one ClipboardSyncNativeConfiguration declaration")

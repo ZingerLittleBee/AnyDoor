@@ -164,6 +164,8 @@ class ProvisioningTests(FakeToolTestCase):
                 '    static var team: String { "OTHERTEAM" }\n    static let decoy = """\n' + declaration + '\n    """')),
             ("raw multiline string", source.replace(declaration,
                 '    static var team: String { "OTHERTEAM" }\n    static let decoy = #"""\n' + declaration + '\n    """#')),
+            ("inactive conditional declaration", source.replace(declaration,
+                '#if NEVER_DEFINED\n' + declaration + '\n#else\n    static var team: String { "OTHERTEAM" }\n#endif')),
             ("duplicate after method", source.replace("    static func validate", declaration + "\n    static func validate")),
             ("duplicate type", source + "\nenum ClipboardSyncNativeConfiguration {}\n"),
         ]:
