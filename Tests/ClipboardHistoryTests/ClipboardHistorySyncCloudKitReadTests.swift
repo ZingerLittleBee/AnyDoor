@@ -146,10 +146,8 @@ final class ClipboardHistorySyncCloudKitReadTests: XCTestCase {
         let absentZoneControl = try await missingZone.control(for: Self.account)
         XCTAssertNil(absentZoneControl)
         let deletedZone = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(.userDeletedZone) })
-        do {
-            _ = try await deletedZone.control(for: Self.account)
-            XCTFail("A user-deleted collection still requires authority recovery")
-        } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .missingRemoteState) }
+        let deletedZoneControl = try await deletedZone.control(for: Self.account)
+        XCTAssertNil(deletedZoneControl, "The module decides whether confirmed absence requires explicit recovery")
         let omitted = ClipboardSyncCloudKit(recordReader: { _, _, _ in [:] })
         do {
             _ = try await omitted.downloadFileSegment(remote, index: 0, for: Self.account)

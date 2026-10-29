@@ -69,7 +69,9 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             return try record.map { try decodeControl($0, account: account) }
         } catch {
             try checkCancellation(generation)
-            if Self.hasCode(error, .zoneNotFound) { return nil }
+            // The module still requires explicit recovery for an established
+            // collection. After retirement, absence permits its fresh candidate.
+            if Self.hasCode(error, .zoneNotFound) || Self.hasCode(error, .userDeletedZone) { return nil }
             throw Self.failure(error)
         }
     }

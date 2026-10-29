@@ -737,6 +737,57 @@ final class ClipboardHistorySyncTests: XCTestCase {
         }
     }
 
+    func testNativeDeletedZoneCanCreateFreshCollectionOnlyAfterExplicitRecovery() async throws {
+        let account = ClipboardHistorySyncCloudKitReadTests.account
+        let cloud = SyncTestCloud(account: account)
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("deleted-zone-recovery-\(UUID())")
+        let module = makeModule(services: services, keyByte: 0xE8, time: 1_000, root: root)
+        let local = try await module.capture(.init(source: .unknown, content: .text("retained after native zone deletion")))
+        let tag = try await module.createTagDefinition(named: "Shared", assigningTo: local.entryID).definition
+        try await module.setSyncTagSelected(tag.id, selected: true)
+        try await module.setSyncEnabled(true)
+        let oldControl = try await cloud.control(for: account)
+        let previous = try XCTUnwrap(oldControl)
+        await cloud.removeControl(using: ClipboardSyncCloudKit(recordReader: { requestedAccount, _, _ in
+            XCTAssertEqual(requestedAccount, account)
+            throw CKError(.userDeletedZone)
+        }))
+        await module.retrySync()
+        let missing = await module.syncStatus()
+        XCTAssertEqual(missing.phase, .failed(.recoveryRequired))
+        XCTAssertTrue(missing.canRecoverMissingCloudCollection)
+        let confirmation = try await module.prepareMissingCloudCollectionRecovery()
+        try await module.recoverMissingCloudCollection(confirmation)
+        let retired = await module.syncStatus()
+        XCTAssertFalse(retired.isEnabled)
+        XCTAssertFalse(retired.canRecoverMissingCloudCollection)
+        let choices = try await module.syncTags()
+        XCTAssertTrue(choices.allSatisfy { !$0.isSelected })
+        try await module.closeStoreForTesting()
+
+        let reopened = makeModule(services: services, keyByte: 0xE8, time: 1_001, root: root)
+        await reopened.resumeSync()
+        let off = await reopened.syncStatus()
+        XCTAssertFalse(off.isEnabled)
+        try await reopened.setSyncEnabled(true)
+        let active = await reopened.syncStatus()
+        XCTAssertEqual(active.phase, .upToDate, "A deleted native zone must not strand an explicitly recovered collection")
+        guard active.phase == .upToDate else { return }
+        let newControl = try await cloud.control(for: account)
+        let created = try XCTUnwrap(newControl)
+        XCTAssertNotEqual(created.epoch, previous.epoch)
+        XCTAssertEqual(created.keyID, previous.keyID)
+        let retained = try await reopened.page(.init())
+        XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+        let beforeSelection = await cloud.currentUploads().filter { $0.record.epoch == created.epoch && $0.record.kind == .entry }
+        XCTAssertTrue(beforeSelection.isEmpty)
+        try await reopened.setSyncTagSelected(tag.id, selected: true)
+        let selectedUploads = await cloud.currentUploads().filter { $0.record.epoch == created.epoch && $0.record.kind == .entry }
+        XCTAssertFalse(selectedUploads.isEmpty)
+    }
+
     func testMissingCollectionRecoveryKeepsLocalWorkAndRequiresFreshParticipation() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -4937,7 +4988,11 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         fileSegmentFailure = failure
     }
     func requestedFileSegments() -> [Int] { fileSegmentRequests }
-    private var currentAccount = ClipboardSyncAccount(container: "test", environment: "test", owner: "test-user")
+    private var currentAccount: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "test-user")) {
+        currentAccount = account
+    }
+    private var absentControlReader: ClipboardSyncCloudKit?
     private var descriptors: [String: ClipboardSyncControl] = [:]
     private var records: [String: [ClipboardSyncUpload]] = [:]
     private var losesPurgeResponse = false
@@ -5009,6 +5064,9 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func failNextAccountReadWithNative(_ native: ClipboardSyncCloudKit) { nativeAccountFault = native }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
+        if descriptors[account.identifier] == nil, let absentControlReader {
+            return try await absentControlReader.control(for: account)
+        }
         if corruptsNextControl {
             corruptsNextControl = false
             throw ClipboardSyncServiceError.corruptData
@@ -5269,7 +5327,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func loseNextControlResponse() { losesControlResponse = true }
     func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
-    func removeControl() { descriptors[currentAccount.identifier] = nil }
+    func removeControl(using native: ClipboardSyncCloudKit? = nil) {
+        descriptors[currentAccount.identifier] = nil
+        absentControlReader = native
+    }
     func returnControlAtNextCreation(_ control: ClipboardSyncControl) { nextCreationControl = control }
     func accountReadCount() -> Int { reads }
     private func checkAccount(_ account: ClipboardSyncAccount) throws {
