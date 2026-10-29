@@ -60,8 +60,8 @@ final class ClipboardWorkingOutputReplay {
             defer { close(fd) }
             var status = stat()
             let url = path.isEmpty ? root : root.appendingPathComponent(path)
-            guard fstat(fd, &status) == 0,
-                  ClipboardSyncFileSnapshot(status) == snapshot,
+            guard fstat(fd, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            guard ClipboardSyncFileSnapshot(status) == snapshot,
                   let native = try ClipboardLinkedNativeIdentity.read(url, status: status),
                   member.identity.provesContinuity(with: native) else { throw ClipboardWorkingOutputChanged() }
             guard snapshot == (member.checkpoint ?? member.snapshot) else { throw ClipboardWorkingOutputChanged() }
@@ -158,6 +158,7 @@ final class ClipboardWorkingOutputReplay {
                 pread(descriptor, $0.baseAddress?.advanced(by: read), length - read, off_t(offset) + off_t(read))
             }
             if amount < 0, errno == EINTR { continue }
+            guard amount >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             guard amount > 0 else { throw ClipboardWorkingOutputChanged() }
             read += amount
         }

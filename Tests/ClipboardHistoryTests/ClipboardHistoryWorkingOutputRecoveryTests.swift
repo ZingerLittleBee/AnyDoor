@@ -15,6 +15,18 @@ private struct WorkingOutputStoreKey: ClipboardHistoryMasterKeyStoring {
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func interruptedWorkingOutputForRecovery(stage: String) async throws -> (
+        root: URL, pending: URL, services: ClipboardSyncServices
+    ) {
+        let root = try workingOutputScenario(kind: "tree", stage: stage)
+        let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+            test: "ClipboardHistoryLinkedFileTests/testInterruptedAuthenticatedTreePrefixIsReclaimedAndRetryCompletes")
+        XCTAssertEqual(result.status, 73, result.output)
+        guard result.status == 73 else { throw CocoaError(.executableRuntimeMismatch) }
+        return (root, try workingOutputPath(in: root), try await restoreWorkingOutputServices(in: root))
+    }
+
+    @MainActor
     func testInterruptedPrefixTruncationAndTimestampEditsRequireReview() async throws {
         if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
             try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))

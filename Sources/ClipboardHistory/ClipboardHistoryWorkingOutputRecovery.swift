@@ -29,6 +29,12 @@ private struct ClipboardWorkingOutputRecord: Codable, Sendable {
     var descriptor: ClipboardSyncFileDescriptor?
     var replayDeclined: Bool?
     var url: URL { directory.appendingPathComponent(name) }
+
+    // Older unavailable notices also set replayDeclined on inspection errors.
+    // Their original proofs may be retried, but never replaced by fresh ones.
+    var hasDeclinedProof: Bool {
+        reason == .changed || (replayDeclined == true && reason != .unavailable)
+    }
 }
 
 struct ClipboardWorkingOutputRecoveryRequired: Error {}
@@ -361,8 +367,7 @@ final class ClipboardWorkingOutputOwner: Sendable {
             try Data.fetchOne(db, sql: "SELECT record FROM clipboard_working_outputs WHERE directory = ?", arguments: [path])
                 .map { try JSONDecoder().decode(ClipboardWorkingOutputRecord.self, from: $0) }
         }
-        guard let record, record.descriptor == descriptor, !record.completed, record.replayDeclined != true,
-              record.reason == nil || record.reason == .incomplete else { return }
+        guard let record, record.descriptor == descriptor, !record.hasDeclinedProof else { return }
         try recover(record, database: database) { tree in
             let replay = try ClipboardWorkingOutputReplay(tree: tree, database: database, owner: record.id, root: record.url)
             try verify(replay)
@@ -396,9 +401,9 @@ final class ClipboardWorkingOutputOwner: Sendable {
             guard let expected = record.identity else { throw RecoveryFailure.incomplete }
             guard let current = try ClipboardLinkedNativeIdentity.read(record.url, status: status),
                   expected.provesContinuity(with: current) else { throw RecoveryFailure.changed }
-            // A retained notice is no longer automatic deletion authority.
-            // Refreshes only notice disappearance or identity changes; they do
-            // not repeatedly read a potentially enormous user-modified tree.
+            // List refreshes only notice disappearance or identity changes.
+            // An authorized receive may retry unavailable inspection, including
+            // a completed candidate, using its original full proof below.
             if record.reason != nil, verifyIncomplete == nil { return }
             guard let fingerprint = record.fingerprint else { throw RecoveryFailure.incomplete }
             if verifyIncomplete == nil, ClipboardSyncFileSnapshot(status) != record.snapshot {
@@ -419,13 +424,21 @@ final class ClipboardWorkingOutputOwner: Sendable {
         } catch is CancellationError { throw CancellationError() }
         catch let error as DatabaseError { throw error }
         catch let error as ClipboardSyncServiceError { throw error }
+        catch let error as DecodingError { throw error }
+        catch ClipboardHistoryStorageError.invalidPayloadEnvelope { throw ClipboardHistoryStorageError.invalidPayloadEnvelope }
+        catch ClipboardHistoryStorageError.payloadAuthenticationFailed { throw ClipboardHistoryStorageError.payloadAuthenticationFailed }
+        catch ClipboardHistoryStorageError.unsafePayloadPath { throw ClipboardHistoryStorageError.unsafePayloadPath }
         catch is ClipboardWorkingOutputChanged { reason = .changed }
         catch RecoveryFailure.incomplete { reason = .incomplete }
         catch RecoveryFailure.changed { reason = .changed }
         catch { reason = .unavailable }
         var retained = record
-        retained.reason = reason
-        if verifyIncomplete != nil { retained.replayDeclined = true }
+        // A later access failure cannot erase a previously established mismatch.
+        // Unavailability itself is not evidence that the durable proof differs.
+        if !record.hasDeclinedProof {
+            retained.reason = reason
+            if verifyIncomplete != nil { retained.replayDeclined = reason != .unavailable }
+        }
         try database.write { try $0.execute(sql: "UPDATE clipboard_working_outputs SET record = ? WHERE id = ?",
             arguments: [try JSONEncoder().encode(retained), record.id.uuidString]) }
     }
@@ -460,11 +473,15 @@ final class ClipboardWorkingOutputOwner: Sendable {
             guard let currentParent = try openParent(record.directory) else { throw RecoveryFailure.changed }
             defer { close(currentParent) }
             var parentStatus = stat(), pinnedParent = stat()
-            guard fstat(currentParent, &parentStatus) == 0, fstat(parent, &pinnedParent) == 0,
-                  parentStatus.st_dev == pinnedParent.st_dev, parentStatus.st_ino == pinnedParent.st_ino else { throw RecoveryFailure.changed }
+            guard fstat(currentParent, &parentStatus) == 0, fstat(parent, &pinnedParent) == 0 else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+            guard parentStatus.st_dev == pinnedParent.st_dev, parentStatus.st_ino == pinnedParent.st_ino else { throw RecoveryFailure.changed }
             var top = stat()
-            guard fstatat(parent, record.name, &top, AT_SYMLINK_NOFOLLOW) == 0,
-                  top.st_ino == record.identity?.fileID,
+            guard fstatat(parent, record.name, &top, AT_SYMLINK_NOFOLLOW) == 0 else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+            guard top.st_ino == record.identity?.fileID,
                   Int64(top.st_birthtimespec.tv_sec) == record.identity?.birthSeconds,
                   Int64(top.st_birthtimespec.tv_nsec) == record.identity?.birthNanoseconds else { throw RecoveryFailure.changed }
             var directory = dup(path.isEmpty ? parent : root)
@@ -477,7 +494,8 @@ final class ClipboardWorkingOutputOwner: Sendable {
                 close(directory); directory = next
                 let ancestor = try tree.ownershipSnapshot(components[...index].joined(separator: "/"))
                 var current = stat()
-                guard fstat(directory, &current) == 0, current.st_dev == ancestor.device,
+                guard fstat(directory, &current) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                guard current.st_dev == ancestor.device,
                       current.st_ino == ancestor.inode else { throw RecoveryFailure.changed }
             }
             let name = components.last ?? record.name
