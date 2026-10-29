@@ -213,11 +213,19 @@ larger versions require an exact-version download action. Uploads are automatic
 for eligible files of any size. A previously complete local version remains
 usable until the requested replacement is ready. Preview, copy, Open, and Reveal
 never authorize a pending download.
+Manual download commands may return after durable exact-version consent with
+`waitForSync: false`. The owned sync task prioritizes the request at its next
+outgoing checkpoint; it does not preempt an active provider call.
 The `v30_clipboard_sync_file_retries` journal isolates damaged or locally inaccessible
 file downloads from independent sharing and deletion. An unresolved file keeps its
 visible failure and previous complete bytes. Automatic retries wait 30 seconds,
 including across restart; explicit Retry can retry immediately. Account, key,
 control, provider backoff, and database failures still stop the pass.
+Corrupt encrypted content records use the same persistent 30-second deadline for
+downloading, authenticating, and decoding that record, not for change discovery.
+Other verified retirement events in the page can apply, but an unreadable record
+may contain deletion or sharing authority: its cursor remains unacknowledged and
+outgoing publication stays blocked until that unknown authority is resolved.
 Directory/package/symlink content is not flattened into an ordinary file.
 Directories use the same version graph, transport, exact download consent, and
 Linked Location ownership as files. Their threshold includes every synchronized
