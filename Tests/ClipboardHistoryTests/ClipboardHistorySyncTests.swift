@@ -836,6 +836,87 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: afterRestart.currentURL), Data("accepted remote file edit".utf8))
     }
 
+    func testRetainedWithdrawalMetadataWaitsForConsentAndHonorsLaterLocalFavorite() async throws {
+        for editsLocally in [false, true] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("retained-metadata-\(UUID())")
+            let first = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root)
+            let peer = makeModule(services: services, keyByte: 0xE7, time: 2_000)
+            let captured = try await first.capture(.init(source: .unknown, content: .text("favorite revision wins")))
+            let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+            try await first.setSyncTagSelected(tag.id, selected: true)
+            try await first.setSyncEnabled(true)
+            try await peer.setSyncEnabled(true)
+            try await first.setSyncEnabled(false)
+            try await first.setSyncTagSelected(tag.id, selected: false)
+            _ = try await peer.apply(.setFavorite(captured.entryID, true))
+            await peer.retrySync()
+            try await first.setSyncEnabled(true)
+            let withdrawn = try await first.page(.init()).entries
+            XCTAssertFalse(try XCTUnwrap(withdrawn.first).isFavorite, "Receiving metadata cannot modify the withdrawn local copy")
+            await peer.retrySync()
+            if editsLocally {
+                _ = try await first.apply(.setFavorite(captured.entryID, true))
+                _ = try await first.apply(.setFavorite(captured.entryID, false))
+            }
+            try await first.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xE6, time: 3_000, root: root)
+            await reopened.resumeSync()
+            let retained = try await reopened.page(.init()).entries
+            XCTAssertFalse(try XCTUnwrap(retained.first).isFavorite)
+            try await reopened.setSyncTagSelected(tag.id, selected: true)
+            let rejoined = try await reopened.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(rejoined.first).isFavorite, !editsLocally)
+            await peer.retrySync()
+            let peerEntries = try await peer.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(peerEntries.first).isFavorite, !editsLocally)
+            let fresh = makeModule(services: services, keyByte: 0xE8, time: 4_000)
+            try await fresh.setSyncEnabled(true)
+            let freshEntries = try await fresh.page(.init()).entries
+            XCTAssertEqual(try XCTUnwrap(freshEntries.first).isFavorite, !editsLocally)
+        }
+    }
+
+    func testUnpublishedWithdrawalRetainsRemoteFavoriteBeforeReactivation() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pending-metadata-\(UUID())")
+        let first = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root)
+        let peer = makeModule(services: services, keyByte: 0xE7, time: 2_000)
+        let captured = try await first.capture(.init(source: .unknown, content: .text("retained favorite")))
+        let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+        try await first.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        try await peer.setSyncEnabled(true)
+        try await first.setSyncEnabled(false)
+        try await first.setSyncTagSelected(tag.id, selected: false)
+        _ = try await peer.apply(.setFavorite(captured.entryID, true))
+        await peer.retrySync()
+        let unrelated = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: "Advance tag clock")
+        _ = try await peer.replaceTagDefinitions(with: [tag, unrelated])
+        for _ in 0..<3 {
+            try await peer.setSyncTagSelected(unrelated.id, selected: true)
+            try await peer.setSyncTagSelected(unrelated.id, selected: false)
+        }
+        try await peer.setSyncTagSelected(tag.id, selected: true)
+        try await first.setSyncEnabled(true)
+        let entries = try await first.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(entries.first).isFavorite)
+        await peer.retrySync()
+        let peerEntries = try await peer.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(peerEntries.first).isFavorite)
+        try await first.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xE6, time: 3_000, root: root)
+        await reopened.resumeSync()
+        let restored = try await reopened.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(restored.first).isFavorite)
+        let fresh = makeModule(services: services, keyByte: 0xE8, time: 4_000)
+        try await fresh.setSyncEnabled(true)
+        let freshEntries = try await fresh.page(.init()).entries
+        XCTAssertTrue(try XCTUnwrap(freshEntries.first).isFavorite)
+    }
+
     func testUnpublishedWithdrawalRetainsRemoteEditBeforeLaterReactivation() async throws {
         for hasLocalEdit in [false, true] {
             let cloud = SyncTestCloud()
