@@ -382,10 +382,23 @@ extension ClipboardHistoryModule {
             }
             guard var control, control.accountID == account.identifier,
                   state.retiredEpochs?.contains(control.epoch) != true else { throw ClipboardSyncServiceError.missingRemoteState }
-            if state.control == nil, state.retiredEpochs?.isEmpty == false, let candidate = state.candidate {
-                guard candidate.keyID == control.keyID, candidate.keyCheck == control.keyCheck else {
+            var verifiedRecoveryKey: Data?
+            if state.control == nil, state.retiredEpochs?.isEmpty == false, let candidate = state.candidate,
+               candidate.keyID != control.keyID || candidate.keyCheck != control.keyCheck {
+                // Recovery preserves a proposal for an absent collection. A fresh
+                // device can win creation with another key, but that key must be
+                // available and verified before replacing local authority.
+                let replacementKey = try await services.keys.load(account: account, keyID: control.keyID)
+                try await admitSync(generation, account: account, services: services)
+                guard let replacementKey else {
+                    await finishSync(.waitingForKey, generation: generation)
+                    return
+                }
+                guard replacementKey.count == 32,
+                      ClipboardSyncCodec.check(key: replacementKey, account: account, keyID: control.keyID) == control.keyCheck else {
                     throw ClipboardSyncServiceError.corruptData
                 }
+                verifiedRecoveryKey = replacementKey
             }
             let activationAuthorized = try cloudActivationAuthorized()
             if let previous = state.control, previous.keyID != control.keyID || previous.keyCheck != control.keyCheck {
@@ -428,7 +441,9 @@ extension ClipboardHistoryModule {
             }
             state.control = control
             try syncWrite { try saveSyncAccount(state, in: $0) }
-            let loadedKey = try await services.keys.load(account: account, keyID: control.keyID)
+            let loadedKey: Data?
+            if let verifiedRecoveryKey { loadedKey = verifiedRecoveryKey }
+            else { loadedKey = try await services.keys.load(account: account, keyID: control.keyID) }
             try await admitSync(generation, account: account, services: services)
             guard let key = loadedKey else {
                 await finishSync(.waitingForKey, generation: generation)
