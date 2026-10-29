@@ -6,8 +6,31 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncCloudKitReadTests: XCTestCase {
+    private enum ControlVersionFixture: CaseIterable, Sendable { case future, nonNumeric, missing, foreignAccount }
+
+    func testFutureControlProtocolIsUnsupportedAfterIdentityValidation() async throws {
+        for fixture in ControlVersionFixture.allCases {
+            let cloud = ClipboardSyncCloudKit(recordReader: { account, ids, _ in
+                let record = CKRecord(recordType: "ClipboardSyncControlV1", recordID: ids[0])
+                record["accountID"] = (fixture == .foreignAccount ? "another-account" : account.identifier) as NSString
+                if fixture == .nonNumeric { record["protocolVersion"] = "2" as NSString }
+                else if fixture != .missing { record["protocolVersion"] = 2 as NSNumber }
+                // A future protocol need not retain the current key/epoch fields.
+                return [ids[0]: .success(record)]
+            })
+            do {
+                _ = try await cloud.control(for: Self.account)
+                XCTFail("Unsupported or malformed control must not be accepted")
+            } catch {
+                let expected: ClipboardSyncServiceError = fixture == .future ? .unsupportedVersion : .corruptData
+                XCTAssertEqual(error as? ClipboardSyncServiceError, expected, "\(fixture)")
+            }
+        }
+    }
+
     func testPermanentProviderFailuresAreDistinctFromRetryableCloudErrors() async throws {
-        for code: CKError.Code in [.internalError, .serverRejectedRequest, .invalidArguments, .incompatibleVersion] {
+        for code: CKError.Code in [.internalError, .serverRejectedRequest, .invalidArguments, .incompatibleVersion,
+                                  .limitExceeded, .constraintViolation, .managedAccountRestricted] {
             let expected: ClipboardSyncServiceError = code == .incompatibleVersion ? .unsupportedVersion : .providerRejected
             for wrapped in [false, true] {
                 let mutationError = wrapped ? CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [
@@ -46,6 +69,33 @@ final class ClipboardHistorySyncCloudKitReadTests: XCTestCase {
             _ = try await delayed.control(for: Self.account)
             XCTFail("A provider delay must remain retryable")
         } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .network(retryAfter: 90)) }
+    }
+
+    func testNonCloudNativeFailuresRetryOnlyKnownTransportErrors() async throws {
+        let unknown = NSError(domain: "dev.bybee.AnyDoor.native-cloud-fixture", code: 1)
+        let wrapped = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [
+            "cause": unknown, "conflict": CKError(.serverRecordChanged), "batch": CKError(.batchRequestFailed),
+        ]])
+        let cases: [(Error, ClipboardSyncServiceError)] = [
+            (unknown, .providerRejected), (wrapped, .providerRejected),
+            (URLError(.badURL), .providerRejected),
+            (URLError(.timedOut), .network(retryAfter: nil)),
+            (URLError(.networkConnectionLost), .network(retryAfter: nil)),
+        ]
+        for (failure, expected) in cases {
+            let cloud = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw failure })
+            do {
+                _ = try await cloud.control(for: Self.account)
+                XCTFail("The native failure must reach the caller")
+            } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, expected) }
+            XCTAssertEqual(ClipboardSyncCloudKit.atomicModificationFailure(saveErrors: [failure], deleteErrors: [])
+                as? ClipboardSyncServiceError, expected)
+        }
+        let cancelled = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw URLError(.cancelled) })
+        do {
+            _ = try await cancelled.control(for: Self.account)
+            XCTFail("Native URL cancellation must not become a provider failure")
+        } catch { XCTAssertTrue(error is CancellationError) }
     }
 
     func testMissingReferencedChunkIsUnavailableForBothDownloadPaths() async throws {

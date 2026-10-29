@@ -203,6 +203,15 @@ or local-history key. See [release provisioning](../releasing.md) for the signed
 capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
 for isolated real-store coverage; those tests do not establish live iCloud delivery.
 
+Native response identities accept only the checked concrete owner or
+`CKCurrentUserDefaultName` for the exact account-scoped zone and record name.
+Fetch/save/delete callback keys are normalized to requested keys, including partial
+failures; returned control system fields are preserved for the next atomic CAS.
+Change and zone callbacks validate identities even after an ordinary provider
+failure. An observed identity mismatch cannot be replaced by a later successful
+callback or treated as an ordinary network retry. This compatibility does not
+weaken the separate concrete-account, key, epoch, or cancellation checks.
+
 `ClipboardHistorySyncFiles` prepares currently accessible file and directory content
 before staging an entry envelope. Source paths and bookmarks remain local.
 An initially unavailable original retains its captured identity for Retry and
@@ -213,11 +222,19 @@ larger versions require an exact-version download action. Uploads are automatic
 for eligible files of any size. A previously complete local version remains
 usable until the requested replacement is ready. Preview, copy, Open, and Reveal
 never authorize a pending download.
+Manual download commands may return after durable exact-version consent with
+`waitForSync: false`. The owned sync task prioritizes the request at its next
+outgoing checkpoint; it does not preempt an active provider call.
 The `v30_clipboard_sync_file_retries` journal isolates damaged or locally inaccessible
 file downloads from independent sharing and deletion. An unresolved file keeps its
 visible failure and previous complete bytes. Automatic retries wait 30 seconds,
 including across restart; explicit Retry can retry immediately. Account, key,
 control, provider backoff, and database failures still stop the pass.
+Corrupt encrypted content records use the same persistent 30-second deadline for
+downloading, authenticating, and decoding that record, not for change discovery.
+Other verified retirement events in the page can apply, but an unreadable record
+may contain deletion or sharing authority: its cursor remains unacknowledged and
+outgoing publication stays blocked until that unknown authority is resolved.
 Directory/package/symlink content is not flattened into an ordinary file.
 Directories use the same version graph, transport, exact download consent, and
 Linked Location ownership as files. Their threshold includes every synchronized
@@ -321,6 +338,14 @@ changes across a whole-tree rename. Long proof reads run outside the module acto
 main database write transaction, and revocable mutation gate. The final gate
 admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
+An unchanged prepared replacement remains owned by that exact application journal
+and is revalidated for reuse, so repeated native exchange failures do not create
+another complete tree. A newer selected version cannot reuse an older intent.
+Application packages still require a fresh explicit Apply Update action. Unknown
+editor replacements require revision-bound reassociation, which retires the old
+journal without inferring a swap outcome or deleting either visible output.
+An unresolved journal exposes the existing Retry/Reassociate actions through
+unavailable tracking status; it does not make the saved working bytes unavailable.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
 Top-level vnode handles share a process-wide budget of 64, including handles
@@ -391,6 +416,11 @@ The final exchange uses a revocable generation gate and a serialized database
 authority check after file hashing. Off revokes the gate before waiting for work
 to exit; deletion/withdrawal/reset transactions cannot race the last eligibility
 read. No long file hashing or provider I/O holds that final mutation gate.
+Shutdown cancels and drains owned sync work before completing termination. File
+loops check cancellation, but an individual synchronous filesystem call or native
+file-coordination request has no guaranteed completion deadline. The app does not
+abandon a writer that could still publish after shutdown; stalled-volume quit
+behavior remains outside the isolated test evidence.
 
 The additive `v26_clipboard_sync_file_conflicts` migration persists displayed
 choices, resolution journals, and version retention pins. File ancestry must be
@@ -457,6 +487,16 @@ queued during a failing pass; Off revokes that intent. Provider retry deadlines
 still take precedence. A permanent rejection outranks conflict/batch siblings
 inside a partial CloudKit failure; retryable wrappers retain the longest supplied
 delay.
+Request-size limits, unique-constraint rejections, managed-account restrictions,
+and unrecognized provider errors pause unchanged automatic requests. Known URL
+connectivity failures remain retryable, and cancellation remains cancellation.
+The authenticated content envelope names exactly one top-level operation; mixed
+known and unknown cases are corruption. Additional fields inside a known payload
+retain normal Codable forward compatibility.
+Authenticated content with an unknown operation name and controls with an unknown
+explicit protocol version report unsupportedVersion. Invalid JSON, malformed known
+content, and authentication failures remain corruptData. A future control version
+does not bypass account identity checks or authorize replacing the collection.
 Account changes persist disabled participation and its reason; an old enabled flag or
 retained key cannot bind a new account. Unresolved manual activation is only
 retained within the current runtime generation, so a restart before account
@@ -1268,8 +1308,12 @@ retired before the lifecycle reports ready or resumes monitoring/sync. Its one-t
 transaction adds missing definitions while preserving current encrypted identities
 and memberships; only a successful import permits deleting the preference. An
 encrypted completion marker rejects replay after restart, and failures retain the
-source for retry. New tag mutations never refresh a mirror. Manual export builds
-current definitions in memory from the module. Manual restore directly replaces
+source for retry. New tag mutations never refresh a mirror. The atomic legacy import runs in
+a module-owned utility worker so WAL reads remain responsive; ordinary writers
+wait for its turn. Close, retry and reset cancel and drain that worker, and store
+migration joins it before replacing the pool. Store transitions reject new imports
+until replacement finishes. Lifecycle readiness still waits for durable import.
+Manual export builds current definitions in memory from the module. Manual restore directly replaces
 definitions through the module, preserving memberships of retained IDs and removing
 those of removed IDs; missing backup fields leave tags unchanged. Distinct IDs with
 the same name round-trip without merging. See

@@ -1,5 +1,6 @@
 import AppKit
 import CloudKit
+import CryptoKit
 import Darwin
 import Foundation
 import GRDB
@@ -623,10 +624,16 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     func testPermanentProviderFailureStopsAutomaticWorkAcrossRestartUntilExplicitRetry() async throws {
-        for waitsForTransfer in [true, false] {
-            let code: CKError.Code = waitsForTransfer ? .serverRejectedRequest : .incompatibleVersion
-            let expected: ClipboardHistorySyncPhase = waitsForTransfer ? .failed(.providerRejected) : .failed(.unsupportedVersion)
-            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(code) })
+        let cases: [(Error, Bool, ClipboardHistorySyncPhase)] = [
+            (CKError(.serverRejectedRequest), true, .failed(.providerRejected)),
+            (CKError(.incompatibleVersion), false, .failed(.unsupportedVersion)),
+            (CKError(.limitExceeded), true, .failed(.providerRejected)),
+            (CKError(.constraintViolation), false, .failed(.providerRejected)),
+            (CKError(.managedAccountRestricted), true, .failed(.providerRejected)),
+            (NSError(domain: "dev.bybee.AnyDoor.native-cloud-fixture", code: 1), false, .failed(.providerRejected)),
+        ]
+        for (error, waitsForTransfer, expected) in cases {
+            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw error })
             let cloud = SyncTestCloud()
             let keys = SyncTestKeys()
             let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: .milliseconds(40))
@@ -4743,6 +4750,99 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(keyCount, 2)
     }
 
+    func testAuthenticatedEnvelopeRejectsMixedCasesAndKeepsNestedExtensions() async throws {
+        for ambiguous in [true, false] {
+            let cloud = SyncTestCloud(account: ClipboardHistorySyncCloudKitReadTests.account)
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("content-envelope-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let module = makeModule(services: services, keyByte: 0x10, time: 1_000, root: root.appendingPathComponent("Store"))
+            let local = try await module.capture(.init(source: .unknown, content: .text("retained local entry")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: local.entryID).definition
+            try await module.setSyncTagSelected(tag.id, selected: true)
+            try await module.setSyncEnabled(true)
+            let known = """
+                {"text":{"_0":{"id":"\(UUID().uuidString)","text":"known nested extension","capturedAt":0,
+                "sourceProvenance":"unknown","favorite":false,"tags":[{"id":"\(tag.id)","name":"Shared"}],"futureNested":{"field":true}}}}
+                """
+            let plaintext = ambiguous ? String(known.dropLast()) + #", "futureContent":{"_0":{}}}"# : known
+            try await Self.publishRawContentFixture(plaintext, cloud: cloud, keys: keys,
+                assetRoot: root.appendingPathComponent("Provider"))
+            await module.retrySync()
+            let status = await module.syncStatus()
+            XCTAssertEqual(status.phase, ambiguous ? .failed(.corruptData) : .upToDate)
+            let page = try await module.page(.init())
+            let expected: Set<String> = ambiguous ? ["retained local entry"] : ["retained local entry", "known nested extension"]
+            XCTAssertEqual(Set(page.entries.compactMap(\.previewText)), expected)
+        }
+    }
+
+    func testAuthenticatedFutureContentPausesAcrossRestartWithoutImportingOrAutomaticRetry() async throws {
+        let cloud = SyncTestCloud(account: ClipboardHistorySyncCloudKitReadTests.account)
+        let keys = SyncTestKeys()
+        let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: .milliseconds(40))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("future-content-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let store = root.appendingPathComponent("Store")
+        let module = makeModule(services: services, keyByte: 0x12, time: 1_000, root: store)
+        let local = try await module.capture(.init(source: .unknown, content: .text("retained while waiting for an upgrade")))
+        try await module.setSyncEnabled(true)
+        try await Self.publishRawContentFixture(#"{"futureContent":{"_0":{"message":"future wire operation"}}}"#,
+            cloud: cloud, keys: keys, assetRoot: root.appendingPathComponent("Provider"))
+        await module.retrySync()
+        let failed = await module.syncStatus()
+        XCTAssertEqual(failed.phase, .failed(.unsupportedVersion))
+        let localPage = try await module.page(.init())
+        XCTAssertEqual(localPage.entries.map(\.id), [local.entryID])
+        let before = await cloud.accountReadCount()
+        await module.resumeSync()
+        try await Task.sleep(for: .milliseconds(160))
+        let automatic = await cloud.accountReadCount()
+        XCTAssertEqual(automatic, before, "Future content must not be downloaded repeatedly as corruption")
+        try await module.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0x12, time: 1_001, root: store)
+        let beforeReopen = await cloud.accountReadCount()
+        await reopened.resumeSync()
+        try await Task.sleep(for: .milliseconds(160))
+        let afterReopen = await cloud.accountReadCount()
+        XCTAssertEqual(afterReopen, beforeReopen)
+        let restored = await reopened.syncStatus()
+        XCTAssertEqual(restored.phase, .failed(.unsupportedVersion))
+        await reopened.retrySync()
+        let explicit = await cloud.accountReadCount()
+        XCTAssertGreaterThan(explicit, afterReopen, "Explicit Retry may check again after an upgrade or provider repair")
+        let stillUnsupported = await reopened.syncStatus()
+        XCTAssertEqual(stillUnsupported.phase, .failed(.unsupportedVersion))
+    }
+
+    func testAuthenticatedMalformedKnownContentAndUnauthenticatedFutureContentStayCorrupt() async throws {
+        let cases = [
+            (#"{"text":{"_0":{"text":"missing required fields"}}}"#, false),
+            ("{", false),
+            (#"{"futureA":{},"futureB":{}}"#, false),
+            (#"{"futureContent":{"_0":{}}}"#, true),
+        ]
+        for (plaintext, damageAuthentication) in cases {
+            let cloud = SyncTestCloud(account: ClipboardHistorySyncCloudKitReadTests.account)
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("malformed-content-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let module = makeModule(services: services, keyByte: 0x11, time: 1_000, root: root.appendingPathComponent("Store"))
+            let local = try await module.capture(.init(source: .unknown, content: .text("retained valid local entry")))
+            try await module.setSyncEnabled(true)
+            try await Self.publishRawContentFixture(plaintext, cloud: cloud, keys: keys,
+                assetRoot: root.appendingPathComponent("Provider"), damageAuthentication: damageAuthentication)
+            await module.retrySync()
+            let failed = await module.syncStatus()
+            XCTAssertEqual(failed.phase, .failed(.corruptData), plaintext)
+            XCTAssertFalse(failed.canRecoverMissingCloudCollection)
+            let retained = try await module.page(.init())
+            XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+        }
+    }
+
     func testDamagedCiphertextDoesNotImportAndRetryKeepsTheUnreadCursor() async throws {
         let cloud = SyncTestCloud()
         let keys = SyncTestKeys()
@@ -5094,6 +5194,42 @@ final class ClipboardHistorySyncTests: XCTestCase {
         XCTAssertEqual(secondStatus.phase, .upToDate)
     }
 
+    private static func publishRawContentFixture(_ plaintext: String, cloud: SyncTestCloud,
+        keys: SyncTestKeys, assetRoot: URL, damageAuthentication: Bool = false) async throws {
+        let account = try await cloud.account()
+        let observed = try await cloud.control(for: account)
+        let control = try XCTUnwrap(observed)
+        let loaded = await keys.load(account: account, keyID: control.keyID)
+        let key = try XCTUnwrap(loaded)
+        let operationID = UUID()
+        let recordID = "v1-\(operationID.uuidString.lowercased())"
+        // This external wire fixture deliberately does not encode the current
+        // ClipboardSyncContent enum, which cannot express a future operation.
+        let contentKey = HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: key),
+            salt: Data("dev.bybee.AnyDoor.clipboard-sync.v1".utf8), info: Data("content".utf8), outputByteCount: 32)
+        let context = Data(["v1", account.identifier, control.epoch.uuidString, control.keyID.uuidString,
+            recordID, operationID.uuidString, "entry", "0", "1"].joined(separator: ":").utf8)
+        let box = try AES.GCM.seal(Data(plaintext.utf8), using: contentKey, authenticating: context)
+        var sealed = try XCTUnwrap(box.combined)
+        if damageAuthentication { sealed[sealed.count - 1] ^= 1 }
+        let bytes = sealed
+        let record = ClipboardSyncRemoteRecord(recordID: recordID, operationID: operationID,
+            epoch: control.epoch, keyID: control.keyID, kind: .entry, chunkCount: 1,
+            encryptedByteCount: Int64(bytes.count), digest: Data(SHA256.hash(data: bytes)))
+        try FileManager.default.createDirectory(at: assetRoot, withIntermediateDirectories: true)
+        let asset = assetRoot.appendingPathComponent(operationID.uuidString)
+        try bytes.write(to: asset)
+        let native = ClipboardSyncCloudKit(recordReader: { requested, ids, _ in
+            XCTAssertEqual(requested, account)
+            return Dictionary(uniqueKeysWithValues: ids.map { id in
+                (id, .success(ClipboardHistorySyncCloudKitReadTests.chunk(id: id, remote: record,
+                    index: 0, bytes: bytes, url: asset)))
+            })
+        })
+        await cloud.routeDownload(recordID, through: native)
+        _ = try await cloud.commit(.init(record: record, chunks: [bytes]), for: account, control: control)
+    }
+
     private static func publishFixture(_ content: ClipboardSyncContent, operationID: UUID = UUID(),
                                 cloud: SyncTestCloud, keys: SyncTestKeys) async throws {
         let account = try await cloud.account()
@@ -5372,6 +5508,8 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
     private var nextDownloadGate: SyncTestProviderGate?
+    private var nativeDownloads: [String: ClipboardSyncCloudKit] = [:]
+    func routeDownload(_ recordID: String, through native: ClipboardSyncCloudKit) { nativeDownloads[recordID] = native }
     func holdNextDownload(_ gate: SyncTestProviderGate) { nextDownloadGate = gate }
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) async throws -> [Data] {
         if let gate = nextDownloadGate {
@@ -5379,6 +5517,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
             await gate.wait()
         }
         try checkAccount(account)
+        if let native = nativeDownloads[record.recordID] { return try await native.download(record, for: account) }
         if record.kind == .fileBody { fileBodyDownloads += 1 }
         else { contentDownloads[record.recordID, default: 0] += 1 }
         if record.kind == .fileBody, corruptsControlAfterBody {

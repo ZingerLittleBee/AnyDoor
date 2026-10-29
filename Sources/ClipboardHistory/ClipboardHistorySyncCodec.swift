@@ -125,11 +125,13 @@ enum ClipboardSyncCodec {
             } catch { throw ClipboardSyncServiceError.corruptData }
         }
         do {
-            let content = try JSONDecoder().decode(ClipboardSyncContent.self, from: plaintext)
+            let content = try JSONDecoder().decode(ContentEnvelope.self, from: plaintext).content
             switch (record.kind, content) {
             case (.entry, .rejoin), (.tag, .withdrawal), (.entry, .deletion), (.tag, .tag), (.tag, .tagMembership), (.tag, .tagState), (.tag, .tagMerge), (.entry, .text), (.entry, .textEdit), (.entry, .entry), (.entry, .metadata), (.entry, .fileVersion), (.fileBody, .fileBody): return content
             default: throw ClipboardSyncServiceError.corruptData
             }
+        } catch let error as ClipboardSyncServiceError {
+            throw error
         } catch { throw ClipboardSyncServiceError.corruptData }
     }
 
@@ -137,6 +139,30 @@ enum ClipboardSyncCodec {
         var hasher = SHA256()
         for chunk in chunks { hasher.update(data: chunk) }
         return Data(hasher.finalize())
+    }
+
+    private struct ContentEnvelope: Decodable {
+        let content: ClipboardSyncContent
+
+        private struct Key: CodingKey {
+            let stringValue: String
+            var intValue: Int? { nil }
+            init(stringValue: String) { self.stringValue = stringValue }
+            init?(intValue: Int) { return nil }
+        }
+
+        init(from decoder: any Decoder) throws {
+            let keys = try decoder.container(keyedBy: Key.self).allKeys
+            guard keys.count == 1 else { throw ClipboardSyncServiceError.corruptData }
+            switch keys[0].stringValue {
+            case "deletion", "withdrawal", "rejoin", "tag", "text", "textEdit", "entry", "metadata",
+                 "tagMembership", "tagState", "fileBody", "fileVersion", "tagMerge": break
+            default: throw ClipboardSyncServiceError.unsupportedVersion
+            }
+            // Reuse the decoder after validating the envelope, without parsing
+            // the plaintext again or restricting fields inside known content.
+            content = try ClipboardSyncContent(from: decoder)
+        }
     }
 
     private static func derivedKey(_ key: Data, purpose: String) -> SymmetricKey {

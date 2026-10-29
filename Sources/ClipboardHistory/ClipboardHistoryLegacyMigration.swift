@@ -54,6 +54,10 @@ extension ClipboardHistoryModule {
         if let report = try currentLegacyMigrationReport() {
             return .alreadyPublished(report)
         }
+        legacyTagImportStoreTransitions += 1
+        defer { legacyTagImportStoreTransitions -= 1 }
+        try await waitForWriteTurn()
+        let epoch = storeEpoch
         guard let liveDatabase = database, let keys = derivedKeys else {
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
@@ -82,9 +86,16 @@ extension ClipboardHistoryModule {
         await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
+        try await waitForWriteTurn()
+        try Task.checkCancellation()
+        guard storeEpoch == epoch, database === liveDatabase else { throw ClipboardHistoryModuleError.storeUnavailable }
+        let currentEntryCount = try linkedRead { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM clipboard_entries") ?? 0 }
+        guard currentEntryCount == existingEntryCount else {
+            throw ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(entryCount: currentEntryCount)
+        }
         let workingOutputLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: storeRoot)
         defer { withExtendedLifetime(workingOutputLease) {} }
-        guard try await !liveDatabase.read({ try Self.hasWorkingOutputOwnership(in: $0) }) else {
+        guard try !linkedRead({ try Self.hasWorkingOutputOwnership(in: $0) }) else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         try liveDatabase.close()

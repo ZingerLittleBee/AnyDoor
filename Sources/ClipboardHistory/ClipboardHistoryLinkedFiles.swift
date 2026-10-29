@@ -1,12 +1,18 @@
 import Foundation
 import GRDB
 
-/// Display facts live for one database read only. Actions keep their live checks.
-struct ClipboardHistoryFileDisplayFacts {
+/// Display plans capture SQL values only. Native facts are resolved by the
+/// caller after releasing the page's read transaction. Actions keep live checks.
+struct ClipboardHistoryFileDisplayPlan<Value: Sendable>: Sendable {
+    let resolve: @Sendable (inout ClipboardHistoryFileDisplayFacts) -> Value
+}
+
+struct ClipboardHistoryFileDisplayFacts: Sendable {
     private struct Identity: Hashable {
         let path: String
         let identity: Data
         let nativeIdentity: Data?
+        var requiresReadable: Bool = true
     }
     private var availability: [Identity: Bool] = [:]
     private var applications: [String: Bool] = [:]
@@ -24,6 +30,15 @@ struct ClipboardHistoryFileDisplayFacts {
         let application = ClipboardApplicationPackage.isApplication(URL(fileURLWithPath: path))
         applications[path] = application
         return application
+    }
+
+    mutating func isStoredFileAvailable(path: String?, identity: Data?) -> Bool {
+        guard let path, let identity else { return false }
+        let key = Identity(path: path, identity: identity, nativeIdentity: nil, requiresReadable: false)
+        if let cached = availability[key] { return cached }
+        let available = ClipboardSyncFileIO.isAvailable(path: path, identity: identity)
+        availability[key] = available
+        return available
     }
 }
 
@@ -88,11 +103,11 @@ extension ClipboardHistoryModule {
 
     static func linkedFileLocations(entryID: String, in database: Database) throws -> [ClipboardHistoryLinkedFileLocation] {
         var facts = ClipboardHistoryFileDisplayFacts()
-        return try linkedFileLocations(entryIDs: [entryID], facts: &facts, in: database)[entryID] ?? []
+        return try linkedFileLocationPlans(entryIDs: [entryID], in: database)[entryID]?.map { $0.resolve(&facts) } ?? []
     }
 
-    static func linkedFileLocations(entryIDs: [String], facts: inout ClipboardHistoryFileDisplayFacts,
-        in database: Database) throws -> [String: [ClipboardHistoryLinkedFileLocation]] {
+    static func linkedFileLocationPlans(entryIDs: [String],
+        in database: Database) throws -> [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>]] {
         guard !entryIDs.isEmpty else { return [:] }
         let placeholders = Array(repeating: "?", count: entryIDs.count).joined(separator: ",")
         let rows = try Row.fetchAll(database, sql: """
@@ -107,14 +122,14 @@ extension ClipboardHistoryModule {
                   AND location.account_id = (SELECT account_id FROM clipboard_sync_settings WHERE id = 1)
                 ORDER BY member.entry_id, location.kind, location.path, location.id
                 """, arguments: StatementArguments(entryIDs))
-        var result: [String: [ClipboardHistoryLinkedFileLocation]] = [:]
-        var locations: [String: ClipboardHistoryLinkedFileLocation] = [:]
+        var result: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>]] = [:]
+        var locations: [String: ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>] = [:]
         for row in rows {
             let id: String = row["id"]
-            let location: ClipboardHistoryLinkedFileLocation
+            let location: ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>
             if let cached = locations[id] { location = cached }
             else {
-                location = try linkedFileLocation(row, facts: &facts)
+                location = try linkedFileLocationPlan(row)
                 locations[id] = location
             }
             result[row["entry_id"], default: []].append(location)
@@ -177,10 +192,10 @@ extension ClipboardHistoryModule {
 
     static func linkedFileLocation(_ row: Row) throws -> ClipboardHistoryLinkedFileLocation {
         var facts = ClipboardHistoryFileDisplayFacts()
-        return try linkedFileLocation(row, facts: &facts)
+        return try linkedFileLocationPlan(row).resolve(&facts)
     }
 
-    private static func linkedFileLocation(_ row: Row, facts: inout ClipboardHistoryFileDisplayFacts) throws -> ClipboardHistoryLinkedFileLocation {
+    private static func linkedFileLocationPlan(_ row: Row) throws -> ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation> {
         guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
               let base = UUID(uuidString: row["base_version_id"]),
               let kind = ClipboardHistoryLinkedFileLocationKind(rawValue: row["kind"]),
@@ -188,15 +203,21 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.storageFailure
         }
         let path: String = row["path"]
-        let available = facts.isAvailable(path: path, identity: row["identity"], nativeIdentity: row["native_identity"])
-        // Recursive classification is persisted by reconciliation outside SQL.
-        let isApplication = (row["is_application"] as Bool? ?? false) || facts.isApplication(path: path)
+        let identity: Data = row["identity"]
+        let nativeIdentity: Data? = row["native_identity"]
+        let storedApplication = row["is_application"] as Bool? ?? false
+        let revision: UInt64 = row["revision"]
+        let pendingApplication = (row["applying_version_id"] as String?) != nil
         let applicationVersion = row.hasColumn("application_update_version")
             ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
-        return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
-            url: URL(fileURLWithPath: path), kind: kind,
-            state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
-            revision: row["revision"], applicationUpdateVersionID: isApplication && applicationVersion != base ? applicationVersion : nil)
+        return .init { facts in
+            let available = facts.isAvailable(path: path, identity: identity, nativeIdentity: nativeIdentity)
+            let isApplication = storedApplication || facts.isApplication(path: path)
+            return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
+                url: URL(fileURLWithPath: path), kind: kind,
+                state: [.detached, .identityUncertain, .paused].contains(storedState) || (available && !pendingApplication) ? storedState : .unavailable,
+                revision: revision, applicationUpdateVersionID: isApplication && applicationVersion != base ? applicationVersion : nil)
+        }
     }
 
     private static func linkedObjectBase(
