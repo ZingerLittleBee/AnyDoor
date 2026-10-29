@@ -615,7 +615,10 @@ actor LinkedFileKeys: ClipboardSyncKeyStoring {
 }
 
 actor LinkedFileCloud: ClipboardSyncTransport {
-    private var identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
+    private var identity: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "linked-file-user")) {
+        identity = account
+    }
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
     private var purgedRecords: Set<String> = []

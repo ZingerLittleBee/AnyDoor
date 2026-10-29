@@ -6,6 +6,13 @@ import os
 /// CloudKit only sees opaque metadata and encrypted assets. Domain decisions,
 /// keys, retry journals, and account consent remain in ClipboardHistoryModule.
 actor ClipboardSyncCloudKit: ClipboardSyncTransport {
+    /// Replaces only the external, account-scoped record read. Native callers
+    /// retain the checked database and owned CloudKit operation lifecycle.
+    typealias RecordReader = @Sendable (ClipboardSyncAccount, [CKRecord.ID], [String]) async throws
+        -> [CKRecord.ID: Result<CKRecord, Error>]
+    private typealias RecordFetch = @Sendable ([CKRecord.ID], [String]) async throws
+        -> [CKRecord.ID: Result<CKRecord, Error>]
+
     private static let controlName = "control.v1"
     private static let controlType = "ClipboardSyncControlV1"
     private static let objectType = "ClipboardSyncObjectV1"
@@ -20,6 +27,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private var container: CKContainer?
     private var cancellationGeneration = 0
     private var operations: [UUID: CKDatabaseOperation] = [:]
+    private let recordReader: RecordReader?
+
+    init(recordReader: RecordReader? = nil) {
+        self.recordReader = recordReader
+    }
 
     func account() async throws -> ClipboardSyncAccount {
         let generation = cancellationGeneration
@@ -47,11 +59,11 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
 
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         let generation = cancellationGeneration
-        let database = try await checkedDatabase(for: account)
+        let fetch = try await recordFetcher(for: account)
         try checkCancellation(generation)
         do {
             let record = try await fetchOptionalRecord(
-                controlID(account), desiredKeys: Self.controlKeys, database: database
+                controlID(account), desiredKeys: Self.controlKeys, fetch: fetch
             )
             try checkCancellation(generation)
             return try record.map { try decodeControl($0, account: account) }
@@ -178,7 +190,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         _ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount
     ) async throws -> [Data] {
         let generation = cancellationGeneration
-        let database = try await checkedDatabase(for: account)
+        let fetch = try await recordFetcher(for: account)
         try checkCancellation(generation)
         try validateMetadata(record)
         var chunks: [Data] = []
@@ -190,9 +202,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             let ids = (start..<end).map { chunkID(record, index: $0, account: account) }
             let fetched: [CKRecord.ID: Result<CKRecord, Error>]
             do {
-                fetched = try await fetchRecords(
-                    ids, desiredKeys: Self.chunkMetadataKeys + ["asset"], database: database
-                )
+                fetched = try await fetch(ids, Self.chunkMetadataKeys + ["asset"])
             } catch {
                 try checkCancellation(generation)
                 throw Self.failure(error)
@@ -200,12 +210,7 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             try checkCancellation(generation)
             for (offset, id) in ids.enumerated() {
                 guard let result = fetched[id] else { throw ClipboardSyncServiceError.corruptData }
-                let chunk: CKRecord
-                do { chunk = try result.get() }
-                catch {
-                    if Self.hasCode(error, .unknownItem) { throw ClipboardSyncServiceError.recordUnavailable }
-                    throw Self.failure(error)
-                }
+                let chunk = try Self.requiredChunk(result)
                 try validateChunk(chunk, remote: record, index: start + offset)
                 guard let asset = chunk["asset"] as? CKAsset, let url = asset.fileURL else {
                     throw ClipboardSyncServiceError.corruptData
@@ -567,16 +572,16 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int,
         for account: ClipboardSyncAccount) async throws -> Data {
         let generation = cancellationGeneration
-        let database = try await checkedDatabase(for: account)
+        let fetch = try await recordFetcher(for: account)
         try checkCancellation(generation)
         try validateMetadata(record)
         guard index >= 0, index < record.chunkCount else { throw ClipboardSyncServiceError.corruptData }
         let id = chunkID(record, index: index, account: account)
         do {
-            let results = try await fetchRecords([id], desiredKeys: Self.chunkMetadataKeys + ["asset"], database: database)
+            let results = try await fetch([id], Self.chunkMetadataKeys + ["asset"])
             try checkCancellation(generation)
             guard let result = results[id] else { throw ClipboardSyncServiceError.corruptData }
-            let chunk = try result.get()
+            let chunk = try Self.requiredChunk(result)
             try validateChunk(chunk, remote: record, index: index)
             guard let url = (chunk["asset"] as? CKAsset)?.fileURL else {
                 throw ClipboardSyncServiceError.corruptData
@@ -616,6 +621,18 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         try checkCancellation(generation)
         guard observed == expected else { throw ClipboardSyncServiceError.accountChanged }
         return try checkedContainer().privateCloudDatabase
+    }
+
+    private func recordFetcher(for account: ClipboardSyncAccount) async throws -> RecordFetch {
+        try Task.checkCancellation()
+        try ClipboardSyncNativeConfiguration.validate(account)
+        if let recordReader {
+            return { ids, keys in try await recordReader(account, ids, keys) }
+        }
+        // Bind once per entry point, as before, rather than repeating native
+        // account discovery for every bounded batch in an ordinary download.
+        let database = try await checkedDatabase(for: account)
+        return { ids, keys in try await self.fetchRecords(ids, desiredKeys: keys, database: database) }
     }
 
     private func checkCancellation(_ generation: Int) throws {
@@ -797,8 +814,16 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
     private func fetchOptionalRecord(
         _ id: CKRecord.ID, desiredKeys: [String], database: CKDatabase
     ) async throws -> CKRecord? {
+        try await fetchOptionalRecord(id, desiredKeys: desiredKeys) { ids, keys in
+            try await self.fetchRecords(ids, desiredKeys: keys, database: database)
+        }
+    }
+
+    private func fetchOptionalRecord(
+        _ id: CKRecord.ID, desiredKeys: [String], fetch: RecordFetch
+    ) async throws -> CKRecord? {
         let generation = cancellationGeneration
-        let results = try await fetchRecords([id], desiredKeys: desiredKeys, database: database)
+        let results = try await fetch([id], desiredKeys)
         try checkCancellation(generation)
         guard let result = results[id] else { throw ClipboardSyncServiceError.corruptData }
         switch result {
@@ -806,6 +831,16 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         case .failure(let error):
             if Self.hasCode(error, .unknownItem) { return nil }
             throw error
+        }
+    }
+
+    /// Only a requested immutable chunk's own missing-record result is local
+    /// to that body. Operation, zone, and control failures keep their authority.
+    private nonisolated static func requiredChunk(_ result: Result<CKRecord, Error>) throws -> CKRecord {
+        do { return try result.get() }
+        catch {
+            if (error as? CKError)?.code == .unknownItem { throw ClipboardSyncServiceError.recordUnavailable }
+            throw failure(error)
         }
     }
 
