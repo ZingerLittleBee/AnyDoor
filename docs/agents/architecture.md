@@ -262,6 +262,15 @@ The additive `v32_working_output_recovery` journal owns only exact generated
 Receiving paths, with a durable reservation before creation, pinned native
 identity, and an encrypted complete-output fingerprint. A store-local advisory
 lease excludes active constructors in this and other processes from recovery.
+The additive `v34_working_output_members` journal records native identities when
+each member is created, and snapshots after each 4 MiB of actual writing and when
+its content and metadata finish. It
+stores no sync key or plaintext content. An already authorized receive can replay
+the same authenticated version using its current key and encrypted transfer
+cache, require the exact created-member set, an unchanged durable snapshot for
+every member, and a matching construction prefix,
+then reclaim that partial before retrying. Data and resource-fork tails may be
+short, but every retained byte and portable attribute must match the source.
 Its stable empty `working-output.lock` is a store artifact during legacy
 migration and relocation. Store replacement holds an exclusive lease, including
 when an older store has not created the sidecar yet, and accepts only an empty
@@ -273,14 +282,23 @@ missing exact paths retire ownership without following renamed or published
 files. Recovery never deletes by filename pattern or reclaims retained
 `AnyDoor update` outputs.
 
-An interrupted construction without a complete proof, changed content, or an
-uncertain identity remains an ordinary readable working output for review.
+Off and startup do not obtain sync keys to replay an incomplete construction.
+They retain it for a later authorized receive or review. A changed member,
+replacement identity, extra member, unavailable replay, or creation interrupted
+before native identity persistence remains an ordinary readable output for review.
 `workingOutputRecoveries` exposes that exact path across Off and restart. Keep
 File explicitly leaves its bytes alone and relinquishes ownership; users can
 inspect or remove it through Finder. One pending reservation per version directory
 prevents repeated failures from accumulating new partials. Existing review notices
 use cheap path/identity checks on refresh, rather than hashing their contents
-again. This is local recovery, with no cloud deletion, new download consent, or
+again; an incomplete candidate is replayed only by an authorized receive. A
+detected mismatch permanently leaves that candidate for review. Snapshot equality
+protects timestamp-only edits and same-inode truncation to another valid source
+prefix. Each parent directory is updated in the child's creation transaction.
+Writes between progress checkpoints, and a crash between a native metadata change
+and its durable snapshot, remain conservative. Progress costs
+O(content bytes / 4 MiB + members) database transactions, with no extra file fsync.
+This is local recovery, with no cloud deletion, new download consent, or
 automatic re-enablement of sync. Unverified outputs never materialize as complete
 history, and encrypted background stores still contain no plaintext file cache.
 

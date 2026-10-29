@@ -10,7 +10,8 @@ enum ClipboardFileTreeDecoding {
     static func decode(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, destination: URL?,
         faults: ClipboardHistoryFaultInjector = .init(), destinationParent: Int32? = nil,
-        rootCreated: ((Int32) throws -> Void)? = nil) throws -> ClipboardSyncFileSnapshot? {
+        rootCreated: ((Int32) throws -> Void)? = nil, ownership: ClipboardWorkingOutputOwner? = nil,
+        replay: ClipboardWorkingOutputReplay? = nil) throws -> ClipboardSyncFileSnapshot? {
         guard let body = descriptor.body, let encodedSize = descriptor.encodedByteCount, encodedSize > 0 else {
             throw ClipboardSyncServiceError.corruptData
         }
@@ -28,7 +29,7 @@ enum ClipboardFileTreeDecoding {
         try database.write { try $0.execute(sql: "CREATE TABLE entries(path TEXT PRIMARY KEY COLLATE BINARY, kind TEXT NOT NULL, header BLOB NOT NULL, created BLOB) WITHOUT ROWID") }
         let outputTree = try destination.map { url in
             guard let destinationParent else { throw ClipboardSyncServiceError.localStorage }
-            return try ClipboardFileTreeOutput(destination: url, parentDescriptor: destinationParent, rootCreated: rootCreated)
+            return try ClipboardFileTreeOutput(destination: url, parentDescriptor: destinationParent, rootCreated: rootCreated, ownership: ownership)
         }
         var chunk = 0
         var stream = Reader {
@@ -69,6 +70,7 @@ enum ClipboardFileTreeDecoding {
             } else if header.link != nil { throw ClipboardSyncServiceError.corruptData }
             try database.write { try $0.execute(sql: "INSERT INTO entries(path, kind, header) VALUES (?, ?, ?)", arguments: [header.path, header.kind, bytes]) }
             previous = header.path
+            try replay?.begin(header)
             let output = try outputTree?.create(header)
             defer { if let output, output >= 0 { close(output) } }
             if let output {
@@ -78,11 +80,18 @@ enum ClipboardFileTreeDecoding {
                     arguments: [try JSONEncoder().encode(ClipboardSyncFileSnapshot(created)), header.path]) }
             }
             var remaining = header.size
+            var nextProgress = ClipboardWorkingOutputOwner.progressByteCount
             original = try ClipboardFileTree.add(original, remaining)
             while remaining > 0 {
                 let part = try stream.read(Int(min(remaining, 64 * 1_024)))
+                try replay?.body(part)
                 if let output {
                     try write(part, to: output)
+                    let written = header.size - remaining + Int64(part.count)
+                    if written >= nextProgress {
+                        try ownership?.checkpointMember(path: header.path, descriptor: output, expectedSize: written)
+                        nextProgress = written + ClipboardWorkingOutputOwner.progressByteCount
+                    }
                     try faults.check(.syncWorkingOutputDuringConstruction)
                 }
                 remaining -= Int64(part.count)
@@ -92,9 +101,22 @@ enum ClipboardFileTreeDecoding {
                 let fork = try output.flatMap { try ClipboardFileMetadata.fork(fd: $0, writing: true) }
                 defer { if let fork { close(fork) } }
                 remaining = header.forkSize
+                nextProgress = ClipboardWorkingOutputOwner.progressByteCount
                 while remaining > 0 {
                     let part = try stream.read(Int(min(remaining, 64 * 1_024)))
-                    if let fork { try write(part, to: fork) }
+                    try replay?.fork(part)
+                    if let fork {
+                        try write(part, to: fork)
+                        let written = header.forkSize - remaining + Int64(part.count)
+                        if written >= nextProgress, let output, let ownership {
+                            var status = stat()
+                            guard fstat(fork, &status) == 0, status.st_size == written else {
+                                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+                            }
+                            try ownership.checkpointMember(path: header.path, descriptor: output, expectedSize: header.size)
+                            nextProgress = written + ClipboardWorkingOutputOwner.progressByteCount
+                        }
+                    }
                     remaining -= Int64(part.count)
                 }
                 if let fork, fsync(fork) != 0 { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
@@ -114,11 +136,11 @@ enum ClipboardFileTreeDecoding {
                 original = try ClipboardFileTree.add(original, attribute.size)
                 // The validation pass discards bounded pieces. Construction
                 // holds only the current value because fsetxattr is indivisible.
-                var value = try output == nil ? Data() : ClipboardFileMetadata.allocate(Int(attribute.size))
+                var value = try output == nil && replay == nil ? Data() : ClipboardFileMetadata.allocate(Int(attribute.size))
                 var offset = 0
                 while Int64(offset) < attribute.size {
                     let part = try stream.read(Int(min(attribute.size - Int64(offset), 64 * 1_024)))
-                    if output != nil { value.replaceSubrange(offset..<(offset + part.count), with: part) }
+                    if output != nil || replay != nil { value.replaceSubrange(offset..<(offset + part.count), with: part) }
                     offset += part.count
                 }
                 if let output {
@@ -126,8 +148,12 @@ enum ClipboardFileTreeDecoding {
                         throw ClipboardHistoryStorageError.fileOperationFailed(errno)
                     }
                 }
+                try replay?.attribute(attribute, value: value)
             }
             if let output, output >= 0, header.kind != "link", fsync(output) != 0 { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            if let output { try ownership?.checkpointMember(path: header.path, descriptor: output,
+                expectedSize: header.kind == "file" ? header.size : nil) }
+            try replay?.end()
         }
         guard previous != nil, stream.consumed == encodedSize, original == descriptor.originalByteCount,
               Data(stream.hash.finalize()) == descriptor.contentDigest else { throw ClipboardSyncServiceError.corruptData }

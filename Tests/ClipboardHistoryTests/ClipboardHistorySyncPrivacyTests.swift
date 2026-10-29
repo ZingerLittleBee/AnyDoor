@@ -388,12 +388,23 @@ private enum PrivacySubprocess {
         process.environment = environment
         process.standardOutput = output
         process.standardError = output
+        let completion = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+        process.terminationHandler = { child in
+            completion.withLock { $0 = child.terminationReason == .exit ? child.terminationStatus : -1 }
+        }
         try process.run()
+        defer { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
         let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while process.isRunning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        if process.isRunning { process.terminate() }
-        process.waitUntilExit()
+        while completion.withLock({ $0 }) == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        if completion.withLock({ $0 }) == nil {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            let terminationDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while completion.withLock({ $0 }) == nil && ContinuousClock.now < terminationDeadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        guard let status = completion.withLock({ $0 }) else { throw CocoaError(.executableRuntimeMismatch) }
         let transcript = try String(contentsOf: log, encoding: .utf8)
-        return .init(status: process.terminationReason == .exit ? process.terminationStatus : -1, output: transcript)
+        return .init(status: status, output: transcript)
     }
 }
