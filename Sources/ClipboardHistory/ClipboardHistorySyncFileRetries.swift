@@ -54,6 +54,7 @@ extension ClipboardHistoryModule {
     /// Only errors attributable to one file may defer its work. Account, key,
     /// control, provider backoff, and database failures retain pass-wide authority.
     static func isIsolatedSyncFileFailure(_ error: Error) -> Bool {
+        if error is ClipboardWorkingOutputRecoveryRequired { return true }
         if ClipboardSyncFileErrors.isAccessDenied(error) || ClipboardSyncFileErrors.isSourceChanged(error) { return true }
         switch error as? ClipboardSyncServiceError {
         case .recordUnavailable, .corruptData, .localFileAccessDenied: return true

@@ -162,7 +162,7 @@ extension ClipboardHistoryModule {
         }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         do {
-            let recovery = try currentSyncRecovery()
+            let recovery = try currentSyncRetryPolicy()
             if !explicitRetry, let phase = recovery.phase, phase.requiresExplicitRetry {
                 setSyncPhase(phase)
                 return
@@ -180,7 +180,7 @@ extension ClipboardHistoryModule {
         let bindingAuthorized = syncAccountBindingGeneration == generation
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         let task = Task {
-            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation) }
+            if pendingReset && !bindingAuthorized { await self.discoverPendingCloudReset(generation: generation, explicitRetry: explicitRetry) }
             else { await self.performSync(generation: generation, allowAccountBinding: bindingAuthorized) }
         }
         syncTask = task
@@ -218,7 +218,7 @@ extension ClipboardHistoryModule {
               let pollingInterval = syncServices?.pollingInterval else { return }
         let retryNotBefore: Date?
         do {
-            let recovery = try currentSyncRecovery()
+            let recovery = try currentSyncRetryPolicy()
             guard recovery.phase?.requiresExplicitRetry != true else { return }
             retryNotBefore = recovery.retryNotBefore
         }
@@ -231,6 +231,19 @@ extension ClipboardHistoryModule {
             guard let self else { return }
             await self.syncPollingFired(generation: generation)
         }
+    }
+
+    private func currentSyncRetryPolicy() throws -> (phase: ClipboardHistorySyncPhase?, retryNotBefore: Date?) {
+        var recovery = try currentSyncRecovery()
+        // Explicit activation may bind another account. Its dormant predecessor's
+        // reset must not authorize requests or prevent that new account binding.
+        guard syncAccountBindingGeneration != syncGeneration,
+              let reset = try currentCloudReset(), reset.status.isPending else { return recovery }
+        if reset.failure?.requiresExplicitRetry == true { recovery.phase = reset.failure }
+        if let deadline = reset.retryNotBefore {
+            recovery.retryNotBefore = max(recovery.retryNotBefore ?? deadline, deadline)
+        }
+        return recovery
     }
 
     private func syncPollingFired(generation: UInt64, explicitRetry: Bool = false) async {
@@ -297,6 +310,7 @@ extension ClipboardHistoryModule {
                     try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ?, enabled = 0 WHERE id = 1",
                         arguments: [account.identifier])
                 }
+                syncAccountBindingGeneration = nil
                 await performCloudReset(generation: generation)
                 return
             }
@@ -428,10 +442,10 @@ extension ClipboardHistoryModule {
                 // Drain mutations made while a provider request was suspended,
                 // including rejoining during cleanup. An unchanged history does
                 // not need another full backfill scan for every uploaded record.
-                let revision = try syncWrite { try Self.historyRevision(in: $0) }
+                let revision = try syncFileRead { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
-                    try stageSyncBackfill(account: account, control: control, key: key)
-                    stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
+                    stagedRevision = try await stageSyncBackfill(account: account, control: control, key: key,
+                        generation: generation)
                 }
                 let ordinary = try nextSyncUpload(account: account, control: control)
                 let preparedRestoration = ordinary == nil ? try await nextSyncFileRestoration(account: account,
@@ -445,7 +459,7 @@ extension ClipboardHistoryModule {
                 }
                 let restoration = preparedRestoration?.upload
                 if ordinary == nil, restoration == nil,
-                   stagedRevision != (try syncWrite { try Self.historyRevision(in: $0) }) { continue }
+                   stagedRevision != (try syncFileRead { try Self.historyRevision(in: $0) }) { continue }
                 if let upload = ordinary ?? restoration {
                     let restoring = restoration != nil
                     do {
@@ -671,7 +685,7 @@ extension ClipboardHistoryModule {
     }
 }
 
-private extension ClipboardHistorySyncPhase {
+extension ClipboardHistorySyncPhase {
     var requiresExplicitRetry: Bool {
         self == .failed(.providerRejected) || self == .failed(.unsupportedVersion)
     }

@@ -476,18 +476,28 @@ extension ClipboardHistoryModule {
                Int64(content.bytes.count) == size, Data(SHA256.hash(data: content.bytes)) == descriptor.contentDigest else {
                 throw ClipboardSyncServiceError.corruptData
             }
-            // Authentication is complete before any ordinary file is created.
-            // Publication stays synchronous with final admission and DB commit.
-            try await admitSyncFilePublication(generation, account: account, control: control, services: services)
-            try await waitForWriteTurn()
-            try admitSync(generation)
-            guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else { continue }
-            output = try ClipboardSyncFileIO.publish(
-                content.bytes, descriptor: descriptor, root: try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch),
-                accountID: account.identifier, faultInjector: faultInjector
-            )
+            // Authentication precedes off-actor construction; final publication
+            // remains synchronous with renewed admission and local completion.
+            let publicationRoot = try syncFilePublicationRoot(descriptor, account: account, epoch: control.epoch)
+            let candidate = try await ClipboardSyncFilePublication.constructInline(content.bytes,
+                descriptor: descriptor, root: publicationRoot, accountID: account.identifier,
+                ownership: workingOutputJournal(), faults: faultInjector)
+            do {
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                try await waitForWriteTurn()
+                try admitSync(generation)
+                guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch) else {
+                    await ClipboardSyncFilePublication.discard(candidate)
+                    continue
+                }
+                output = try ClipboardSyncFilePublication.publish(candidate, descriptor: descriptor,
+                    root: publicationRoot, accountID: account.identifier, faults: faultInjector)
+                await ClipboardSyncFilePublication.discard(candidate)
+                try await admitSyncFilePublication(generation, account: account, control: control, services: services)
+                guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
+                      try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch) else { continue }
+            } catch { await ClipboardSyncFilePublication.discard(candidate); throw error }
             }
-            try faultInjector.check(.syncFileAfterPublication)
             try syncWrite { database in
                 try database.execute(sql: """
                     UPDATE clipboard_sync_file_versions

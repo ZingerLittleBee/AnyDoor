@@ -141,7 +141,7 @@ extension ClipboardHistoryModule {
 
     /// Old account journals remain dormant while another account participates.
     /// Resolving the current system account never grants ordinary sync consent.
-    func discoverPendingCloudReset(generation: UInt64) async {
+    func discoverPendingCloudReset(generation: UInt64, explicitRetry: Bool) async {
         do {
             guard let services = syncServices else { throw ClipboardSyncServiceError.capabilityUnavailable }
             try admitCloudResetDiscovery(generation)
@@ -155,6 +155,7 @@ extension ClipboardHistoryModule {
                         arguments: [account.identifier])
                     try database.execute(sql: "UPDATE clipboard_sync_reset SET activation_authorized = 0 WHERE id = 1")
                 }
+                if !explicitRetry, journal.failure?.requiresExplicitRetry == true { publishSyncStatus(); return }
                 if let deadline = journal.retryNotBefore, deadline > now() { publishSyncStatus(); return }
                 await performCloudReset(generation: generation)
             } else if syncStatus().isEnabled {

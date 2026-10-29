@@ -84,8 +84,8 @@ extension ClipboardHistoryLinkedFileTests {
         XCTAssertEqual(linked.first?.url.path, proof.url.path)
         XCTAssertEqual(try package.contentsSnapshot(), baseline)
         let diagnostics = try await upgraded.storageDiagnostics()
-        XCTAssertEqual(Array(diagnostics.appliedMigrations.suffix(5)),
-            ["v29_clipboard_sync_file_lifecycle", "v28_clipboard_sync_application_updates", "v30_clipboard_sync_file_retries", "v31_legacy_tag_recovery", "v33_clipboard_sync_page_indexes"])
+        XCTAssertEqual(Array(diagnostics.appliedMigrations.suffix(6)),
+            ["v29_clipboard_sync_file_lifecycle", "v28_clipboard_sync_application_updates", "v30_clipboard_sync_file_retries", "v31_legacy_tag_recovery", "v32_working_output_recovery", "v33_clipboard_sync_page_indexes"])
         XCTAssertTrue(diagnostics.databaseIntegrityOK && diagnostics.foreignKeyIntegrityOK && diagnostics.cipherIntegrityOK)
         try await upgraded.closeStoreForTesting()
         let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(testingDatabaseURL: databaseURL, databaseKey: key))

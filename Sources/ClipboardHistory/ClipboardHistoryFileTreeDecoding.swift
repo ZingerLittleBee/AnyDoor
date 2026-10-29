@@ -9,7 +9,8 @@ enum ClipboardFileTreeDecoding {
     @discardableResult
     static func decode(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, destination: URL?,
-        faults: ClipboardHistoryFaultInjector = .init(), destinationParent: Int32? = nil) throws -> ClipboardSyncFileSnapshot? {
+        faults: ClipboardHistoryFaultInjector = .init(), destinationParent: Int32? = nil,
+        rootCreated: ((Int32) throws -> Void)? = nil) throws -> ClipboardSyncFileSnapshot? {
         guard let body = descriptor.body, let encodedSize = descriptor.encodedByteCount, encodedSize > 0 else {
             throw ClipboardSyncServiceError.corruptData
         }
@@ -27,7 +28,7 @@ enum ClipboardFileTreeDecoding {
         try database.write { try $0.execute(sql: "CREATE TABLE entries(path TEXT PRIMARY KEY COLLATE BINARY, kind TEXT NOT NULL, header BLOB NOT NULL, created BLOB) WITHOUT ROWID") }
         let outputTree = try destination.map { url in
             guard let destinationParent else { throw ClipboardSyncServiceError.localStorage }
-            return try ClipboardFileTreeOutput(destination: url, parentDescriptor: destinationParent)
+            return try ClipboardFileTreeOutput(destination: url, parentDescriptor: destinationParent, rootCreated: rootCreated)
         }
         var chunk = 0
         var stream = Reader {
@@ -80,7 +81,10 @@ enum ClipboardFileTreeDecoding {
             original = try ClipboardFileTree.add(original, remaining)
             while remaining > 0 {
                 let part = try stream.read(Int(min(remaining, 64 * 1_024)))
-                if let output { try write(part, to: output) }
+                if let output {
+                    try write(part, to: output)
+                    try faults.check(.syncWorkingOutputDuringConstruction)
+                }
                 remaining -= Int64(part.count)
             }
             original = try ClipboardFileTree.add(original, header.forkSize)

@@ -80,8 +80,17 @@ extension ClipboardHistoryModule {
     /// Snapshot local differences before applying incoming operations. A local
     /// edit made while a provider request is suspended must not be overwritten.
     func recordLocalSyncMemberships(account: ClipboardSyncAccount, epoch: UUID,
-        sharedID: String? = nil, in database: Database) throws {
-        let selected = Set(try selectedSyncTags(accountID: account.identifier, in: database).map(\.id))
+        sharedID: String? = nil, tagID: String? = nil, in database: Database) throws {
+        let selected: Set<String>
+        if let tagID {
+            selected = Set(try String.fetchAll(database, sql: """
+                SELECT tag.tag_id FROM clipboard_sync_tags AS tag
+                JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
+                WHERE tag.account_id = ? AND tag.tag_id = ? AND tag.selected = 1
+                """, arguments: [account.identifier, tagID]))
+        } else {
+            selected = Set(try selectedSyncTags(accountID: account.identifier, in: database).map(\.id))
+        }
         let entries: [Row]
         if let sharedID {
             entries = try Row.fetchAll(database, sql: """
@@ -131,19 +140,38 @@ extension ClipboardHistoryModule {
         }
     }
 
-    func stageSyncMemberships(account: ClipboardSyncAccount, control: ClipboardSyncControl,
-                              key: Data, in database: Database) throws {
-        try recordLocalSyncMemberships(account: account, epoch: control.epoch, in: database)
-        for row in try Row.fetchAll(database, sql: """
+    func stageSyncMemberships(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterSubject = ""
+        var afterTag = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, sql: """
             SELECT * FROM clipboard_sync_memberships WHERE account_id = ? AND epoch = ? AND pending = 1
-            """, arguments: [account.identifier, control.epoch.uuidString]) {
+              AND (shared_id, tag_id) > (?, ?) ORDER BY shared_id, tag_id LIMIT 1
+            """, arguments: [account.identifier, control.epoch.uuidString, afterSubject, afterTag]) }) {
             let membership = syncMembership(from: row)
-            let upload = try ClipboardSyncCodec.seal(.tagMembership(membership), account: account, control: control, key: key)
-            try storeSyncUpload(upload, subjectID: membership.sharedID, account: account, in: database)
-            try database.execute(sql: """
-                UPDATE clipboard_sync_memberships SET pending = 0
-                WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ?
-                """, arguments: [account.identifier, control.epoch.uuidString, membership.sharedID, membership.tagID])
+            afterSubject = membership.sharedID
+            afterTag = membership.tagID
+            try await stageSyncOperation(.tagMembership(membership), subjectID: membership.sharedID,
+                account: account, control: control, key: key, generation: generation) { database, _ in
+                // The source assignment/selection may change without updating
+                // this register until its next snapshot. Recheck only this pair.
+                guard try Bool.fetchOne(database, sql: """
+                    SELECT EXISTS(SELECT 1 FROM clipboard_sync_tags AS tag
+                    JOIN clipboard_tag_definitions AS definition ON definition.id = tag.tag_id
+                    WHERE tag.account_id = ? AND tag.tag_id = ? AND tag.selected = 1)
+                    """, arguments: [account.identifier, membership.tagID]) == true else { return false }
+                try recordLocalSyncMemberships(account: account, epoch: control.epoch,
+                    sharedID: membership.sharedID, tagID: membership.tagID, in: database)
+                guard try !Self.isSyncDeleted(membership.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database),
+                      try !membership.present || syncSubjectCanStage(membership.sharedID, account: account, control: control, in: database) else { return false }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_memberships SET pending = 0
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ? AND tag_id = ? AND pending = 1
+                      AND counter = ? AND operation_id = ? AND present = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, membership.sharedID, membership.tagID,
+                        membership.revision.counter, membership.revision.operationID, membership.present])
+                return database.changesCount == 1
+            }
         }
     }
 

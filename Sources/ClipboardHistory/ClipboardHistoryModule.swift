@@ -192,6 +192,7 @@ public actor ClipboardHistoryModule {
             .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
+                try? await self?.recoverWorkingOutputs()
                 await self?.startMaintenanceTaskIfNeeded()
             }
         )
@@ -337,6 +338,7 @@ public actor ClipboardHistoryModule {
             .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
+                try? await self?.recoverWorkingOutputs()
                 await self?.startMaintenanceTaskIfNeeded()
             }
         )
