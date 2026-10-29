@@ -39,9 +39,10 @@ extension ClipboardHistoryModule {
             applicationRunningGuards[source.id] = runningGuard
         } else { runningGuard = nil }
         let runningState = await runningGuard?.state() ?? .identityUncertain
+        let pendingCanRetry = try linkedApplicationCanRetry(source, descriptor: versions.latest)
         let state: ClipboardHistoryApplicationUpdateState
         if [.detached, .identityUncertain].contains(source.state) || inspected.0 == nil { state = .identityUncertain }
-        else if source.state == .paused || source.hasPendingApplication { state = .unavailable }
+        else if source.state == .paused || (source.hasPendingApplication && !pendingCanRetry) { state = .unavailable }
         else if inspected.0?.digest != source.baseDigest { state = .localChanges }
         else if versions.hasConflict || source.state == .conflict { state = .conflict }
         else if versions.complete?.descriptor.versionID != versions.latest.versionID { state = .requiresDownload }
@@ -98,7 +99,6 @@ extension ClipboardHistoryModule {
         try await admitSync(generation, account: context.account, services: services)
         let source = try syncWrite { database in
             let source = try Self.validateApplicationUpdate(snapshot, phase: "ready", in: database)
-            guard !source.hasPendingApplication else { throw ClipboardHistoryApplicationUpdateError.stalePlan }
             try database.execute(sql: "UPDATE clipboard_sync_application_plans SET phase = 'applying' WHERE id = ?", arguments: [snapshot.id.uuidString])
             return source
         }
