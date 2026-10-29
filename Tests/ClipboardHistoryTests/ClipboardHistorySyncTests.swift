@@ -12,6 +12,16 @@ import os
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
     func testSyncPayloadPreparationAllowsHistoryWorkAndOffRevokesBeforeDraining() async throws {
+        try await assertSyncPayloadPreparationAllowsHistoryWork(rejoin: false)
+    }
+
+    @MainActor
+    func testRejoinPayloadPreparationAllowsHistoryWorkAndOffRevokesBeforeDraining() async throws {
+        try await assertSyncPayloadPreparationAllowsHistoryWork(rejoin: true)
+    }
+
+    @MainActor
+    private func assertSyncPayloadPreparationAllowsHistoryWork(rejoin: Bool) async throws {
         let armed = OSAllocatedUnfairLock(initialState: false)
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
@@ -29,8 +39,15 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let tag = try await module.createTagDefinition(named: "Prepared", assigningTo: bitmap.entryID).definition
         try await module.setSyncTagSelected(tag.id, selected: true)
         await module.awaitDerivedJobsForTesting()
+        if rejoin {
+            try await module.setSyncEnabled(true)
+            try await module.setSyncTagSelected(tag.id, selected: false)
+        }
         armed.withLock { $0 = true }
-        let enable = Task { try await module.setSyncEnabled(true) }
+        let enable = Task {
+            if rejoin { try await module.setSyncTagSelected(tag.id, selected: true) }
+            else { try await module.setSyncEnabled(true) }
+        }
         addTeardownBlock { barrier.release(); _ = try? await enable.value }
         for _ in 0..<400 {
             if barrier.isWaiting { break }

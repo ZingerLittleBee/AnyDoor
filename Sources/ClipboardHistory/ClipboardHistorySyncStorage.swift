@@ -103,15 +103,18 @@ extension ClipboardHistoryModule {
 
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
         generation: UInt64) async throws -> Int64 {
-        let revision = try syncWrite { database in
+        let revision = try syncFileRead { try Self.historyRevision(in: $0) }
+        try syncWrite { database in
             try stageSyncDeletions(account: account, control: control, key: key, in: database)
             try recordSyncWithdrawals(in: database)
-            try stageSyncWithdrawals(account: account, control: control, key: key, in: database)
+            try recordLocalSyncMemberships(account: account, epoch: control.epoch, in: database)
+        }
+        try await stageSyncWithdrawals(account: account, control: control, key: key, generation: generation)
+        try syncWrite { database in
             try stageSyncTagMerges(account: account, control: control, key: key, in: database)
             try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
             try stageSyncMemberships(account: account, control: control, key: key, in: database)
             try stageSyncMetadata(account: account, control: control, key: key, in: database)
-            return try Self.historyRevision(in: database)
         }
         let store = try requiredPayloadStore()
         var afterID = ""
@@ -193,6 +196,13 @@ extension ClipboardHistoryModule {
         try syncWrite { try stageSyncTextEdits(account: account, control: control, key: key, in: $0) }
         // Concurrent intent is deliberately not covered by this pass's witness.
         return revision
+    }
+
+    func syncStagingContextMatches(account: ClipboardSyncAccount, control: ClipboardSyncControl,
+        in database: Database) throws -> Bool {
+        guard let context = try syncFileContext(in: database) else { return false }
+        return context.account == account && context.control.epoch == control.epoch
+            && context.control.keyID == control.keyID && context.control.phase == "active"
     }
 
     func storeSyncUpload(_ upload: ClipboardSyncUpload, subjectID: String,

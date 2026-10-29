@@ -68,12 +68,6 @@ extension ClipboardHistoryModule {
         return .init(identity: identity, bitmaps: bitmaps, thumbnailID: thumbnailID)
     }
 
-    func syncEntryContent(id: UUID, sharedID: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
-                          control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntryContent {
-        try syncEntrySnapshot(id: id, sharedID: sharedID, tags: tags, account: account, control: control,
-            key: key, in: database).materialize(using: requiredPayloadStore())
-    }
-
     func syncEntrySnapshot(id: UUID, sharedID: UUID, tags: [ClipboardSyncTagContent], account: ClipboardSyncAccount,
                           control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncEntrySnapshot {
         let storedID = id.uuidString.lowercased()
