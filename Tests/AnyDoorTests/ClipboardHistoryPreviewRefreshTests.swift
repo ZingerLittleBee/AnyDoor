@@ -6,6 +6,75 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryPreviewRefreshTests: XCTestCase {
+    func testExplicitPreviewBoundsRepeatedChangesAndKeepsCancellationSilent() async throws {
+        for cancelled in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-bounded-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
+                keyStore: FileConflictUILocalKey(byte: 0x66)))
+            let capture = try await module.capture(.init(source: .unknown, content: .text("before")))
+            let delivery = PreviewDeliveryGate(holdCount: 2)
+            addTeardownBlock { await delivery.release() }
+            let model = ClipboardHistoryPresentationModel(operations: .init(
+                status: { await module.status() },
+                page: { try await module.page($0, after: $1) },
+                apply: { try await module.apply($0) },
+                materialize: { request in
+                    let value = try await module.materialize(request)
+                    await delivery.holdFirstDelivery()
+                    return value
+                },
+                tagDefinitions: { try await module.tagDefinitions() }))
+            await model.reload()
+            let request = Task { await model.previewMaterialization(for: capture.entryID) }
+            for index in 0..<(cancelled ? 1 : 2) {
+                await delivery.waitUntilHeld()
+                let plan = try await module.textEditPlan(for: capture.entryID)
+                _ = try await module.saveTextEdit("updated \(index)", using: plan)
+                await model.refreshForStoreChange()
+                if cancelled { request.cancel() }
+                await delivery.release()
+            }
+
+            let result = await request.value
+
+            XCTAssertNil(result)
+            XCTAssertEqual(model.actionFailure, cancelled ? nil : .previewChanged)
+        }
+    }
+
+    func testExplicitPreviewRetriesAReadSupersededByAConcurrentEdit() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-request-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
+            keyStore: FileConflictUILocalKey(byte: 0x65)))
+        let capture = try await module.capture(.init(source: .unknown, content: .text("before")))
+        let delivery = PreviewDeliveryGate()
+        addTeardownBlock { await delivery.release() }
+        let model = ClipboardHistoryPresentationModel(operations: .init(
+            status: { await module.status() },
+            page: { try await module.page($0, after: $1) },
+            apply: { try await module.apply($0) },
+            materialize: { request in
+                let value = try await module.materialize(request)
+                await delivery.holdFirstDelivery()
+                return value
+            },
+            tagDefinitions: { try await module.tagDefinitions() }))
+        await model.reload()
+        let request = Task { await model.previewMaterialization(for: capture.entryID) }
+        await delivery.waitUntilHeld()
+        let plan = try await module.textEditPlan(for: capture.entryID)
+        _ = try await module.saveTextEdit("current preview", using: plan)
+        await model.refreshForStoreChange()
+        await delivery.release()
+
+        let result = await request.value
+
+        XCTAssertEqual(result?.exactTexts, ["current preview"])
+        XCTAssertNil(model.actionFailure)
+    }
+
     func testReceivedTextRefreshesFullPreviewWhenItsVisiblePrefixIsUnchanged() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-received-\(UUID())")
         removeClipboardHistoryDirectoryAfterTest(root)
@@ -100,11 +169,13 @@ final class ClipboardHistoryPreviewRefreshTests: XCTestCase {
 private actor PreviewDeliveryGate {
     private var held: CheckedContinuation<Void, Never>?
     private var started: CheckedContinuation<Void, Never>?
-    private var didHold = false
+    private var remainingHolds: Int
+
+    init(holdCount: Int = 1) { remainingHolds = holdCount }
 
     func holdFirstDelivery() async {
-        guard !didHold else { return }
-        didHold = true
+        guard remainingHolds > 0 else { return }
+        remainingHolds -= 1
         await withCheckedContinuation { continuation in
             held = continuation
             started?.resume()

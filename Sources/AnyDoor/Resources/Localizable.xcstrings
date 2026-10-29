@@ -4472,6 +4472,13 @@
         }
       }
     },
+    "clipboard.toast.previewChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Clipboard content changed while opening the preview. Try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "打开预览时剪贴板内容发生了变化，请重试。" } }
+      }
+    },
     "clipboard.toast.copyFailed": {
       "extractionState": "manual",
       "localizations": {
