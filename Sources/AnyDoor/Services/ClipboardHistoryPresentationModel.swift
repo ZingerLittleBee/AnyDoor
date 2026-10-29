@@ -104,7 +104,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             try await module.materialize(request)
         }
         requestSyncFileDownload = { entryID, objectID, versionID in
-            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID)
+            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID, waitForSync: false)
         }
         requestFileConflictDownload = { try await module.requestFileConflictDownload($0, versionID: $1) }
         resolveFileConflict = { try await module.resolveFileConflict($0, choosing: $1) }
