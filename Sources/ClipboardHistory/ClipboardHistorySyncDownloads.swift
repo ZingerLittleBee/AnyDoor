@@ -160,7 +160,10 @@ extension ClipboardHistoryModule {
     func admitSyncFilePublication(_ generation: UInt64, account: ClipboardSyncAccount,
         control: ClipboardSyncControl, services: ClipboardSyncServices) async throws {
         try await admitSync(generation, account: account, services: services)
-        guard let current = try await services.transport.control(for: account), current.phase == "active",
+        let observed: ClipboardSyncControl?
+        do { observed = try await services.transport.control(for: account) }
+        catch ClipboardSyncServiceError.corruptData { throw ClipboardSyncServiceError.corruptAuthority }
+        guard let current = observed, current.phase == "active",
               current.epoch == control.epoch, current.keyID == control.keyID else {
             throw ClipboardSyncServiceError.missingRemoteState
         }

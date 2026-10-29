@@ -10,6 +10,43 @@ import os
 
 final class ClipboardHistorySyncTests: XCTestCase {
     @MainActor
+    func testCorruptControlDuringFilePublicationStopsIndependentUploads() async throws {
+        for byteCount in [12, 5_000_001] {
+            let fixture = try await fileFixture(names: ["Verified.txt"], contents: [Data(repeating: 0x41, count: byteCount)])
+            if byteCount > 5_000_000 { try await fixture.receiver.setSyncEnabled(true) }
+            let local = try await fixture.receiver.capture(.init(source: .unknown, content: .text("requires healthy authority")))
+            if byteCount > 5_000_000 {
+                let tags = try await fixture.receiver.syncTags()
+                _ = try await fixture.receiver.apply(.setTags(local.entryID, [try XCTUnwrap(tags.first).id]))
+            } else {
+                let tag = try await fixture.receiver.createTagDefinition(named: "Local", assigningTo: local.entryID).definition
+                try await fixture.receiver.setSyncTagSelected(tag.id, selected: true)
+            }
+            await fixture.cloud.corruptControlAfterNextFileBodyDownload()
+            if byteCount > 5_000_000 {
+                let entries = try await fixture.receiver.page(.init()).entries
+                let entry = try XCTUnwrap(entries.first { !$0.syncFiles.isEmpty })
+                let file = try XCTUnwrap(entry.syncFiles.first)
+                try await fixture.receiver.requestSyncFileDownload(entryID: entry.id, objectID: file.id, versionID: file.versionID)
+            } else { try await fixture.receiver.setSyncEnabled(true) }
+            let failure = await fixture.receiver.syncStatus()
+            XCTAssertEqual(failure.phase, .failed(.corruptData))
+            let failed = try await fixture.receiver.page(.init()).entries
+            XCTAssertNil(failed.first { !$0.syncFiles.isEmpty }?.syncFiles.first?.transferFailure,
+                "An authority failure must not mark valid file bytes corrupt")
+            await fixture.sender.retrySync()
+            let beforeRecovery = try await fixture.sender.page(.init()).entries
+            XCTAssertFalse(beforeRecovery.contains { $0.id == local.entryID },
+                "Corrupt collection authority must stop the entire pass, including independent uploads")
+
+            await fixture.receiver.retrySync()
+            await fixture.sender.retrySync()
+            let recovered = try await fixture.sender.page(.init()).entries
+            XCTAssertTrue(recovered.contains { $0.id == local.entryID })
+        }
+    }
+
+    @MainActor
     func testPersistentFileFailureAllowsIndependentSharingAndBacksOffAcrossRestart() async throws {
         let fixture = try await fileFixture(names: ["Damaged.txt", "Healthy.txt"],
             contents: [Data("damaged body".utf8), Data("healthy body".utf8)])
@@ -3827,10 +3864,13 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var damagesFileBody = false
     private var persistentDamagedBody: String?
     private var damagesNextBodyPersistently = false
+    private var corruptsControlAfterBody = false
+    private var corruptsNextControl = false
     private var fileBodyDownloads = 0
     func damageNextFileBodyDownload() { damagesFileBody = true }
     func persistentlyDamageNextFileBody() { damagesNextBodyPersistently = true }
     func repairFileBodies() { persistentDamagedBody = nil; damagesNextBodyPersistently = false }
+    func corruptControlAfterNextFileBodyDownload() { corruptsControlAfterBody = true }
     func fileBodyDownloadCount() -> Int { fileBodyDownloads }
     private var reversesAllChanges = false
     private var reversesDelivery = false
@@ -3859,6 +3899,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func failNextAccountRead(with fault: ClipboardSyncServiceError) { accountFault = fault }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
+        if corruptsNextControl {
+            corruptsNextControl = false
+            throw ClipboardSyncServiceError.corruptData
+        }
         if rendezvous, descriptors[account.identifier] == nil {
             if let initialReadWaiter {
                 self.initialReadWaiter = nil
@@ -3898,6 +3942,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
+        if record.kind == .fileBody, corruptsControlAfterBody {
+            corruptsControlAfterBody = false
+            corruptsNextControl = true
+        }
         if record.kind == .fileBody, damagesNextBodyPersistently {
             damagesNextBodyPersistently = false
             persistentDamagedBody = record.recordID
@@ -3963,6 +4011,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return try await commit(.init(record: upload.record, chunks: []), for: account, control: control)
     }
     func downloadFileSegment(_ record: ClipboardSyncRemoteRecord, index: Int, for account: ClipboardSyncAccount) async throws -> Data {
+        if corruptsControlAfterBody {
+            corruptsControlAfterBody = false
+            corruptsNextControl = true
+        }
         if shouldHoldFileSegment {
             shouldHoldFileSegment = false
             await withCheckedContinuation {

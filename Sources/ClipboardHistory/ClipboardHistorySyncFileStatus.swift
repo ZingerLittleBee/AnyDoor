@@ -49,6 +49,7 @@ extension ClipboardHistoryModule {
     func recordSyncFileFailure(_ error: Error, descriptor: ClipboardSyncFileDescriptor,
         account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) throws {
         guard generation == syncGeneration, !syncSuspended, !(error is CancellationError) else { return }
+        guard (error as? ClipboardSyncServiceError) != .corruptAuthority else { return }
         let failure = Self.syncFileFailure(error)
         try syncWrite { database in
             try database.execute(sql: """
@@ -82,7 +83,7 @@ extension ClipboardHistoryModule {
         case .localFileAccessDenied: .localFileAccessDenied
         case .accountChanged, .accountUnavailable: .accountChanged
         case .keyLocked, .keyUnavailable: .keyUnavailable
-        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion: .unavailable
+        case .capabilityUnavailable, .missingRemoteState, .recordUnavailable, .unsupportedVersion, .corruptAuthority: .unavailable
         case .localStorage, nil: .localStorage
         }
     }

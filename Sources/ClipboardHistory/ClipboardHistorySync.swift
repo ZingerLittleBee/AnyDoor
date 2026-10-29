@@ -543,7 +543,10 @@ extension ClipboardHistoryModule {
 
     func admitSync(_ generation: UInt64, account: ClipboardSyncAccount, services: ClipboardSyncServices) async throws {
         try admitSync(generation)
-        guard try await services.transport.account() == account else { throw ClipboardSyncServiceError.accountChanged }
+        let observed: ClipboardSyncAccount
+        do { observed = try await services.transport.account() }
+        catch ClipboardSyncServiceError.corruptData { throw ClipboardSyncServiceError.corruptAuthority }
+        guard observed == account else { throw ClipboardSyncServiceError.accountChanged }
         try await waitForWriteTurn()
         try admitSync(generation)
     }
@@ -565,7 +568,7 @@ extension ClipboardHistoryModule {
         case .localFileAccessDenied: return .failed(.localFileAccessDenied)
         case .recordUnavailable: return .failed(.network)
         case .missingRemoteState: return .failed(.recoveryRequired)
-        case .corruptData: return .failed(.corruptData)
+        case .corruptData, .corruptAuthority: return .failed(.corruptData)
         case .unsupportedVersion: return .failed(.unsupportedVersion)
         }
     }
