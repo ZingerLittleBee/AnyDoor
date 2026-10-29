@@ -15,6 +15,31 @@ enum ClipboardSyncFileWork: Sendable {
     }
 }
 
+private struct ClipboardSyncFileRetryFailure: Codable {
+    let phase: ClipboardHistorySyncPhase
+    let recordUnavailable: Bool
+
+    init(phase: ClipboardHistorySyncPhase, recordUnavailable: Bool) {
+        self.phase = phase
+        self.recordUnavailable = recordUnavailable
+    }
+
+    private enum CodingKeys: String, CodingKey { case phase, recordUnavailable }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.phase) {
+            phase = try container.decode(ClipboardHistorySyncPhase.self, forKey: .phase)
+            recordUnavailable = try container.decode(Bool.self, forKey: .recordUnavailable)
+        } else {
+            // Legacy rows have only a display phase, which does not prove the
+            // original error. Keep reporting them until the existing retry is due.
+            phase = try ClipboardHistorySyncPhase(from: decoder)
+            recordUnavailable = false
+        }
+    }
+}
+
 extension ClipboardHistoryModule {
     static func createSyncFileRetrySchema(in database: Database) throws {
         try database.execute(sql: """
@@ -45,21 +70,24 @@ extension ClipboardHistoryModule {
     }
 
     func shouldDeferSyncFileWork(_ work: ClipboardSyncFileWork, account: ClipboardSyncAccount,
-        control: ClipboardSyncControl) throws -> Bool {
+        control: ClipboardSyncControl, reportMissingRecord: Bool = true) throws -> Bool {
         guard let row = try syncFileRead({ try Row.fetchOne($0, sql: """
             SELECT phase, retry_not_before FROM clipboard_sync_file_retries
             WHERE account_id = ? AND epoch = ? AND work_id = ?
             """, arguments: [account.identifier, control.epoch.uuidString, work.identifier]) }),
               (row["retry_not_before"] as Double) > now().timeIntervalSince1970 else { return false }
-        let phase = try JSONDecoder().decode(ClipboardHistorySyncPhase.self, from: row["phase"])
-        if deferredSyncFileFailure == nil { deferredSyncFileFailure = phase }
+        let failure = try JSONDecoder().decode(ClipboardSyncFileRetryFailure.self, from: row["phase"])
+        if deferredSyncFileFailure == nil, reportMissingRecord || !failure.recordUnavailable {
+            deferredSyncFileFailure = failure.phase
+        }
         return true
     }
 
     func deferSyncFileWork(_ work: ClipboardSyncFileWork, error: Error, account: ClipboardSyncAccount,
-        control: ClipboardSyncControl, generation: UInt64) throws {
+        control: ClipboardSyncControl, generation: UInt64, reportMissingRecord: Bool = true) throws {
         try admitSync(generation)
-        let phase = syncFailurePhase(error)
+        let failure = ClipboardSyncFileRetryFailure(phase: syncFailurePhase(error),
+            recordUnavailable: (error as? ClipboardSyncServiceError) == .recordUnavailable)
         try syncWrite { database in
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_file_retries(account_id, epoch, work_id, phase, retry_not_before)
@@ -67,9 +95,11 @@ extension ClipboardHistoryModule {
                 ON CONFLICT(account_id, epoch, work_id) DO UPDATE SET
                     phase = excluded.phase, retry_not_before = excluded.retry_not_before
                 """, arguments: [account.identifier, control.epoch.uuidString, work.identifier,
-                    try JSONEncoder().encode(phase), now().addingTimeInterval(30).timeIntervalSince1970])
+                    try JSONEncoder().encode(failure), now().addingTimeInterval(30).timeIntervalSince1970])
         }
-        if deferredSyncFileFailure == nil { deferredSyncFileFailure = phase }
+        if deferredSyncFileFailure == nil, reportMissingRecord || !failure.recordUnavailable {
+            deferredSyncFileFailure = failure.phase
+        }
     }
 
     func completeSyncFileWork(_ work: ClipboardSyncFileWork, account: ClipboardSyncAccount,
@@ -97,7 +127,7 @@ extension ClipboardHistoryModule {
             WHERE location.account_id = ? AND location.epoch = ? AND location.object_id = ?
             ORDER BY location.id LIMIT 1
             """, arguments: [accountID, epoch, objectID.uuidString]) else { return nil }
-        switch try JSONDecoder().decode(ClipboardHistorySyncPhase.self, from: data) {
+        switch try JSONDecoder().decode(ClipboardSyncFileRetryFailure.self, from: data).phase {
         case .failed(let failure): return ClipboardHistorySyncFileFailure(rawValue: failure.rawValue) ?? .unavailable
         default: return .unavailable
         }

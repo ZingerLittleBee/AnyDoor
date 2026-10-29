@@ -97,15 +97,22 @@ extension ClipboardHistoryModule {
             arguments: [accountID, epoch, sharedID])
     }
 
-    func stageSyncDeletions(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        for row in try Row.fetchAll(database, sql: """
-            SELECT shared_id FROM clipboard_sync_deletions WHERE account_id = ? AND epoch = ? AND origin = 'local' AND record_id IS NULL
-            """, arguments: [account.identifier, control.epoch.uuidString]) {
-            let sharedID: String = row["shared_id"]
-            let upload = try ClipboardSyncCodec.seal(.deletion(.init(sharedID: sharedID)), account: account, control: control, key: key)
-            try storeSyncUpload(upload, subjectID: sharedID, account: account, in: database)
-            try database.execute(sql: "UPDATE clipboard_sync_deletions SET record_id = ? WHERE account_id = ? AND epoch = ? AND shared_id = ?",
-                arguments: [upload.record.recordID, account.identifier, control.epoch.uuidString, sharedID])
+    func stageSyncDeletions(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterID = ""
+        while let sharedID = try syncFileRead({ try String.fetchOne($0, sql: """
+            SELECT shared_id FROM clipboard_sync_deletions WHERE account_id = ? AND epoch = ?
+              AND origin = 'local' AND record_id IS NULL AND shared_id > ? ORDER BY shared_id LIMIT 1
+            """, arguments: [account.identifier, control.epoch.uuidString, afterID]) }) {
+            afterID = sharedID
+            try await stageSyncOperation(.deletion(.init(sharedID: sharedID)), subjectID: sharedID,
+                account: account, control: control, key: key, generation: generation) { database, record in
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_deletions SET record_id = ? WHERE account_id = ? AND epoch = ?
+                      AND shared_id = ? AND origin = 'local' AND record_id IS NULL
+                    """, arguments: [record.recordID, account.identifier, control.epoch.uuidString, sharedID])
+                return database.changesCount == 1
+            }
         }
     }
 

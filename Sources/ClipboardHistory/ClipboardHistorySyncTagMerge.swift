@@ -63,13 +63,24 @@ extension ClipboardHistoryModule {
             arguments: [accountID, id]) ?? id
     }
 
-    func stageSyncTagMerges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        for row in try Row.fetchAll(database, sql: "SELECT operation_id, content FROM clipboard_sync_tag_merge_outbox WHERE account_id = ?",
-            arguments: [account.identifier]) {
-            let merge = try JSONDecoder().decode(ClipboardSyncTagMerge.self, from: row["content"])
-            let upload = try ClipboardSyncCodec.seal(.tagMerge(merge), account: account, control: control, key: key)
-            try storeSyncUpload(upload, subjectID: min(merge.firstID, merge.secondID), account: account, in: database)
-            try database.execute(sql: "DELETE FROM clipboard_sync_tag_merge_outbox WHERE operation_id = ?", arguments: [merge.revision.operationID])
+    func stageSyncTagMerges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterID = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, sql: """
+            SELECT operation_id, content FROM clipboard_sync_tag_merge_outbox WHERE account_id = ? AND operation_id > ?
+            ORDER BY operation_id LIMIT 1
+            """, arguments: [account.identifier, afterID]) }) {
+            let id: String = row["operation_id"]
+            let encoded: Data = row["content"]
+            afterID = id
+            let merge = try JSONDecoder().decode(ClipboardSyncTagMerge.self, from: encoded)
+            try await stageSyncOperation(.tagMerge(merge), subjectID: min(merge.firstID, merge.secondID),
+                account: account, control: control, key: key, generation: generation) { database, _ in
+                try database.execute(sql: """
+                    DELETE FROM clipboard_sync_tag_merge_outbox WHERE account_id = ? AND operation_id = ? AND content = ?
+                    """, arguments: [account.identifier, id, encoded])
+                return database.changesCount == 1
+            }
         }
     }
 

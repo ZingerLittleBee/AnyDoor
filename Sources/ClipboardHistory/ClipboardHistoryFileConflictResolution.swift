@@ -281,6 +281,7 @@ extension ClipboardHistoryModule {
                 for inherited in journal.inheritedPlans {
                     try database.execute(sql: "DELETE FROM clipboard_sync_file_conflict_pins WHERE plan_id = ?", arguments: [inherited.uuidString])
                 }
+                try compactFileConflictResolution(planID: row["plan_id"], in: database)
             }
         }
     }

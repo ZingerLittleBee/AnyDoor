@@ -14,6 +14,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
     public let withdrawnEntryCount: Int
     public let lastCompletedAt: Date?
     public let canClearCloudData: Bool
+    public let canRecoverMissingCloudCollection: Bool
     public let cloudReset: ClipboardHistoryCloudResetStatus?
 
     public init(
@@ -24,7 +25,8 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         withdrawnEntryCount: Int = 0,
         lastCompletedAt: Date? = nil,
         cloudReset: ClipboardHistoryCloudResetStatus? = nil,
-        canClearCloudData: Bool = false
+        canClearCloudData: Bool = false,
+        canRecoverMissingCloudCollection: Bool = false
     ) {
         self.isEnabled = isEnabled
         self.phase = phase
@@ -34,6 +36,7 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
         self.lastCompletedAt = lastCompletedAt
         self.cloudReset = cloudReset
         self.canClearCloudData = canClearCloudData
+        self.canRecoverMissingCloudCollection = canRecoverMissingCloudCollection
     }
 }
 
@@ -41,6 +44,12 @@ public struct ClipboardHistorySyncStatus: Equatable, Sendable {
 public struct ClipboardHistoryCloudResetConfirmation: Equatable, Sendable {
     let account: ClipboardSyncAccount
     let control: ClipboardSyncControl
+}
+
+/// Authorizes retiring only this Mac's previously observed missing collection.
+public struct ClipboardHistoryMissingCloudCollectionRecoveryConfirmation: Equatable, Sendable {
+    let account: ClipboardSyncAccount
+    let previousControl: ClipboardSyncControl
 }
 
 public struct ClipboardHistoryCloudResetStatus: Equatable, Sendable {
@@ -74,6 +83,7 @@ public enum ClipboardHistorySyncFailure: String, Codable, Error, Sendable {
     case recoveryRequired
     case accountChanged
     case unsupportedVersion
+    case providerRejected
 }
 
 public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {

@@ -97,7 +97,11 @@ packages, and the shared content lifecycle implement the
 [Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Selected definitions and associations use independent encrypted operations;
-unselected names and memberships remain local. Initial content snapshots seed
+unselected names and memberships remain local. Before importing an entry operation,
+the same writer transaction snapshots local membership differences for that
+subject, including edits made during a provider await. Tag-state and merge
+operations retain their required global snapshot; file-body/version operations
+do not scan unrelated memberships. Initial content snapshots seed
 associations without overwriting later operations. Same-name tags remain distinct
 in Settings, history filters, and card menus. Explicit merge previews disclose the
 newly eligible local history and reject stale confirmation; persistent aliases
@@ -127,6 +131,17 @@ published with the local authenticated payload store before SQL references commi
 failed publication cannot leave a shorter mixed entry. Legacy text envelopes use
 the same writer. Search fields are rebuilt locally, and receiving an entry neither
 starts image recognition nor changes capture preferences or recent-use order.
+
+Outgoing preparation uses stable-key continuation and one entry or immutable
+operation per commit. Payload reads, thumbnail derivation, encoding, and sealing
+run outside the module actor and database writer. Each commit renews its write
+turn and validates the current account, epoch, key, publication authority, and
+pending revision. Tag definitions and memberships recheck only the affected tag
+or entry/tag pair after preparation. Entry and rejoin snapshots use the history
+revision conservatively, so unrelated mutations can require preparing them again.
+Off revokes admission and drains the owned preparation task before returning.
+Revision-only comparisons use readers, including stale-preparation continuations
+during a search-index rebuild; this retains the existing write-turn contract.
 
 The additive `v17_clipboard_sync_content` migration owns independent favorite,
 OCR, and QR registers. Local changes persist their intent in the same transaction
@@ -284,6 +299,14 @@ admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
+Top-level vnode handles share a process-wide budget of 64, including handles
+awaiting cancellation cleanup. One module-owned five-second reconciliation task
+covers overflow locations even when provider polling is disabled, through the
+same automatic retry admission and deadlines.
+A frozen local version and its originating location's new base commit in one
+transaction after rechecking the location revision, identity, and prior base.
+Pausing or reassociating the location during freezing therefore cannot publish
+an edit that its origin fails to adopt; explicit Refresh uses the same boundary.
 
 Real temporary-directory coverage is in
 [directory tests](../../Tests/ClipboardHistoryTests/ClipboardHistoryDirectorySyncTests.swift),
@@ -400,8 +423,15 @@ or old-account queue to restart publication.
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.
 Relaunch preserves that deadline, and Retry cannot bypass it. Transient connecting
-and transfer phases are not treated as completed work after restart. Account
-changes persist disabled participation and its reason; an old enabled flag or
+and transfer phases are not treated as completed work after restart. Native
+nonrecoverable provider/request errors and incompatible versions retain distinct
+failures and stop automatic admission, including polling, file observations, and
+resume after restart. Explicit user commands may retry once, including commands
+queued during a failing pass; Off revokes that intent. Provider retry deadlines
+still take precedence. A permanent rejection outranks conflict/batch siblings
+inside a partial CloudKit failure; retryable wrappers retain the longest supplied
+delay.
+Account changes persist disabled participation and its reason; an old enabled flag or
 retained key cannot bind a new account. Unresolved manual activation is only
 retained within the current runtime generation, so a restart before account
 binding may require explicit activation again rather than authorizing an
@@ -416,6 +446,20 @@ confirmed, unfinished cloud clear resumes its account-scoped cleanup; active run
 responses and use polling/Retry to observe restored access. See the
 [account/key acceptance cases](../testing/clipboard-sync-signing.md#account-and-key-recovery-evidence)
 for the boundary between deterministic fault tests and signed evidence.
+
+A previously observed collection whose control read confirms absence exposes
+`canRecoverMissingCloudCollection`, including while Off and after relaunch.
+[Missing collection recovery](../../Sources/ClipboardHistory/ClipboardHistoryMissingCloudCollectionRecovery.swift)
+uses a separate opaque account/control confirmation and rechecks absence before
+retiring local publication authority. It preserves the shared key, local history,
+unpublished frozen versions and later saved files, then stores a fresh-epoch
+candidate with participation Off and all Sync Tags deselected. No unknown remote
+records are cleared. Only a later explicit On and fresh tag selection can create
+and publish the new collection. A returning control or changed account rejects
+stale confirmation. Recovered epochs remain durably retired even when an old
+control returns after recovery or races the next creation; another device's new
+epoch with the preserved key may still win. An affected unfinished clear becomes
+superseded, never reported as successfully cleared.
 
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
 An interrupted clear for account A does not prevent explicit participation or

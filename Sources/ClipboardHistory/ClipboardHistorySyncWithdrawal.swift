@@ -18,6 +18,18 @@ struct ClipboardSyncRejoin: Codable, Equatable, Sendable {
     let fileVersions: [ClipboardSyncFileVersionContent]?
 }
 
+struct ClipboardSyncRejoinSnapshot: Sendable {
+    let checkpoint: ClipboardSyncRejoin
+    let entry: ClipboardSyncEntrySnapshot
+
+    func materialize(using store: ClipboardHistoryPayloadStore) throws -> ClipboardSyncRejoin {
+        .init(state: checkpoint.state, entry: try entry.materialize(using: store),
+            initialRecordID: checkpoint.initialRecordID, versions: checkpoint.versions,
+            selectedVersionID: checkpoint.selectedVersionID, metadata: checkpoint.metadata,
+            memberships: checkpoint.memberships, fileVersions: checkpoint.fileVersions)
+    }
+}
+
 extension ClipboardHistoryModule {
     static func createSyncWithdrawalSchema(in database: Database) throws {
         try database.execute(sql: """
@@ -70,6 +82,21 @@ extension ClipboardHistoryModule {
             try saveSyncWithdrawal(.init(sharedID: sharedID, withdrawn: true, revision: nextSyncTagRevision(in: database)),
                 accountID: accountID, epoch: epoch, recordID: nil, pending: true, in: database)
         }
+    }
+
+    func recordSyncWithdrawal(sharedID: String, accountID: String, epoch: String, in database: Database) throws {
+        guard try !Self.isSyncWithdrawn(sharedID, accountID: accountID, epoch: epoch, in: database),
+              try !Self.isSyncDeleted(sharedID, accountID: accountID, epoch: epoch, in: database),
+              try Bool.fetchOne(database, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_entries AS shared
+                JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+                WHERE shared.account_id = ? AND shared.epoch = ? AND shared.shared_id = ? AND NOT EXISTS (
+                    SELECT 1 FROM clipboard_entry_tags AS membership
+                    JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
+                    WHERE membership.entry_id = shared.local_entry_id AND selected.account_id = shared.account_id AND selected.selected = 1))
+                """, arguments: [accountID, epoch, sharedID]) == true else { return }
+        try saveSyncWithdrawal(.init(sharedID: sharedID, withdrawn: true, revision: nextSyncTagRevision(in: database)),
+            accountID: accountID, epoch: epoch, recordID: nil, pending: true, in: database)
     }
 
     func saveSyncWithdrawal(_ value: ClipboardSyncWithdrawal, accountID: String, epoch: String,
@@ -127,8 +154,8 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func syncRejoinContent(_ state: ClipboardSyncWithdrawal, account: ClipboardSyncAccount,
-                                  control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncRejoin {
+    private func syncRejoinSnapshot(_ state: ClipboardSyncWithdrawal, account: ClipboardSyncAccount,
+                                  control: ClipboardSyncControl, key: Data, in database: Database) throws -> ClipboardSyncRejoinSnapshot {
         guard let shared = try Row.fetchOne(database, sql: """
             SELECT local_entry_id, record_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ? AND shared_id = ?
             """, arguments: [account.identifier, control.epoch.uuidString, state.sharedID]),
@@ -138,7 +165,7 @@ extension ClipboardHistoryModule {
         let localTags = Set(try String.fetchAll(database, sql: "SELECT tag_id FROM clipboard_entry_tags WHERE entry_id = ?",
             arguments: [localID.uuidString.lowercased()]))
         let tags = try selectedSyncTags(accountID: account.identifier, in: database).filter { localTags.contains($0.id) }
-        let entry = try syncEntryContent(id: localID, sharedID: sharedID, tags: tags, account: account, control: control, key: key, in: database)
+        let entry = try syncEntrySnapshot(id: localID, sharedID: sharedID, tags: tags, account: account, control: control, key: key, in: database)
         let versions = try Data.fetchAll(database, sql: """
             SELECT content FROM clipboard_sync_versions WHERE account_id = ? AND epoch = ? AND subject_id = ? ORDER BY version_id
             """, arguments: [account.identifier, control.epoch.uuidString, state.sharedID]).map {
@@ -160,8 +187,9 @@ extension ClipboardHistoryModule {
                 ClipboardSyncTagMembership(sharedID: $0["shared_id"], tagID: $0["tag_id"], present: $0["present"],
                     revision: .init(counter: $0["counter"], operationID: $0["operation_id"]))
             }
-        return ClipboardSyncRejoin(state: state, entry: entry, initialRecordID: shared["record_id"], versions: versions, selectedVersionID: selection, metadata: metadata, memberships: memberships,
+        let checkpoint = ClipboardSyncRejoin(state: state, entry: entry.metadata, initialRecordID: shared["record_id"], versions: versions, selectedVersionID: selection, metadata: metadata, memberships: memberships,
             fileVersions: try syncFileRejoinVersions(entryID: localID.uuidString.lowercased(), account: account, control: control, in: database))
+        return .init(checkpoint: checkpoint, entry: entry)
     }
 
     func importSyncRejoin(_ value: ClipboardSyncRejoin, account: ClipboardSyncAccount,
@@ -204,26 +232,62 @@ extension ClipboardHistoryModule {
         try reconcileSyncTextVersions(subjectID: value.state.sharedID, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
     }
 
-    func stageSyncWithdrawals(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        try recordLocalSyncMemberships(account: account, epoch: control.epoch, in: database)
-        for row in try Row.fetchAll(database, sql: "SELECT * FROM clipboard_sync_withdrawals WHERE account_id = ? AND epoch = ? AND pending = 1",
-            arguments: [account.identifier, control.epoch.uuidString]) {
-            let value = ClipboardSyncWithdrawal(sharedID: row["shared_id"], withdrawn: row["withdrawn"],
-                revision: .init(counter: row["counter"], operationID: row["operation_id"]))
-            if try Self.isSyncDeleted(value.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database) {
-                try database.execute(sql: """
-                    UPDATE clipboard_sync_withdrawals SET pending = 0
-                    WHERE account_id = ? AND epoch = ? AND shared_id = ?
-                    """, arguments: [account.identifier, control.epoch.uuidString, value.sharedID])
-                continue
+    func stageSyncWithdrawals(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        let store = try requiredPayloadStore()
+        var afterID = ""
+        while true {
+            try await waitForWriteTurn()
+            try admitSync(generation)
+            let next = try syncWrite { database -> (ClipboardSyncWithdrawal, Int64, ClipboardSyncRejoinSnapshot?)? in
+                guard let row = try Row.fetchOne(database, sql: """
+                    SELECT * FROM clipboard_sync_withdrawals
+                    WHERE account_id = ? AND epoch = ? AND pending = 1 AND shared_id > ? ORDER BY shared_id LIMIT 1
+                    """, arguments: [account.identifier, control.epoch.uuidString, afterID]) else { return nil }
+                let value = ClipboardSyncWithdrawal(sharedID: row["shared_id"], withdrawn: row["withdrawn"],
+                    revision: .init(counter: row["counter"], operationID: row["operation_id"]))
+                if try Self.isSyncDeleted(value.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database) {
+                    try database.execute(sql: """
+                        UPDATE clipboard_sync_withdrawals SET pending = 0
+                        WHERE account_id = ? AND epoch = ? AND shared_id = ?
+                        """, arguments: [account.identifier, control.epoch.uuidString, value.sharedID])
+                    return (value, -1, nil)
+                }
+                let snapshot = value.withdrawn ? nil : try syncRejoinSnapshot(value, account: account, control: control, key: key, in: database)
+                return (value, try Self.historyRevision(in: database), snapshot)
             }
-            let content: ClipboardSyncContent = value.withdrawn ? .withdrawal(value)
-                : .rejoin(try syncRejoinContent(value, account: account, control: control, key: key, in: database))
-            let upload = try ClipboardSyncCodec.seal(content, account: account, control: control, key: key)
-            try storeSyncUpload(upload, subjectID: value.sharedID, account: account, in: database)
-            try database.execute(sql: """
-                UPDATE clipboard_sync_withdrawals SET pending = 0, record_id = ? WHERE account_id = ? AND epoch = ? AND shared_id = ?
-                """, arguments: [upload.record.recordID, account.identifier, control.epoch.uuidString, value.sharedID])
+            guard let (value, revision, snapshot) = next else { return }
+            afterID = value.sharedID
+            if revision < 0 { await Task.yield(); continue }
+            let preparation = Task.detached(priority: .utility) {
+                let content: ClipboardSyncContent = try snapshot.map { .rejoin(try $0.materialize(using: store)) } ?? .withdrawal(value)
+                try Task.checkCancellation()
+                return try ClipboardSyncCodec.seal(content, account: account, control: control, key: key)
+            }
+            let upload: ClipboardSyncUpload
+            do {
+                upload = try await withTaskCancellationHandler { try await preparation.value } onCancel: { preparation.cancel() }
+            } catch {
+                try admitSync(generation)
+                if try syncFileRead({ try Self.historyRevision(in: $0) }) != revision { continue }
+                throw error
+            }
+            try await waitForWriteTurn()
+            try admitSync(generation)
+            try syncWrite { database in
+                guard try Self.historyRevision(in: database) == revision,
+                      try syncStagingContextMatches(account: account, control: control, in: database),
+                      try !Self.isSyncDeleted(value.sharedID, accountID: account.identifier, epoch: control.epoch.uuidString, in: database),
+                      try Bool.fetchOne(database, sql: """
+                        SELECT EXISTS(SELECT 1 FROM clipboard_sync_withdrawals WHERE account_id = ? AND epoch = ?
+                          AND shared_id = ? AND pending = 1 AND operation_id = ? AND counter = ? AND withdrawn = ?)
+                        """, arguments: [account.identifier, control.epoch.uuidString, value.sharedID,
+                            value.revision.operationID, value.revision.counter, value.withdrawn]) == true else { return }
+                try storeSyncUpload(upload, subjectID: value.sharedID, account: account, in: database)
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_withdrawals SET pending = 0, record_id = ? WHERE account_id = ? AND epoch = ? AND shared_id = ?
+                    """, arguments: [upload.record.recordID, account.identifier, control.epoch.uuidString, value.sharedID])
+            }
         }
     }
 }

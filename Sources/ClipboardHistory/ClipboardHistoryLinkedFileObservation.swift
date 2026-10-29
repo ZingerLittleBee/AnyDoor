@@ -155,7 +155,7 @@ extension ClipboardHistoryModule {
             do {
                 try await Task.sleep(for: .milliseconds(300))
                 guard let self else { return }
-                let changed = try await self.observeLinkedLocation(id, account: account, epoch: epoch, generation: generation)
+                let changed = try await self.observeLinkedLocation(id, account: account, epoch: epoch, generation: generation, automatic: true)
                 if changed { await self.retrySyncAutomatically() }
                 await self.finishLinkedFileObservation(id, revision: revision)
             } catch ClipboardSyncServiceError.accountChanged {
@@ -185,9 +185,10 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func observeLinkedLocation(_ id: UUID, account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) async throws -> Bool {
+    private func observeLinkedLocation(_ id: UUID, account: ClipboardSyncAccount, epoch: UUID,
+        generation: UInt64, automatic: Bool = false) async throws -> Bool {
         guard let services = syncServices else { return false }
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFileObservation(generation, account: account, epoch: epoch, services: services, automatic: automatic)
         guard let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: $0).first }) else { return false }
         guard !source.hasPendingApplication else { return false }
         let event = linkedFileIdentityEvents[id].flatMap { $0.identity == source.identity ? $0 : nil }
@@ -198,7 +199,7 @@ extension ClipboardHistoryModule {
             await inspection.value
         } onCancel: { inspection.cancel() }
         try Task.checkCancellation()
-        try await admitSync(generation, account: account, services: services)
+        try await admitSyncFileObservation(generation, account: account, epoch: epoch, services: services, automatic: automatic)
         let changed = try syncWrite { database in
             guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: database).first,
                   current.revision == source.revision,

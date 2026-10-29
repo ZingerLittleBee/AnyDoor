@@ -69,25 +69,35 @@ extension ClipboardHistoryModule {
         }
     }
 
-    func stageSyncMetadata(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data, in database: Database) throws {
-        let rows = try Row.fetchAll(database, SQLRequest<Row>(literal: """
-            SELECT metadata.value FROM clipboard_sync_metadata AS metadata
+    func stageSyncMetadata(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
+        generation: UInt64) async throws {
+        var afterSubject = ""
+        var afterField = ""
+        while let row = try syncFileRead({ try Row.fetchOne($0, SQLRequest<Row>(literal: """
+            SELECT metadata.shared_id, metadata.field, metadata.value FROM clipboard_sync_metadata AS metadata
             JOIN clipboard_sync_entries AS shared ON shared.account_id = metadata.account_id
                 AND shared.epoch = metadata.epoch AND shared.shared_id = metadata.shared_id
             JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
             WHERE metadata.account_id = \(account.identifier) AND metadata.epoch = \(control.epoch.uuidString) AND metadata.pending = 1
+              AND (metadata.shared_id, metadata.field) > (\(afterSubject), \(afterField))
               AND (\(Self.syncEntryPublicationAuthority(accountID: account.identifier)))
-            ORDER BY metadata.shared_id, metadata.field
-            """))
-        for row in rows {
-            let value: Data = row["value"]
-            let operation = try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: value)
+            ORDER BY metadata.shared_id, metadata.field LIMIT 1
+            """)) }) {
+            let encoded: Data = row["value"]
+            afterSubject = row["shared_id"]
+            afterField = row["field"]
+            let operation = try JSONDecoder().decode(ClipboardSyncMetadataContent.self, from: encoded)
             guard let operationID = UUID(uuidString: operation.revision.operationID) else { throw ClipboardSyncServiceError.corruptData }
-            let upload = try ClipboardSyncCodec.seal(.metadata(operation), account: account, control: control, key: key, operationID: operationID)
-            try storeSyncUpload(upload, subjectID: operation.id.uuidString.lowercased(), account: account, in: database)
-            try database.execute(sql: """
-                UPDATE clipboard_sync_metadata SET pending = 0 WHERE account_id = ? AND epoch = ? AND shared_id = ? AND field = ?
-                """, arguments: [account.identifier, control.epoch.uuidString, operation.id.uuidString.lowercased(), operation.value.field])
+            let subject = operation.id.uuidString.lowercased()
+            try await stageSyncOperation(.metadata(operation), subjectID: subject, operationID: operationID,
+                account: account, control: control, key: key, generation: generation) { database, _ in
+                guard try syncSubjectCanStage(subject, account: account, control: control, in: database) else { return false }
+                try database.execute(sql: """
+                    UPDATE clipboard_sync_metadata SET pending = 0
+                    WHERE account_id = ? AND epoch = ? AND shared_id = ? AND field = ? AND pending = 1 AND value = ?
+                    """, arguments: [account.identifier, control.epoch.uuidString, subject, operation.value.field, encoded])
+                return database.changesCount == 1
+            }
         }
     }
 
