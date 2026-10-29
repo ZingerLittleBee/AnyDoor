@@ -10,6 +10,7 @@ struct ClipboardSyncFileCandidate: Sendable {
     let parentInode: UInt64
     let snapshot: ClipboardSyncFileSnapshot
     var treeWitness: ClipboardFileTree? = nil
+    var ownership: ClipboardWorkingOutputOwner? = nil
 }
 
 struct ClipboardSyncFileSnapshot: Codable, Sendable, Equatable {
@@ -35,16 +36,74 @@ struct ClipboardSyncFileSnapshot: Codable, Sendable, Equatable {
 }
 
 enum ClipboardSyncFilePublication {
+    /// Legacy inline envelopes share the same owned candidate and final gate.
+    @concurrent
+    static func constructInline(_ data: Data, descriptor: ClipboardSyncFileDescriptor, root: URL,
+        accountID: String, ownership: ClipboardWorkingOutputJournal,
+        faults: ClipboardHistoryFaultInjector) async throws -> ClipboardSyncFileCandidate {
+        guard descriptor.originalByteCount == Int64(data.count),
+              descriptor.contentDigest == Data(SHA256.hash(data: data)) else { throw ClipboardSyncServiceError.corruptData }
+        try ownership.recover()
+        let (directory, url) = try openDirectory(root: root, accountID: accountID, descriptor: descriptor)
+        defer { close(directory) }
+        var parent = stat()
+        guard fstat(directory, &parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        let existing = openat(directory, descriptor.displayName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        if existing >= 0 {
+            defer { close(existing) }
+            var before = stat(), after = stat()
+            guard fstat(existing, &before) == 0,
+                  before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), before.st_size == Int64(data.count),
+                  try digest(existing, byteCount: before.st_size) == descriptor.contentDigest,
+                  fstat(existing, &after) == 0, ClipboardSyncFileSnapshot(before) == ClipboardSyncFileSnapshot(after) else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
+            }
+            return .init(directory: url, name: descriptor.displayName, pendingName: nil,
+                parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(after))
+        }
+        guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        let owner = try ownership.reserve(directory: directory, url: url)
+        let output = openat(directory, owner.name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard output >= 0 else {
+            let failure = errno
+            try? owner.recover()
+            throw ClipboardHistoryStorageError.fileOperationFailed(failure)
+        }
+        defer { close(output) }
+        do {
+            try owner.created(output)
+            try faults.check(.syncWorkingOutputAfterOwnership)
+            try data.withUnsafeBytes { buffer in
+                var written = 0
+                while written < buffer.count {
+                    try Task.checkCancellation()
+                    let amount = Darwin.write(output, buffer.baseAddress?.advanced(by: written), min(64 * 1_024, buffer.count - written))
+                    if amount < 0, errno == EINTR { continue }
+                    guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(amount == 0 ? EIO : errno) }
+                    written += amount
+                    try faults.check(.syncWorkingOutputDuringConstruction)
+                }
+            }
+            guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            var final = stat()
+            guard fstat(output, &final) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            try owner.checkpoint(snapshot: .init(final), descriptor: descriptor)
+            return .init(directory: url, name: descriptor.displayName, pendingName: owner.name,
+                parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(final), ownership: owner)
+        } catch { try? owner.recover(); throw error }
+    }
+
     /// The caller has verified the entire encrypted version before this pass.
     /// Plaintext construction is confined to the visible working-copy directory.
     @concurrent
     static func construct(descriptor: ClipboardSyncFileDescriptor, encryptedDirectory: URL,
         root: URL, account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        faults: ClipboardHistoryFaultInjector = .init()
+        ownership: ClipboardWorkingOutputJournal, faults: ClipboardHistoryFaultInjector = .init()
     ) async throws -> ClipboardSyncFileCandidate {
+        try ownership.recover()
         if descriptor.bodyFormat == .treeSegmentsV1 {
             return try constructTree(descriptor: descriptor, encryptedDirectory: encryptedDirectory,
-                root: root, account: account, control: control, key: key, faults: faults)
+                root: root, account: account, control: control, key: key, ownership: ownership, faults: faults)
         }
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
         defer { close(directory) }
@@ -70,42 +129,48 @@ enum ClipboardSyncFilePublication {
         }
         guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         guard let body = descriptor.body else { throw ClipboardSyncServiceError.localStorage }
-        let pendingName = "Receiving-\(UUID().uuidString).partial"
+        let owner = try ownership.reserve(directory: directory, url: url)
+        let pendingName = owner.name
         let output = openat(directory, pendingName, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard output >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        var succeeded = false
-        defer {
-            close(output)
-            if !succeeded { _ = unlinkat(directory, pendingName, 0) }
+        guard output >= 0 else {
+            let failure = errno
+            try? owner.recover()
+            throw ClipboardHistoryStorageError.fileOperationFailed(failure)
         }
-        var hash = SHA256()
-        var byteCount: Int64 = 0
-        for index in 0..<body.chunkCount {
-            try Task.checkCancellation()
-            let encrypted = try ClipboardSyncFileTransfer.readSegment(in: encryptedDirectory, index: index)
-            let bytes = try ClipboardSyncCodec.openFileSegment(encrypted, descriptor: descriptor,
-                account: account, control: control, key: key, index: index)
-            hash.update(data: bytes)
-            byteCount += Int64(bytes.count)
-            try bytes.withUnsafeBytes { buffer in
-                var written = 0
-                while written < buffer.count {
-                    let count = Darwin.write(output, buffer.baseAddress?.advanced(by: written), buffer.count - written)
-                    if count < 0, errno == EINTR { continue }
-                    guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(count == 0 ? EIO : errno) }
-                    written += count
+        defer { close(output) }
+        do {
+            try owner.created(output)
+            try faults.check(.syncWorkingOutputAfterOwnership)
+            var hash = SHA256()
+            var byteCount: Int64 = 0
+            for index in 0..<body.chunkCount {
+                try Task.checkCancellation()
+                let encrypted = try ClipboardSyncFileTransfer.readSegment(in: encryptedDirectory, index: index)
+                let bytes = try ClipboardSyncCodec.openFileSegment(encrypted, descriptor: descriptor,
+                    account: account, control: control, key: key, index: index)
+                hash.update(data: bytes)
+                byteCount += Int64(bytes.count)
+                try bytes.withUnsafeBytes { buffer in
+                    var written = 0
+                    while written < buffer.count {
+                        let count = Darwin.write(output, buffer.baseAddress?.advanced(by: written), buffer.count - written)
+                        if count < 0, errno == EINTR { continue }
+                        guard count > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(count == 0 ? EIO : errno) }
+                        written += count
+                    }
                 }
+                try faults.check(.syncWorkingOutputDuringConstruction)
             }
-        }
-        guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest else {
-            throw ClipboardSyncServiceError.corruptData
-        }
-        guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        var final = stat()
-        guard fstat(output, &final) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        succeeded = true
-        return .init(directory: url, name: descriptor.displayName, pendingName: pendingName,
-            parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(final))
+            guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest else {
+                throw ClipboardSyncServiceError.corruptData
+            }
+            guard fsync(output) == 0, fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            var final = stat()
+            guard fstat(output, &final) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            try owner.checkpoint(snapshot: .init(final), descriptor: descriptor)
+            return .init(directory: url, name: descriptor.displayName, pendingName: pendingName,
+                parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(final), ownership: owner)
+        } catch { try? owner.recover(); throw error }
     }
 
     /// Only this short operation runs between the owning actor's final admission
@@ -128,12 +193,7 @@ enum ClipboardSyncFilePublication {
         guard ClipboardSyncFileSnapshot(source) == candidate.snapshot else { throw ClipboardSyncServiceError.localStorage }
         try faults.check(.syncFileBeforePublication)
         if let pending = candidate.pendingName {
-            if descriptor.bodyFormat == .treeSegmentsV1 {
-                guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-            } else {
-                guard linkat(directory, pending, directory, candidate.name, 0) == 0,
-                      unlinkat(directory, pending, 0) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-            }
+            guard renameatx_np(directory, pending, directory, candidate.name, UInt32(RENAME_EXCL)) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             guard fsync(directory) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         }
         let destination = url.appendingPathComponent(candidate.name)
@@ -158,22 +218,14 @@ enum ClipboardSyncFilePublication {
             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }
         guard ClipboardSyncFileSnapshot(verified) == ClipboardSyncFileSnapshot(atPath) else { throw ClipboardSyncServiceError.localStorage }
+        try faults.check(.syncFileAfterPublication)
         return .init(url: destination, bookmark: bookmark,
             identity: try NSKeyedArchiver.archivedData(withRootObject: identity, requiringSecureCoding: true))
     }
 
-    static func discard(_ candidate: ClipboardSyncFileCandidate) {
-        guard let pending = candidate.pendingName else { return }
-        let directory = open(candidate.directory.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
-        guard directory >= 0 else { return }
-        defer { close(directory) }
-        var parent = stat()
-        guard fstat(directory, &parent) == 0, parent.st_dev == candidate.parentDevice,
-              parent.st_ino == candidate.parentInode else { return }
-        var value = stat()
-        guard fstatat(directory, pending, &value, AT_SYMLINK_NOFOLLOW) == 0,
-              value.st_dev == candidate.snapshot.device, value.st_ino == candidate.snapshot.inode else { return }
-        try? FileManager.default.removeItem(at: candidate.directory.appendingPathComponent(pending))
+    @concurrent
+    static func discard(_ candidate: ClipboardSyncFileCandidate) async {
+        try? candidate.ownership?.recover()
     }
 
     static func openDirectory(root: URL, accountID: String,

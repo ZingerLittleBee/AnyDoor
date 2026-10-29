@@ -57,6 +57,9 @@ extension ClipboardHistoryModule {
         guard let liveDatabase = database, let keys = derivedKeys else {
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
+        guard try await !liveDatabase.read({ try Self.hasWorkingOutputOwnership(in: $0) }) else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
         let existingEntryCount = try await liveDatabase.read {
             try Int.fetchOne(
                 $0,
@@ -79,17 +82,25 @@ extension ClipboardHistoryModule {
         await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
+        let workingOutputLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: storeRoot)
+        defer { withExtendedLifetime(workingOutputLease) {} }
+        guard try await !liveDatabase.read({ try Self.hasWorkingOutputOwnership(in: $0) }) else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
         try liveDatabase.close()
         self.database = nil
 
         let stagingRoot = legacyMigrationStagingRoot
         var stagingDatabase: DatabasePool?
         do {
+            guard ClipboardHistoryStoreRelocation.processHoldingStoreOpen(in: storeRoot) == nil else {
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
             if discardsExistingEntries {
                 // Deleted only once the staging store is verified, below.
                 try requireOnlyStoreFiles()
             } else {
-                try removeEmptyInitialStore()
+                try removeEmptyInitialStore(workingOutputLease: workingOutputLease)
             }
             if FileManager.default.fileExists(atPath: stagingRoot.path) {
                 try FileManager.default.removeItem(at: stagingRoot)
@@ -118,7 +129,7 @@ extension ClipboardHistoryModule {
             stagingDatabase = nil
             try faultInjector.check(.legacyMigrationBeforePublication)
             if discardsExistingEntries {
-                try discardStore()
+                try discardStore(workingOutputLease: workingOutputLease)
                 // Writers still waiting for a write turn were issued against
                 // the discarded store, and none of them may land in the
                 // migrated one.
@@ -288,6 +299,7 @@ extension ClipboardHistoryModule {
             "history.sqlite-shm",
             "payloads",
             "staging",
+            ClipboardWorkingOutputLease.fileName,
         ]
         guard
             children.allSatisfy({
@@ -296,9 +308,10 @@ extension ClipboardHistoryModule {
         else {
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
+        try ClipboardWorkingOutputLease.validateArtifact(at: storeRoot)
     }
 
-    private func removeEmptyInitialStore() throws {
+    private func removeEmptyInitialStore(workingOutputLease: ClipboardWorkingOutputLease?) throws {
         guard FileManager.default.fileExists(atPath: storeRoot.path) else {
             return
         }
@@ -314,7 +327,7 @@ extension ClipboardHistoryModule {
                 throw ClipboardHistoryModuleError.legacyMigrationFailed
             }
         }
-        try FileManager.default.removeItem(at: storeRoot)
+        try discardStore(workingOutputLease: workingOutputLease, checkDiscardFault: false)
     }
 
     /// Deletes a store whose entries the caller confirmed discarding, the
@@ -326,7 +339,7 @@ extension ClipboardHistoryModule {
     /// goes before the database it belongs to, so it is never replayed into
     /// a new one. Each child is removed by name and the root only once it is
     /// empty.
-    private func discardStore() throws {
+    private func discardStore(workingOutputLease: ClipboardWorkingOutputLease?, checkDiscardFault: Bool = true) throws {
         let fileManager = FileManager.default
         for name in ["payloads", "staging"] {
             let directory = storeRoot.appendingPathComponent(name)
@@ -334,7 +347,7 @@ extension ClipboardHistoryModule {
                 try fileManager.removeItem(at: directory)
             }
         }
-        try faultInjector.check(.legacyMigrationDuringDiscard)
+        if checkDiscardFault { try faultInjector.check(.legacyMigrationDuringDiscard) }
         for name in [
             "history.sqlite-wal",
             "history.sqlite-shm",
@@ -345,6 +358,7 @@ extension ClipboardHistoryModule {
                 try fileManager.removeItem(at: file)
             }
         }
+        try workingOutputLease?.removeArtifact(at: storeRoot)
         guard Darwin.rmdir(storeRoot.path) == 0 else {
             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }

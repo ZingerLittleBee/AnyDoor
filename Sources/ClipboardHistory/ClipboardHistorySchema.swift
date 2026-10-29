@@ -264,6 +264,17 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v31_legacy_tag_recovery") { database in
             try Self.createLegacyTagRecoverySchema(in: database)
         }
+        migrator.registerMigration("v32_working_output_recovery") { database in
+            try Self.createWorkingOutputRecoverySchema(in: database)
+        }
+        migrator.registerMigration("v33_clipboard_sync_page_indexes") { database in
+            try database.execute(sql: """
+                CREATE INDEX clipboard_sync_entries_local_entry
+                    ON clipboard_sync_entries(local_entry_id, account_id, epoch);
+                CREATE INDEX clipboard_sync_file_members_entry
+                    ON clipboard_sync_file_members(entry_id, account_id, epoch);
+                """)
+        }
         return migrator
     }
 

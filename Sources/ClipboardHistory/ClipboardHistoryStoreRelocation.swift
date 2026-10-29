@@ -55,6 +55,7 @@ struct ClipboardHistoryStoreRelocation: Sendable {
         "history.sqlite-journal",
         "payloads",
         "staging",
+        ClipboardWorkingOutputLease.fileName,
     ]
 
     private static let databaseFileNames = [
@@ -72,6 +73,7 @@ struct ClipboardHistoryStoreRelocation: Sendable {
         "history.sqlite-shm",
         "payloads",
         "staging",
+        ClipboardWorkingOutputLease.fileName,
     ]
 
     let legacyRoot: URL
@@ -155,6 +157,8 @@ struct ClipboardHistoryStoreRelocation: Sendable {
     }
 
     private func runPass(now: Date) throws -> Outcome {
+        var workingOutputLease: ClipboardWorkingOutputLease?
+        defer { withExtendedLifetime(workingOutputLease) {} }
         if !exists(stagingRoot) {
             guard try containsStoreArtifacts(legacyRoot) else {
                 return .nothingToRelocate
@@ -175,10 +179,13 @@ struct ClipboardHistoryStoreRelocation: Sendable {
                 )
                 return .postponedWhileLegacyStoreInUse(pid)
             }
+            workingOutputLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: legacyRoot)
             // Detach the whole folder in one atomic rename.
             try rename(legacyRoot, to: stagingRoot)
             try syncDirectory(parent)
             try faultInjector.check(.storeRelocationAfterDetach)
+        } else {
+            workingOutputLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: stagingRoot)
         }
 
         // Hand every non-store child back to the legacy folder.
@@ -206,7 +213,7 @@ struct ClipboardHistoryStoreRelocation: Sendable {
         // one aside when both locations hold store data.
         if hasStoreData(storeRoot) {
             guard hasStoreData(stagingRoot) else {
-                try removeEmptySkeleton(stagingRoot)
+                try removeEmptySkeleton(stagingRoot, workingOutputLease: workingOutputLease)
                 try syncDirectory(parent)
                 removeIfEmpty(legacyRoot)
                 return .nothingToRelocate
@@ -306,7 +313,9 @@ struct ClipboardHistoryStoreRelocation: Sendable {
     /// so a crash leaves either an openable empty store or a bare skeleton,
     /// both of which are weighed as empty again. Anything else in the folder
     /// makes the final `rmdir` fail and keeps the folder.
-    func removeEmptyCandidate(_ candidate: URL) throws {
+    func removeEmptyCandidate(_ candidate: URL, workingOutputLease heldLease: ClipboardWorkingOutputLease? = nil) throws {
+        let lease = try heldLease ?? ClipboardWorkingOutputLease.forStoreReplacement(at: candidate)
+        defer { withExtendedLifetime(lease) {} }
         for name in ["payloads", "staging"] {
             let child = candidate.appendingPathComponent(name)
             if rmdir(child.path) != 0, errno != ENOENT {
@@ -321,6 +330,7 @@ struct ClipboardHistoryStoreRelocation: Sendable {
                 throw ClipboardHistoryStorageError.fileOperationFailed(errno)
             }
         }
+        try lease?.removeArtifact(at: candidate)
         guard rmdir(candidate.path) == 0 else {
             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }
@@ -399,6 +409,7 @@ struct ClipboardHistoryStoreRelocation: Sendable {
             else {
                 return false
             }
+            try ClipboardWorkingOutputLease.validateArtifact(at: directory)
             for name in ["payloads", "staging"] where names.contains(name) {
                 guard
                     let children = try entryNames(
@@ -528,13 +539,19 @@ struct ClipboardHistoryStoreRelocation: Sendable {
         }
     }
 
-    private func removeEmptySkeleton(_ directory: URL) throws {
+    private func removeEmptySkeleton(_ directory: URL, workingOutputLease heldLease: ClipboardWorkingOutputLease? = nil) throws {
+        guard Self.containsOnlyEmptyStoreFiles(directory) else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
+        }
+        let lease = try heldLease ?? ClipboardWorkingOutputLease.forStoreReplacement(at: directory)
+        defer { withExtendedLifetime(lease) {} }
         for name in ["payloads", "staging"] {
             let child = directory.appendingPathComponent(name)
             if rmdir(child.path) != 0, errno != ENOENT {
                 throw ClipboardHistoryStorageError.fileOperationFailed(errno)
             }
         }
+        try lease?.removeArtifact(at: directory)
         guard rmdir(directory.path) == 0 else {
             throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }
@@ -638,7 +655,7 @@ extension ClipboardHistoryModule {
         maintenanceDate: Date
     ) -> StoreResolution {
         guard resolution.availability == .ready,
-            let currentDatabase = resolution.database,
+            resolution.database != nil,
             let keys = resolution.keys
         else {
             // Weighing needs the key this open could not use; pending
@@ -657,8 +674,21 @@ extension ClipboardHistoryModule {
         guard !candidates.isEmpty else { return resolution }
 
         var current = resolution
-        var currentIsEmpty = isEmptyStore(currentDatabase, at: root)
         for candidate in candidates.reversed() {
+            let currentLease: ClipboardWorkingOutputLease?
+            let candidateLease: ClipboardWorkingOutputLease?
+            do {
+                currentLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: root)
+                candidateLease = try ClipboardWorkingOutputLease.forStoreReplacement(at: candidate)
+            } catch {
+                logger.notice("Postponed weighing a displaced store while output ownership is unavailable")
+                return current
+            }
+            defer { withExtendedLifetime((currentLease, candidateLease)) {} }
+            guard let currentDatabase = current.database else { return current }
+            // Classify under the same leases held through deletion or exchange:
+            // an earlier empty snapshot cannot discard a newly reserved output.
+            let currentIsEmpty = isEmptyStore(currentDatabase, at: root)
             switch weighDisplacedStore(
                 at: candidate,
                 keys: keys,
@@ -670,7 +700,8 @@ extension ClipboardHistoryModule {
                 )
                 settle(candidate, relocation: relocation)
             case .empty:
-                removeEmptyCandidate(candidate, relocation: relocation)
+                guard ClipboardHistoryStoreRelocation.processHoldingStoreOpen(in: candidate) == nil else { continue }
+                removeEmptyCandidate(candidate, relocation: relocation, workingOutputLease: candidateLease)
             case .populated where !currentIsEmpty:
                 settle(candidate, relocation: relocation)
             case .populated:
@@ -707,14 +738,11 @@ extension ClipboardHistoryModule {
                     keys: keys,
                     relocation: relocation,
                     root: root,
-                    maintenanceDate: maintenanceDate
+                    maintenanceDate: maintenanceDate,
+                    currentLease: currentLease,
+                    candidateLease: candidateLease
                 )
-                guard current.availability == .ready,
-                    let adopted = current.database
-                else {
-                    return current
-                }
-                currentIsEmpty = isEmptyStore(adopted, at: root)
+                guard current.availability == .ready else { return current }
             }
         }
         return current
@@ -727,7 +755,9 @@ extension ClipboardHistoryModule {
         keys: ClipboardHistoryDerivedKeys,
         relocation: ClipboardHistoryStoreRelocation,
         root: URL,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        currentLease: ClipboardWorkingOutputLease?,
+        candidateLease: ClipboardWorkingOutputLease?
     ) -> StoreResolution {
         do {
             try relocation.exchange(withCandidate: candidate)
@@ -741,6 +771,7 @@ extension ClipboardHistoryModule {
                 maintenanceDate: maintenanceDate
             )
         }
+        defer { withExtendedLifetime((currentLease, candidateLease)) {} }
         let adopted: StoreResolution
         do {
             try relocation.completeExchange()
@@ -779,7 +810,7 @@ extension ClipboardHistoryModule {
             relocation: relocation
         ) {
         case .empty:
-            removeEmptyCandidate(candidate, relocation: relocation)
+            removeEmptyCandidate(candidate, relocation: relocation, workingOutputLease: currentLease)
         case .unreadable, .populated:
             settle(candidate, relocation: relocation)
         }
@@ -824,7 +855,8 @@ extension ClipboardHistoryModule {
         let entryCount: Int
         do {
             entryCount = try database.read {
-                try Int.fetchOne(
+                guard try !Self.hasWorkingOutputOwnership(in: $0) else { return -1 }
+                return try Int.fetchOne(
                     $0,
                     sql: "SELECT COUNT(*) FROM clipboard_entries"
                 ) ?? 0
@@ -853,10 +885,11 @@ extension ClipboardHistoryModule {
 
     private static func removeEmptyCandidate(
         _ candidate: URL,
-        relocation: ClipboardHistoryStoreRelocation
+        relocation: ClipboardHistoryStoreRelocation,
+        workingOutputLease: ClipboardWorkingOutputLease? = nil
     ) {
         do {
-            try relocation.removeEmptyCandidate(candidate)
+            try relocation.removeEmptyCandidate(candidate, workingOutputLease: workingOutputLease)
             logger.notice("Removed an empty displaced Clipboard History store")
         } catch {
             logger.error(

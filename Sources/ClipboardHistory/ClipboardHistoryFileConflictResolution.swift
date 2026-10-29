@@ -70,6 +70,7 @@ extension ClipboardHistoryModule {
                 }
             }
         }
+        var candidateToDiscard: ClipboardSyncFileCandidate?
         do {
             try Self.validateConflictBasis(basis, snapshot: snapshot)
             guard let key = try await services.keys.load(account: account, keyID: control.keyID), key.count == 32,
@@ -138,8 +139,8 @@ extension ClipboardHistoryModule {
             guard let result = journal.prepared.first(where: { $0.descriptor.versionID == journal.resultID }) else { throw ClipboardSyncServiceError.corruptData }
             let output = try await ClipboardSyncFilePublication.construct(descriptor: result.descriptor,
                 encryptedDirectory: result.uploadDirectory, root: syncWorkingRoot,
-                account: account, control: control, key: key)
-            defer { ClipboardSyncFilePublication.discard(output) }
+                account: account, control: control, key: key, ownership: workingOutputJournal())
+            candidateToDiscard = output
             // Refresh metadata after the potentially long freezes. No bodies are
             // fetched here, including an unchosen large remote candidate.
             let state = try linkedRead { database in
@@ -191,8 +192,10 @@ extension ClipboardHistoryModule {
             }
             try faultInjector.check(.fileConflictAfterStaging)
             publishMutation()
+            await ClipboardSyncFilePublication.discard(output)
             return journal.resultID
         } catch {
+            if let candidateToDiscard { await ClipboardSyncFilePublication.discard(candidateToDiscard) }
             if error is ClipboardHistoryFileConflictError {
                 try? syncWrite { database in
                     try database.execute(sql: "UPDATE clipboard_sync_file_resolutions SET phase = 'needsReview' WHERE plan_id = ? AND phase = 'preparing'", arguments: [planID.uuidString])
@@ -278,6 +281,7 @@ extension ClipboardHistoryModule {
                 for inherited in journal.inheritedPlans {
                     try database.execute(sql: "DELETE FROM clipboard_sync_file_conflict_pins WHERE plan_id = ?", arguments: [inherited.uuidString])
                 }
+                try compactFileConflictResolution(planID: row["plan_id"], in: database)
             }
         }
     }
