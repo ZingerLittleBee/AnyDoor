@@ -89,6 +89,64 @@ final class ClipboardHistorySyncCloudKitIdentityTests: XCTestCase {
         XCTAssertEqual(ordinary, [bytes])
         XCTAssertEqual(segmented, bytes)
     }
+
+    func testChangePageRejectsForeignRecordCallbackDespiteLocalValueAndLaterFailure() async throws {
+        for fault: NativeIdentityFixture.IdentityFault in [.callbackOwner, .callbackZone, .callbackName] {
+            let fixture = NativeIdentityFixture(fault: fault, callbackBoundary: .changedRecord)
+            let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+            let observed = try await cloud.control(for: fixture.account)
+            let control = try XCTUnwrap(observed)
+            do {
+                _ = try await cloud.changes(for: fixture.account, control: control, cursor: nil)
+                XCTFail("A local record value cannot authorize a foreign change callback key")
+            } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, fault.expectedFailure) }
+        }
+    }
+
+    func testChangePageRejectsForeignZoneCallbackBeforeLaterFailure() async throws {
+        for fault: NativeIdentityFixture.IdentityFault in [.callbackOwner, .callbackZone] {
+            let fixture = NativeIdentityFixture(fault: fault, callbackBoundary: .changedZone)
+            let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+            let observed = try await cloud.control(for: fixture.account)
+            let control = try XCTUnwrap(observed)
+            do {
+                _ = try await cloud.changes(for: fixture.account, control: control, cursor: nil)
+                XCTFail("A foreign zone callback cannot be hidden by a later network failure")
+            } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .accountChanged) }
+        }
+    }
+
+    func testZoneCreationRejectsForeignCallbackBeforeLaterSuccessOrOutcome() async throws {
+        for fault: NativeIdentityFixture.IdentityFault in [.callbackOwner, .callbackZone] {
+            let fixture = NativeIdentityFixture(fault: fault, callbackBoundary: .savedZone)
+            let cloud = ClipboardSyncCloudKit(nativeOperations: fixture.operations)
+            let candidate = ClipboardSyncControl(accountID: fixture.account.identifier, keyID: UUID(),
+                keyCheck: Data(repeating: 0x51, count: 32), epoch: UUID(), phase: "active", serverToken: nil)
+            do {
+                _ = try await cloud.createControl(candidate, for: fixture.account)
+                XCTFail("A foreign zone callback must not be replaced by subsequent successful callbacks")
+            } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .accountChanged) }
+            XCTAssertTrue(fixture.savedControlOwners().isEmpty)
+        }
+    }
+
+    func testZoneFailureWithoutItemCallbacksKeepsTheProviderError() async throws {
+        let account = ClipboardHistorySyncCloudKitReadTests.account
+        let cloud = ClipboardSyncCloudKit(nativeOperations: .init(accountOwner: { account.owner }, add: { operation in
+            if let zones = operation as? CKModifyRecordZonesOperation {
+                zones.modifyRecordZonesResultBlock?(.failure(CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 120.0])))
+            } else if let fetch = operation as? CKFetchRecordsOperation {
+                for id in fetch.recordIDs ?? [] { fetch.perRecordResultBlock?(id, .failure(CKError(.unknownItem))) }
+                fetch.fetchRecordsResultBlock?(.success(()))
+            } else { XCTFail("Unexpected native operation: \(type(of: operation))") }
+        }))
+        let candidate = ClipboardSyncControl(accountID: account.identifier, keyID: UUID(),
+            keyCheck: Data(repeating: 0x51, count: 32), epoch: UUID(), phase: "active", serverToken: nil)
+        do {
+            _ = try await cloud.createControl(candidate, for: account)
+            XCTFail("A callback-free provider failure cannot become missing result corruption")
+        } catch { XCTAssertEqual(error as? ClipboardSyncServiceError, .network(retryAfter: 120)) }
+    }
 }
 
 private final class NativeIdentityFixture: Sendable {
@@ -102,6 +160,7 @@ private final class NativeIdentityFixture: Sendable {
             }
         }
     }
+    enum CallbackBoundary: Sendable { case changedRecord, changedZone, savedZone }
 
     let account: ClipboardSyncAccount
     let epoch = UUID()
@@ -109,11 +168,14 @@ private final class NativeIdentityFixture: Sendable {
     private let savedOwners = OSAllocatedUnfairLock(initialState: [String]())
     private let currentOwner: OSAllocatedUnfairLock<String>
     private let fault: IdentityFault?
+    private let callbackBoundary: CallbackBoundary?
 
-    init(account: ClipboardSyncAccount = ClipboardHistorySyncCloudKitReadTests.account, fault: IdentityFault? = nil) {
+    init(account: ClipboardSyncAccount = ClipboardHistorySyncCloudKitReadTests.account, fault: IdentityFault? = nil,
+         callbackBoundary: CallbackBoundary? = nil) {
         self.account = account
         self.currentOwner = OSAllocatedUnfairLock(initialState: account.owner)
         self.fault = fault
+        self.callbackBoundary = callbackBoundary
     }
 
     var operations: ClipboardSyncCloudKit.NativeOperations {
@@ -123,27 +185,32 @@ private final class NativeIdentityFixture: Sendable {
     func savedControlOwners() -> [String] { savedOwners.withLock { $0 } }
     func setAccountOwner(_ value: String) { currentOwner.withLock { $0 = value } }
 
-    private func responseID(_ requested: CKRecord.ID, callback: Bool) -> CKRecord.ID {
-        let wrongOwner = fault == (callback ? .callbackOwner : .recordOwner)
-        let wrongZone = fault == (callback ? .callbackZone : .recordZone)
-        let wrongName = fault == (callback ? .callbackName : .recordName)
+    private func responseID(_ requested: CKRecord.ID, callback: Bool, applyFault: Bool = true) -> CKRecord.ID {
+        let wrongOwner = applyFault && fault == (callback ? .callbackOwner : .recordOwner)
+        let wrongZone = applyFault && fault == (callback ? .callbackZone : .recordZone)
+        let wrongName = applyFault && fault == (callback ? .callbackName : .recordName)
         return CKRecord.ID(recordName: wrongName ? "another-record" : requested.recordName,
             zoneID: CKRecordZone.ID(zoneName: wrongZone ? "another-zone" : requested.zoneID.zoneName,
                 ownerName: wrongOwner ? "another-concrete-owner" : CKCurrentUserDefaultName))
+    }
+
+    private func controlRecord(_ id: CKRecord.ID) -> CKRecord {
+        let record = CKRecord(recordType: "ClipboardSyncControlV1", recordID: id)
+        record["protocolVersion"] = 1 as NSNumber
+        record["accountID"] = (fault == .accountField ? "another-account" : account.identifier) as NSString
+        record["keyID"] = keyID.uuidString as NSString
+        record["keyCheck"] = Data(repeating: 0x51, count: 32) as NSData
+        record["epoch"] = epoch.uuidString as NSString
+        record["phase"] = "active" as NSString
+        return record
     }
 
     private func add(_ operation: CKDatabaseOperation) {
         switch operation {
         case let fetch as CKFetchRecordsOperation:
             for id in fetch.recordIDs ?? [] {
-                let alias = responseID(id, callback: true)
-                let record = CKRecord(recordType: "ClipboardSyncControlV1", recordID: responseID(id, callback: false))
-                record["protocolVersion"] = 1 as NSNumber
-                record["accountID"] = (fault == .accountField ? "another-account" : account.identifier) as NSString
-                record["keyID"] = keyID.uuidString as NSString
-                record["keyCheck"] = Data(repeating: 0x51, count: 32) as NSData
-                record["epoch"] = epoch.uuidString as NSString
-                record["phase"] = "active" as NSString
+                let alias = responseID(id, callback: true, applyFault: callbackBoundary == nil)
+                let record = controlRecord(responseID(id, callback: false, applyFault: callbackBoundary == nil))
                 fetch.perRecordResultBlock?(alias, .success(record))
             }
             fetch.fetchRecordsResultBlock?(.success(()))
@@ -159,6 +226,25 @@ private final class NativeIdentityFixture: Sendable {
                 modify.perRecordSaveBlock?(concrete, .success(returned))
             }
             modify.modifyRecordsResultBlock?(.success(()))
+        case let changes as CKFetchRecordZoneChangesOperation:
+            guard let zone = changes.recordZoneIDs?.first else { return XCTFail("Missing requested zone") }
+            let requested = CKRecord.ID(recordName: "control.v1", zoneID: zone)
+            if callbackBoundary == .changedRecord {
+                let valid = controlRecord(responseID(requested, callback: false, applyFault: false))
+                changes.recordWasChangedBlock?(responseID(requested, callback: true), .success(valid))
+                changes.recordWasChangedBlock?(valid.recordID, .success(valid))
+            } else {
+                changes.recordZoneFetchResultBlock?(responseID(requested, callback: true).zoneID, .failure(CKError(.networkFailure)))
+            }
+            changes.recordZoneFetchResultBlock?(zone, .failure(CKError(.networkFailure)))
+            changes.fetchRecordZoneChangesResultBlock?(.failure(CKError(.networkFailure)))
+        case let zones as CKModifyRecordZonesOperation:
+            guard let requested = zones.recordZonesToSave?.first?.zoneID else { return XCTFail("Missing saved zone") }
+            let id = CKRecord.ID(recordName: "control.v1", zoneID: requested)
+            let valid = CKRecordZone(zoneID: requested)
+            zones.perRecordZoneSaveBlock?(responseID(id, callback: true).zoneID, .success(valid))
+            zones.perRecordZoneSaveBlock?(requested, .success(valid))
+            zones.modifyRecordZonesResultBlock?(.failure(CKError(.networkFailure)))
         default:
             XCTFail("Unexpected native operation: \(type(of: operation))")
         }

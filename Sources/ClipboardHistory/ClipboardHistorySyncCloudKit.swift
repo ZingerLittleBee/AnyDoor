@@ -123,12 +123,17 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
             // A conflicting initializer or a lost successful response chooses
             // the server's immutable key identity, never the local candidate.
             try checkCancellation(generation)
+            let mapped = Self.failure(error)
+            if let identityFailure = mapped as? ClipboardSyncServiceError,
+               identityFailure == .accountChanged || identityFailure == .corruptData {
+                throw identityFailure
+            }
             if let authoritative = try? await control(for: account) {
                 try checkCancellation(generation)
                 return authoritative
             }
             try checkCancellation(generation)
-            throw Self.failure(error)
+            throw mapped
         }
     }
 
@@ -981,13 +986,30 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         let generation = cancellationGeneration
         let operation = CKModifyRecordZonesOperation(recordZonesToSave: [CKRecordZone(zoneID: id)])
         let zone = OSAllocatedUnfairLock<Result<CKRecordZone, Error>?>(initialState: nil)
-        operation.perRecordZoneSaveBlock = { _, result in zone.withLock { $0 = result } }
+        operation.perRecordZoneSaveBlock = { returnedID, result in
+            zone.withLock { current in
+                if let previous = current, case .failure = previous { return }
+                guard Self.ownsZone(returnedID, account: database.account) else {
+                    current = .failure(ClipboardSyncServiceError.accountChanged)
+                    return
+                }
+                if case .success(let saved) = result, !Self.ownsZone(saved.zoneID, account: database.account) {
+                    current = .failure(ClipboardSyncServiceError.accountChanged)
+                    return
+                }
+                current = result
+            }
+        }
         let saved: CKRecordZone = try await run(operation, database: database) { continuation in
             operation.modifyRecordZonesResultBlock = { outcome in
                 do {
+                    guard let result = zone.withLock({ $0 }) else {
+                        try outcome.get()
+                        throw ClipboardSyncServiceError.corruptData
+                    }
+                    let saved = try result.get()
                     try outcome.get()
-                    guard let result = zone.withLock({ $0 }) else { throw ClipboardSyncServiceError.corruptData }
-                    continuation.resume(returning: try result.get())
+                    continuation.resume(returning: saved)
                 } catch { continuation.resume(throwing: error) }
             }
         }
@@ -1025,17 +1047,45 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
         )
         operation.fetchAllChanges = false
         let state = OSAllocatedUnfairLock(initialState: ChangeAccumulator())
-        operation.recordWasChangedBlock = { _, result in
+        operation.recordWasChangedBlock = { id, result in
             state.withLock {
+                guard $0.error == nil else { return }
+                guard Self.ownsZone(id.zoneID, account: database.account) else {
+                    $0.error = ClipboardSyncServiceError.accountChanged
+                    return
+                }
                 switch result {
-                case .success(let record): $0.records.append(record)
+                case .success(let record):
+                    guard Self.ownsZone(record.recordID.zoneID, account: database.account) else {
+                        $0.error = ClipboardSyncServiceError.accountChanged
+                        return
+                    }
+                    guard Self.sameRecord(id, record.recordID, account: database.account) else {
+                        $0.error = ClipboardSyncServiceError.corruptData
+                        return
+                    }
+                    $0.records.append(record)
                 case .failure(let error): $0.error = error
                 }
             }
         }
-        operation.recordWithIDWasDeletedBlock = { id, _ in state.withLock { $0.deleted.append(id) } }
-        operation.recordZoneFetchResultBlock = { _, result in
+        operation.recordWithIDWasDeletedBlock = { id, _ in
             state.withLock {
+                guard $0.error == nil else { return }
+                guard Self.ownsZone(id.zoneID, account: database.account) else {
+                    $0.error = ClipboardSyncServiceError.accountChanged
+                    return
+                }
+                $0.deleted.append(id)
+            }
+        }
+        operation.recordZoneFetchResultBlock = { returnedID, result in
+            state.withLock {
+                guard $0.error == nil else { return }
+                guard Self.ownsZone(returnedID, account: database.account) else {
+                    $0.error = ClipboardSyncServiceError.accountChanged
+                    return
+                }
                 switch result {
                 case .success(let result):
                     $0.token = result.serverChangeToken
