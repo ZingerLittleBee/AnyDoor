@@ -6,6 +6,17 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The command palette has a black glass surface in Dark Mode, so its text and
+  dividers stay legible over bright windows.
+- Command palette rows are restyled: the selected row stands out by brightness
+  and shows a Return hint, symbols sit on rounded tiles the size of an app
+  icon, a toggle that is on fills its tile with the accent color, and hotkeys
+  render one keycap per key.
+- Command palette symbols are evened out in size and centered by how they look,
+  so tall or wide icons no longer appear larger or off-center in their tiles.
+
 ## [4.2.10] - 2026-10-28
 
 ### Fixed
