@@ -10,6 +10,87 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testStalePayloadPreparationKeepsHistoryReadableDuringSearchRecovery() async throws {
+        let payload = LinkedReplacementBarrier()
+        let rebuild = LinkedReplacementBarrier()
+        defer { payload.release(); rebuild.release() }
+        let armed = OSAllocatedUnfairLock(initialState: (payload: false, rebuild: false))
+        let faults = ClipboardHistoryFaultInjector { point in
+            if point == .payloadAuthentication {
+                let shouldPause = armed.withLock { value in
+                    guard value.payload else { return false }; value.payload = false; return true
+                }
+                if shouldPause { payload.pause(); return true }
+            }
+            if point == .searchRebuildBeforePublish {
+                if armed.withLock({ $0.rebuild }) { rebuild.pause(); return false }
+                return true
+            }
+            return false
+        }
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-stale-preparation-\(UUID())")
+        let original = makeModule(services: services, keyByte: 0xF2, time: 1_000, root: root)
+        try await original.setAutomaticImageTextIndexingEnabled(false)
+        let anchor = try await original.capture(.init(source: .unknown, content: .text("already shared")))
+        let tag = try await original.createTagDefinition(named: "Prepared", assigningTo: anchor.entryID).definition
+        try await original.setSyncTagSelected(tag.id, selected: true)
+        try await original.setSyncEnabled(true)
+        await original.suspendSync()
+        let bitmap = try await original.capture(.init(source: .unknown, content: .bitmap(try makeSyncBitmap(), provenance: .image)))
+        _ = try await original.apply(.setTags(bitmap.entryID, [tag.id]))
+        await original.awaitDerivedJobsForTesting()
+        // Arrange a real old index version; opening performs and fails the actual
+        // rebuild, so the public retry below owns a real writer transaction.
+        let database = try await original.requiredDatabase()
+        try await database.write { try $0.execute(sql: """
+            UPDATE clipboard_maintenance_metadata SET integer_value = 0 WHERE key = 'searchIndexVersion'
+            """) }
+        try await original.closeStoreForTesting()
+        let module = makeModule(services: services, keyByte: 0xF2, time: 2_000, root: root, faults: faults)
+        await module.awaitSearchIndexRebuildForTesting()
+        let failed = await module.status()
+        XCTAssertEqual(failed.searchIndex, .failed(.rebuildFailed))
+        armed.withLock { $0.payload = true }
+        let sync = Task { await module.resumeSync() }
+        addTeardownBlock { payload.release(); rebuild.release(); await sync.value }
+        for _ in 0..<400 {
+            if payload.isWaiting { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(payload.isWaiting)
+        _ = try await module.apply(.delete(bitmap.entryID))
+        armed.withLock { $0.rebuild = true }
+        let retry = try await module.retrySearchIndex()
+        XCTAssertEqual(retry, .indexing)
+        for _ in 0..<400 {
+            if rebuild.isWaiting { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(rebuild.isWaiting)
+        payload.release()
+        try await Task.sleep(for: .milliseconds(100))
+        var served = false
+        let read = Task { let page = try await module.page(.init()); served = true; return page }
+        for _ in 0..<200 {
+            if served { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(served, "Discarding a stale preparation must not park the history actor behind search recovery")
+        rebuild.release()
+        let page = try await read.value
+        XCTAssertEqual(page.entries.map(\.id), [anchor.entryID])
+        await sync.value
+        let status = await module.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let peer = makeModule(services: services, keyByte: 0xF3, time: 3_000)
+        try await peer.setSyncEnabled(true)
+        let entries = try await peer.page(.init()).entries
+        XCTAssertEqual(entries.map(\.id), [anchor.entryID])
+    }
+
     func testPendingSyncMutationsCommitOnePreparedOperationPerWriterTurn() async throws {
         let probe = ClipboardHistorySQLTransactionProbe()
         let cloud = SyncTestCloud()

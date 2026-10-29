@@ -428,7 +428,7 @@ extension ClipboardHistoryModule {
                 // Drain mutations made while a provider request was suspended,
                 // including rejoining during cleanup. An unchanged history does
                 // not need another full backfill scan for every uploaded record.
-                let revision = try syncWrite { try Self.historyRevision(in: $0) }
+                let revision = try syncFileRead { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
                     stagedRevision = try await stageSyncBackfill(account: account, control: control, key: key,
                         generation: generation)
@@ -445,7 +445,7 @@ extension ClipboardHistoryModule {
                 }
                 let restoration = preparedRestoration?.upload
                 if ordinary == nil, restoration == nil,
-                   stagedRevision != (try syncWrite { try Self.historyRevision(in: $0) }) { continue }
+                   stagedRevision != (try syncFileRead { try Self.historyRevision(in: $0) }) { continue }
                 if let upload = ordinary ?? restoration {
                     let restoring = restoration != nil
                     do {
