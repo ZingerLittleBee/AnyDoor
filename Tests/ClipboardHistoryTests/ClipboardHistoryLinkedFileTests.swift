@@ -9,6 +9,43 @@ import ClipboardHistoryTestSupport
 
 final class ClipboardHistoryLinkedFileTests: XCTestCase {
     @MainActor
+    func testUnreadableInstalledReplacementRetainsJournalUntilRecoveryIsProven() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Permission denial requires an unprivileged test process") }
+        let target = OSAllocatedUnfairLock(initialState: Optional<URL>.none)
+        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+            guard point == .linkedFileAfterReplacement, let url = target.withLock({ $0 }) else { return false }
+            _ = chmod(url.path, 0)
+            return true
+        })
+        let locations = try await fixture.receiver.linkedFileLocations(for: fixture.entryID)
+        let working = try XCTUnwrap(locations.first)
+        addTeardownBlock { _ = chmod(working.url.path, 0o600) }
+        target.withLock { $0 = working.url }
+        try Data("installed remote edit".utf8).write(to: fixture.original)
+        await fixture.sender.retrySync()
+        await fixture.receiver.retrySync()
+        XCTAssertThrowsError(try Data(contentsOf: working.url))
+        target.withLock { $0 = nil }
+        await fixture.receiver.retrySync()
+        try await fixture.receiver.closeStoreForTesting()
+        XCTAssertEqual(chmod(working.url.path, 0o600), 0)
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52)
+        await reopened.resumeSync()
+        let restored = try await reopened.linkedFileLocations(for: fixture.entryID)
+        let current = try XCTUnwrap(restored.first { $0.id == working.id })
+        XCTAssertEqual(current.url, working.url, "Uncertain inspection must not rebind the link to the displaced old inode")
+        XCTAssertNotEqual(current.baseVersionID, working.baseVersionID)
+        XCTAssertEqual(try Data(contentsOf: working.url), Data("installed remote edit".utf8))
+        let siblings = try FileManager.default.contentsOfDirectory(at: working.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+        let displaced = siblings.filter { $0.lastPathComponent.hasPrefix(working.url.lastPathComponent + " (AnyDoor update ") }
+        XCTAssertTrue(displaced.contains { (try? Data(contentsOf: $0)) == Data("initial linked bytes".utf8) })
+        try Data("saved on the installed inode".utf8).write(to: working.url)
+        await reopened.retrySync()
+        await fixture.sender.retrySync()
+        XCTAssertEqual(try Data(contentsOf: fixture.original), Data("saved on the installed inode".utf8))
+    }
+
+    @MainActor
     func testRestoringLinkedBaseClearsSourceFailureWithoutPublishingAnotherVersion() async throws {
         let changing = OSAllocatedUnfairLock(initialState: Optional<URL>.none)
         let faults = ClipboardHistoryFaultInjector { point in
@@ -578,7 +615,10 @@ actor LinkedFileKeys: ClipboardSyncKeyStoring {
 }
 
 actor LinkedFileCloud: ClipboardSyncTransport {
-    private var identity = ClipboardSyncAccount(container: "test", environment: "test", owner: "linked-file-user")
+    private var identity: ClipboardSyncAccount
+    init(account: ClipboardSyncAccount = .init(container: "test", environment: "test", owner: "linked-file-user")) {
+        identity = account
+    }
     private var currentControl: ClipboardSyncControl?
     private var uploads: [ClipboardSyncUpload] = []
     private var purgedRecords: Set<String> = []
