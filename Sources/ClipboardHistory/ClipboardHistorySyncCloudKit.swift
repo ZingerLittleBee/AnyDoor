@@ -814,9 +814,12 @@ actor ClipboardSyncCloudKit: ClipboardSyncTransport {
 
     private func decodeControl(_ record: CKRecord, account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
         guard record.recordType == Self.controlType, Self.sameRecord(record.recordID, controlID(account), account: account),
-              (record["protocolVersion"] as? NSNumber)?.intValue == 1,
               record["accountID"] as? String == account.identifier,
-              let key = record["keyID"] as? String, let keyID = UUID(uuidString: key),
+              let protocolVersion = record["protocolVersion"] as? NSNumber else {
+            throw ClipboardSyncServiceError.corruptData
+        }
+        guard protocolVersion == 1 else { throw ClipboardSyncServiceError.unsupportedVersion }
+        guard let key = record["keyID"] as? String, let keyID = UUID(uuidString: key),
               let keyCheck = record["keyCheck"] as? Data, keyCheck.count == 32,
               let epochValue = record["epoch"] as? String, let epoch = UUID(uuidString: epochValue),
               let phase = record["phase"] as? String,

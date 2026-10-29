@@ -203,6 +203,15 @@ or local-history key. See [release provisioning](../releasing.md) for the signed
 capability gate and [sync tests](../../Tests/ClipboardHistoryTests/ClipboardHistorySyncTests.swift)
 for isolated real-store coverage; those tests do not establish live iCloud delivery.
 
+Native response identities accept only the checked concrete owner or
+`CKCurrentUserDefaultName` for the exact account-scoped zone and record name.
+Fetch/save/delete callback keys are normalized to requested keys, including partial
+failures; returned control system fields are preserved for the next atomic CAS.
+Change and zone callbacks validate identities even after an ordinary provider
+failure. An observed identity mismatch cannot be replaced by a later successful
+callback or treated as an ordinary network retry. This compatibility does not
+weaken the separate concrete-account, key, epoch, or cancellation checks.
+
 `ClipboardHistorySyncFiles` prepares currently accessible file and directory content
 before staging an entry envelope. Source paths and bookmarks remain local.
 An initially unavailable original retains its captured identity for Retry and
@@ -437,6 +446,13 @@ queued during a failing pass; Off revokes that intent. Provider retry deadlines
 still take precedence. A permanent rejection outranks conflict/batch siblings
 inside a partial CloudKit failure; retryable wrappers retain the longest supplied
 delay.
+Request-size limits, unique-constraint rejections, managed-account restrictions,
+and unrecognized provider errors pause unchanged automatic requests. Known URL
+connectivity failures remain retryable, and cancellation remains cancellation.
+Authenticated content with an unknown operation name and controls with an unknown
+explicit protocol version report unsupportedVersion. Invalid JSON, malformed known
+content, and authentication failures remain corruptData. A future control version
+does not bypass account identity checks or authorize replacing the collection.
 Account changes persist disabled participation and its reason; an old enabled flag or
 retained key cannot bind a new account. Unresolved manual activation is only
 retained within the current runtime generation, so a restart before account

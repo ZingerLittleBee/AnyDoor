@@ -6,6 +6,28 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncCloudKitReadTests: XCTestCase {
+    private enum ControlVersionFixture: CaseIterable, Sendable { case future, nonNumeric, missing, foreignAccount }
+
+    func testFutureControlProtocolIsUnsupportedAfterIdentityValidation() async throws {
+        for fixture in ControlVersionFixture.allCases {
+            let cloud = ClipboardSyncCloudKit(recordReader: { account, ids, _ in
+                let record = CKRecord(recordType: "ClipboardSyncControlV1", recordID: ids[0])
+                record["accountID"] = (fixture == .foreignAccount ? "another-account" : account.identifier) as NSString
+                if fixture == .nonNumeric { record["protocolVersion"] = "2" as NSString }
+                else if fixture != .missing { record["protocolVersion"] = 2 as NSNumber }
+                // A future protocol need not retain the current key/epoch fields.
+                return [ids[0]: .success(record)]
+            })
+            do {
+                _ = try await cloud.control(for: Self.account)
+                XCTFail("Unsupported or malformed control must not be accepted")
+            } catch {
+                let expected: ClipboardSyncServiceError = fixture == .future ? .unsupportedVersion : .corruptData
+                XCTAssertEqual(error as? ClipboardSyncServiceError, expected, "\(fixture)")
+            }
+        }
+    }
+
     func testPermanentProviderFailuresAreDistinctFromRetryableCloudErrors() async throws {
         for code: CKError.Code in [.internalError, .serverRejectedRequest, .invalidArguments, .incompatibleVersion,
                                   .limitExceeded, .constraintViolation, .managedAccountRestricted] {
