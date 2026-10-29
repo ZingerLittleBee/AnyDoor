@@ -704,7 +704,7 @@ final class ClipboardHistoryPresentationModel {
             applicationUpdatePlan = nil
             applicationUpdateNotice = .applied
             invalidateMaterializations(for: plan.entryID)
-            await reload()
+            await refreshForStoreChange()
         } catch {
             guard generation == applicationUpdateGeneration else { return }
             await loadApplicationUpdate(generation: generation)
