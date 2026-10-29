@@ -573,7 +573,7 @@ extension ClipboardHistoryLinkedFileTests {
         let exited = try await result
         XCTAssertEqual(exited.status, 73, exited.output)
         let recovered = try await module.workingOutputRecoveries()
-        XCTAssertTrue(recovered.isEmpty)
+        XCTAssertTrue(recovered.isEmpty, "Unexpected recovery notices after the producer exited: \(recovered)")
         XCTAssertFalse(FileManager.default.fileExists(atPath: pending.path))
     }
 
@@ -827,7 +827,7 @@ extension ClipboardHistoryLinkedFileTests {
     }
 
     @MainActor
-    private func restoreWorkingOutputServices(in root: URL) async throws -> ClipboardSyncServices {
+    func restoreWorkingOutputServices(in root: URL) async throws -> ClipboardSyncServices {
         let transcript = try JSONDecoder().decode(WorkingOutputTranscript.self,
             from: Data(contentsOf: root.appendingPathComponent("external-transcript")))
         let cloud = LinkedFileCloud(), keys = LinkedFileKeys()
@@ -845,14 +845,14 @@ private struct WorkingOutputTranscript: Codable, Sendable {
     let uploads: [ClipboardSyncUpload]
 }
 
-private enum WorkingOutputCrash {
+enum WorkingOutputCrash {
     static let rootKey = "ANYDOOR_WORKING_OUTPUT_TEST_ROOT"
     struct Result: Sendable { let status: Int32; let output: String }
 
     @concurrent static func run(root: URL, bundle: URL, test: String) async throws -> Result {
-        let scratch = root.appendingPathComponent("Scratch")
+        let scratch = root.appendingPathComponent("Scratch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: false)
-        let log = root.appendingPathComponent("child.log")
+        let log = scratch.appendingPathComponent("child.log")
         guard FileManager.default.createFile(atPath: log.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
         let output = try FileHandle(forWritingTo: log)
         defer { try? output.close() }

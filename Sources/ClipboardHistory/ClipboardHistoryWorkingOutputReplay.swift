@@ -11,6 +11,7 @@ struct ClipboardWorkingOutputMember: Codable {
     let snapshot: ClipboardSyncFileSnapshot
     let metadata: Data
     var checkpoint: ClipboardSyncFileSnapshot?
+    var removal: ClipboardWorkingOutputRemovalProof?
 
     static func created(at url: URL, descriptor: Int32) throws -> Self {
         var status = stat(), named = stat()

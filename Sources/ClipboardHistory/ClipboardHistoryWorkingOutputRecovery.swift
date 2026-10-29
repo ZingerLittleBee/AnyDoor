@@ -16,7 +16,7 @@ public struct ClipboardHistoryWorkingOutputRecovery: Equatable, Sendable, Identi
     }
 }
 
-private struct ClipboardWorkingOutputRecord: Codable, Sendable {
+struct ClipboardWorkingOutputRecord: Codable, Sendable {
     let id: UUID
     let directory: URL
     let name: String
@@ -28,6 +28,7 @@ private struct ClipboardWorkingOutputRecord: Codable, Sendable {
     var reason: ClipboardHistoryWorkingOutputRecovery.Reason?
     var descriptor: ClipboardSyncFileDescriptor?
     var replayDeclined: Bool?
+    var removalStarted: Bool?
     var url: URL { directory.appendingPathComponent(name) }
 
     // Older unavailable notices also set replayDeclined on inspection errors.
@@ -114,17 +115,18 @@ final class ClipboardWorkingOutputLease: Sendable {
 struct ClipboardWorkingOutputJournal: Sendable {
     let database: DatabasePool
     let storeRoot: URL
+    var faults: ClipboardHistoryFaultInjector = .init()
 
-    func recover() throws { _ = try ClipboardWorkingOutputOwner.recoverAllSynchronously(in: database, root: storeRoot) }
+    func recover() throws { _ = try ClipboardWorkingOutputOwner.recoverAllSynchronously(in: database, root: storeRoot, faults: faults) }
 
     func reserve(directory: Int32, url: URL, descriptor: ClipboardSyncFileDescriptor) throws -> ClipboardWorkingOutputOwner {
-        try ClipboardWorkingOutputOwner(database: database, storeRoot: storeRoot, directory: directory, url: url, descriptor: descriptor)
+        try ClipboardWorkingOutputOwner(database: database, storeRoot: storeRoot, directory: directory, url: url, descriptor: descriptor, faults: faults)
     }
 
     func recover(directory: URL, descriptor: ClipboardSyncFileDescriptor,
         verify: @escaping (ClipboardWorkingOutputReplay) throws -> Void) throws {
         try ClipboardWorkingOutputOwner.recoverAuthenticated(in: database, root: storeRoot,
-            directory: directory, descriptor: descriptor, verify: verify)
+            directory: directory, descriptor: descriptor, faults: faults, verify: verify)
     }
 }
 
@@ -132,17 +134,19 @@ final class ClipboardWorkingOutputOwner: Sendable {
     static let progressByteCount: Int64 = 4 * 1_024 * 1_024
     private let database: DatabasePool
     private let lease: ClipboardWorkingOutputLease
+    private let faults: ClipboardHistoryFaultInjector
     private let rootDescriptor = OSAllocatedUnfairLock(initialState: Int32(-1))
     let id: UUID
     let directory: URL
     let name: String
 
     fileprivate init(database: DatabasePool, storeRoot: URL, directory: Int32, url: URL,
-        descriptor: ClipboardSyncFileDescriptor) throws {
+        descriptor: ClipboardSyncFileDescriptor, faults: ClipboardHistoryFaultInjector) throws {
         guard let lease = try ClipboardWorkingOutputLease(root: storeRoot, exclusive: false) else {
             throw ClipboardWorkingOutputRecoveryRequired()
         }
         self.lease = lease
+        self.faults = faults
         var status = stat(), atPath = stat()
         guard let resolved = realpath(url.path, nil) else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         defer { free(resolved) }
@@ -301,7 +305,7 @@ final class ClipboardWorkingOutputOwner: Sendable {
 
     func recover() throws {
         guard let record = try Self.record(id, database: database) else { return }
-        try Self.recover(record, database: database)
+        try Self.recover(record, database: database, faults: faults)
     }
 
     private func update(_ mutate: (inout ClipboardWorkingOutputRecord) throws -> Void) throws {
@@ -324,13 +328,15 @@ final class ClipboardWorkingOutputOwner: Sendable {
     }
 
     @concurrent
-    static func recoverAll(in database: DatabasePool, root: URL) async throws {
-        while try !recoverAllSynchronously(in: database, root: root) {
+    static func recoverAll(in database: DatabasePool, root: URL, retryRemoval: Bool = true,
+        faults: ClipboardHistoryFaultInjector = .init()) async throws {
+        while try !recoverAllSynchronously(in: database, root: root, retryRemoval: retryRemoval, faults: faults) {
             try await Task.sleep(for: .milliseconds(20))
         }
     }
 
-    fileprivate static func recoverAllSynchronously(in database: DatabasePool, root: URL) throws -> Bool {
+    fileprivate static func recoverAllSynchronously(in database: DatabasePool, root: URL, retryRemoval: Bool = false,
+        faults: ClipboardHistoryFaultInjector = .init()) throws -> Bool {
         guard let lease = try ClipboardWorkingOutputLease(root: root, exclusive: true) else {
             // Another recovery owns an exclusive lease: let a concurrent list
             // read its settled notices. Active producers instead remain hidden.
@@ -343,7 +349,9 @@ final class ClipboardWorkingOutputOwner: Sendable {
         for value in ids {
             try Task.checkCancellation()
             guard let id = UUID(uuidString: value) else { continue }
-            if let record = try record(id, database: database) { try recover(record, database: database) }
+            if let record = try record(id, database: database) {
+                try recover(record, database: database, retryRemoval: retryRemoval, faults: faults)
+            }
         }
         return true
     }
@@ -355,7 +363,8 @@ final class ClipboardWorkingOutputOwner: Sendable {
     }
 
     fileprivate static func recoverAuthenticated(in database: DatabasePool, root: URL, directory: URL,
-        descriptor: ClipboardSyncFileDescriptor, verify: @escaping (ClipboardWorkingOutputReplay) throws -> Void) throws {
+        descriptor: ClipboardSyncFileDescriptor, faults: ClipboardHistoryFaultInjector,
+        verify: @escaping (ClipboardWorkingOutputReplay) throws -> Void) throws {
         guard let lease = try ClipboardWorkingOutputLease(root: root, exclusive: true) else {
             throw ClipboardWorkingOutputRecoveryRequired()
         }
@@ -368,14 +377,15 @@ final class ClipboardWorkingOutputOwner: Sendable {
                 .map { try JSONDecoder().decode(ClipboardWorkingOutputRecord.self, from: $0) }
         }
         guard let record, record.descriptor == descriptor, !record.hasDeclinedProof else { return }
-        try recover(record, database: database) { tree in
+        try recover(record, database: database, faults: faults) { tree in
             let replay = try ClipboardWorkingOutputReplay(tree: tree, database: database, owner: record.id, root: record.url)
             try verify(replay)
             try replay.finish()
         }
     }
 
-    private static func recover(_ record: ClipboardWorkingOutputRecord, database: DatabasePool,
+    private static func recover(_ record: ClipboardWorkingOutputRecord, database: DatabasePool, retryRemoval: Bool = false,
+        faults: ClipboardHistoryFaultInjector = .init(),
         verifyIncomplete: ((ClipboardFileTree) throws -> Void)? = nil) throws {
         let reason: ClipboardHistoryWorkingOutputRecovery.Reason
         do {
@@ -401,6 +411,13 @@ final class ClipboardWorkingOutputOwner: Sendable {
             guard let expected = record.identity else { throw RecoveryFailure.incomplete }
             guard let current = try ClipboardLinkedNativeIdentity.read(record.url, status: status),
                   expected.provesContinuity(with: current) else { throw RecoveryFailure.changed }
+            if record.removalStarted == true {
+                guard !record.hasDeclinedProof else { return }
+                if record.reason != nil, !retryRemoval, verifyIncomplete == nil { return }
+                try ClipboardWorkingOutputRemoval.resume(record, database: database, parent: parent, faults: faults)
+                try retire(record.id, database: database)
+                return
+            }
             // List refreshes only notice disappearance or identity changes.
             // An authorized receive may retry unavailable inspection, including
             // a completed candidate, using its original full proof below.
@@ -417,8 +434,8 @@ final class ClipboardWorkingOutputOwner: Sendable {
                 if record.completed { throw RecoveryFailure.changed }
                 throw RecoveryFailure.incomplete
             }
-            try remove(tree, record: record, parent: parent)
-            guard fsync(parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+            try ClipboardWorkingOutputRemoval.prepare(tree, record: record, database: database)
+            try ClipboardWorkingOutputRemoval.resume(record, database: database, parent: parent, faults: faults)
             try retire(record.id, database: database)
             return
         } catch is CancellationError { throw CancellationError() }
@@ -432,15 +449,19 @@ final class ClipboardWorkingOutputOwner: Sendable {
         catch RecoveryFailure.incomplete { reason = .incomplete }
         catch RecoveryFailure.changed { reason = .changed }
         catch { reason = .unavailable }
-        var retained = record
-        // A later access failure cannot erase a previously established mismatch.
-        // Unavailability itself is not evidence that the durable proof differs.
-        if !record.hasDeclinedProof {
-            retained.reason = reason
-            if verifyIncomplete != nil { retained.replayDeclined = reason != .unavailable }
+        try database.write { db in
+            guard let data = try Data.fetchOne(db, sql: "SELECT record FROM clipboard_working_outputs WHERE id = ?",
+                arguments: [record.id.uuidString]) else { return }
+            // Removal may have committed progress before this failure. Merge the
+            // diagnostic into the latest owner, never restore the old phase.
+            var retained = try JSONDecoder().decode(ClipboardWorkingOutputRecord.self, from: data)
+            if !retained.hasDeclinedProof {
+                retained.reason = reason
+                if verifyIncomplete != nil { retained.replayDeclined = reason != .unavailable }
+            }
+            try db.execute(sql: "UPDATE clipboard_working_outputs SET record = ? WHERE id = ?",
+                arguments: [try JSONEncoder().encode(retained), record.id.uuidString])
         }
-        try database.write { try $0.execute(sql: "UPDATE clipboard_working_outputs SET record = ? WHERE id = ?",
-            arguments: [try JSONEncoder().encode(retained), record.id.uuidString]) }
     }
 
     private enum RecoveryFailure: Error { case incomplete, changed, unavailable }
@@ -463,55 +484,6 @@ final class ClipboardWorkingOutputOwner: Sendable {
         } catch { close(fd); throw error }
     }
 
-    private static func remove(_ tree: ClipboardFileTree, record: ClipboardWorkingOutputRecord, parent: Int32) throws {
-        try tree.verify()
-        let root = openat(parent, record.name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
-        guard root >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        defer { close(root) }
-        try tree.forEachOwnershipEntry { path, expected in
-            try Task.checkCancellation()
-            guard let currentParent = try openParent(record.directory) else { throw RecoveryFailure.changed }
-            defer { close(currentParent) }
-            var parentStatus = stat(), pinnedParent = stat()
-            guard fstat(currentParent, &parentStatus) == 0, fstat(parent, &pinnedParent) == 0 else {
-                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-            }
-            guard parentStatus.st_dev == pinnedParent.st_dev, parentStatus.st_ino == pinnedParent.st_ino else { throw RecoveryFailure.changed }
-            var top = stat()
-            guard fstatat(parent, record.name, &top, AT_SYMLINK_NOFOLLOW) == 0 else {
-                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-            }
-            guard top.st_ino == record.identity?.fileID,
-                  Int64(top.st_birthtimespec.tv_sec) == record.identity?.birthSeconds,
-                  Int64(top.st_birthtimespec.tv_nsec) == record.identity?.birthNanoseconds else { throw RecoveryFailure.changed }
-            var directory = dup(path.isEmpty ? parent : root)
-            guard directory >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-            defer { close(directory) }
-            let components = path.split(separator: "/").map(String.init)
-            for index in components.indices.dropLast() {
-                let next = openat(directory, components[index], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-                guard next >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-                close(directory); directory = next
-                let ancestor = try tree.ownershipSnapshot(components[...index].joined(separator: "/"))
-                var current = stat()
-                guard fstat(directory, &current) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-                guard current.st_dev == ancestor.device,
-                      current.st_ino == ancestor.inode else { throw RecoveryFailure.changed }
-            }
-            let name = components.last ?? record.name
-            var current = stat()
-            guard fstatat(directory, name, &current, AT_SYMLINK_NOFOLLOW) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-            let isDirectory = current.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR)
-            if isDirectory {
-                // Our preceding child unlinks changed directory timestamps.
-                guard current.st_dev == expected.device, current.st_ino == expected.inode,
-                      current.st_mode == expected.mode else { throw RecoveryFailure.changed }
-            } else if ClipboardSyncFileSnapshot(current) != expected { throw RecoveryFailure.changed }
-            guard unlinkat(directory, name, isDirectory ? AT_REMOVEDIR : 0) == 0 else {
-                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-            }
-        }
-    }
 }
 
 extension ClipboardHistoryModule {
@@ -533,15 +505,17 @@ extension ClipboardHistoryModule {
             """)
     }
 
-    func workingOutputJournal() throws -> ClipboardWorkingOutputJournal { .init(database: try requiredDatabase(), storeRoot: storeRoot) }
+    func workingOutputJournal() throws -> ClipboardWorkingOutputJournal {
+        .init(database: try requiredDatabase(), storeRoot: storeRoot, faults: faultInjector)
+    }
 
-    func recoverWorkingOutputs() async throws {
+    func recoverWorkingOutputs(retryRemoval: Bool = true) async throws {
         let database = try requiredDatabase()
-        try await ClipboardWorkingOutputOwner.recoverAll(in: database, root: storeRoot)
+        try await ClipboardWorkingOutputOwner.recoverAll(in: database, root: storeRoot, retryRemoval: retryRemoval, faults: faultInjector)
     }
 
     public func workingOutputRecoveries() async throws -> [ClipboardHistoryWorkingOutputRecovery] {
-        try await recoverWorkingOutputs()
+        try await recoverWorkingOutputs(retryRemoval: false)
         return try await requiredDatabase().read { database in
             try Data.fetchAll(database, sql: "SELECT record FROM clipboard_working_outputs ORDER BY id").compactMap {
                 let record = try JSONDecoder().decode(ClipboardWorkingOutputRecord.self, from: $0)
