@@ -425,9 +425,14 @@ extension ClipboardHistoryModule {
 
     func receivePendingSyncFiles(
         account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
-        services: ClipboardSyncServices, generation: UInt64
+        services: ClipboardSyncServices, generation: UInt64, requestedVersions: Set<UUID>? = nil
     ) async throws {
-        try stageAutomaticFileConflictDownloads(account: account, control: control)
+        guard requestedVersions?.isEmpty != true else { return }
+        if requestedVersions == nil { try stageAutomaticFileConflictDownloads(account: account, control: control) }
+        let requested = requestedVersions.map { $0.map(\.uuidString).sorted() }
+        let restriction = requested.map {
+            " AND version.version_id = choice.current_version_id AND version.version_id IN (\(Array(repeating: "?", count: $0.count).joined(separator: ",")))"
+        } ?? ""
         let descriptors = try syncFileRead { database in
             try Data.fetchAll(database, sql: """
                 SELECT version.descriptor FROM clipboard_sync_file_versions AS version
@@ -439,7 +444,8 @@ extension ClipboardHistoryModule {
                     WHERE member.account_id = version.account_id AND member.epoch = version.epoch
                       AND member.object_id = version.object_id
                       AND \(Self.liveSyncFileMember))
-                """, arguments: [account.identifier, control.epoch.uuidString]).map {
+                \(restriction)
+                """, arguments: StatementArguments([account.identifier, control.epoch.uuidString] + (requested ?? []))).map {
                     try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: $0)
                 }
         }

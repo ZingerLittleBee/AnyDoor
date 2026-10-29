@@ -29,7 +29,10 @@ extension ClipboardHistoryModule {
             """)
     }
 
-    public func requestSyncFileDownload(entryID: ClipboardHistoryEntryID, objectID: UUID, versionID: UUID) async throws {
+    /// Passing false returns after durable consent and owned scheduling, without
+    /// waiting for the current provider transfer to finish.
+    public func requestSyncFileDownload(entryID: ClipboardHistoryEntryID, objectID: UUID, versionID: UUID,
+        waitForSync: Bool = true) async throws {
         try await waitForWriteTurn()
         let generation = syncGeneration
         try admitSync(generation)
@@ -58,7 +61,8 @@ extension ClipboardHistoryModule {
                 ON CONFLICT(account_id, epoch, object_id, version_id) DO UPDATE SET authorized = 1, failure = NULL
                 """, arguments: [accountID, row["epoch"] as String, objectID.uuidString, versionID.uuidString])
         }
-        await retrySync()
+        prioritizedSyncFileDownloads.insert(versionID)
+        await retrySync(waitForSync: waitForSync)
     }
 
     func syncFileDownloadAuthorized(_ descriptor: ClipboardSyncFileDescriptor,
