@@ -49,6 +49,14 @@ preserved edits are ordinary readable files. The local history database, backgro
 payloads, and transfer chunks remain encrypted. Local history uses a device-only
 Keychain key; a separate content key is distributed through iCloud Keychain for sync.
 
+If iCloud Drive **Desktop & Documents Folders** or another folder-sync service
+syncs Documents, it may upload these readable working copies separately. Those
+copies follow that service's encryption and deletion settings, outside AnyDoor's
+content encryption and cloud-clear controls. For iCloud Drive, end-to-end
+protection depends on [Advanced Data Protection](https://support.apple.com/en-ie/102651).
+Turning off Clipboard Sync or clearing its cloud data does not remove copies
+from that separate service. See [Apple's Desktop & Documents guide](https://support.apple.com/en-za/109344).
+
 Moves and renames continue tracking when the original object can be identified.
 An external editor that saves by replacing that object may require **Reassociate
 File…** when continuity cannot be proven, even at the same name or path. Review the

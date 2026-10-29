@@ -15759,6 +15759,23 @@
         }
       }
     },
+    "settings.clipboard.sync.workingCopies": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working copies are readable files in ~/Documents/AnyDoor/Clipboard. iCloud Drive Desktop & Documents or another folder-sync service may upload them separately, under its own encryption and deletion settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作副本是 ~/Documents/AnyDoor/Clipboard 中可读取的文件。iCloud 云盘的“桌面与文稿”或其他文件夹同步服务可能另行上传它们，其加密与删除规则由相应服务决定。"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.backfill": {
       "extractionState": "manual",
       "localizations": {
