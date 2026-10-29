@@ -42,6 +42,16 @@ final class ClipboardSyncHostAcceptanceTests: XCTestCase {
         try await fixture.receiver.setSyncEnabled(true)
         let retried = await presentation.transferSyncFile(file, entryID: captured.entryID)
         XCTAssertNil(retried)
+        var completed = false
+        for _ in 0..<1_000 {
+            let entry = try await fixture.receiver.page(.init()).entries.first { $0.id == captured.entryID }
+            completed = entry?.syncFiles.contains {
+                $0.id == file.id && $0.versionID == file.versionID && $0.state == .complete
+            } == true
+            if completed { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(completed, "Admitted download must complete without another sync command")
         let content = try await fixture.receiver.materialize(.init(entryID: captured.entryID, purpose: .normalPaste))
         guard case .file(let recovered) = content.items.first?.representations.first else { return XCTFail("Expected the explicitly downloaded file") }
         XCTAssertEqual(try Data(contentsOf: recovered.currentURL), bytes)
