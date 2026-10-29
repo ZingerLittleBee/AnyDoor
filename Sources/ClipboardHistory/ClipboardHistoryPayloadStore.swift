@@ -23,6 +23,7 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case syncFilePreservationAfterCopy
     case syncFileCleanupBeforeRemoval
     case syncFileRejoinBeforeStaging
+    case syncFileVerificationSegment
     case fileConflictAfterBranchFreeze
     case fileConflictBeforeStaging
     case fileConflictAfterStaging

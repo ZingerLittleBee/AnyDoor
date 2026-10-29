@@ -399,25 +399,37 @@ extension ClipboardHistoryModule {
             try admitSync(generation)
             var conflicts = 0
             var stagedRevision: Int64?
+            var unavailableRestorations: Set<ClipboardSyncFileRestorationIdentity> = []
             while true {
                 // Drain mutations made while a provider request was suspended,
                 // including rejoining during cleanup. An unchanged history does
                 // not need another full backfill scan for every uploaded record.
                 let revision = try syncWrite { try Self.historyRevision(in: $0) }
                 if stagedRevision != revision {
-                    try await prepareSyncFileRejoins(account: account, control: control, key: key, generation: generation)
                     try stageSyncBackfill(account: account, control: control, key: key)
                     stagedRevision = try syncWrite { try Self.historyRevision(in: $0) }
                 }
                 let ordinary = try nextSyncUpload(account: account, control: control)
-                let restoration = ordinary == nil ? try nextSyncFileRestoration(account: account, control: control) : nil
+                let preparedRestoration = ordinary == nil ? try await nextSyncFileRestoration(account: account,
+                    control: control, key: key, generation: generation, excluding: unavailableRestorations) : nil
+                if let preparedRestoration, preparedRestoration.upload == nil {
+                    // A missing retained body gets one attempt per activation in
+                    // this pass. A fallback child or concurrent local edit still
+                    // advances the history revision and is staged next turn.
+                    unavailableRestorations.insert(preparedRestoration.identity)
+                    continue
+                }
+                let restoration = preparedRestoration?.upload
+                if ordinary == nil, restoration == nil,
+                   stagedRevision != (try syncWrite { try Self.historyRevision(in: $0) }) { continue }
                 if let upload = ordinary ?? restoration {
                     let restoring = restoration != nil
                     do {
                         try await admitSync(generation, account: account, services: services)
                         guard try syncWrite({ database in
                             if restoring {
-                                guard try syncFileRestorationIsPending(upload.record, account: account, control: control, in: database) else { return false }
+                                guard try syncFileRestorationIsPending(upload.record, account: account, control: control,
+                                    identity: preparedRestoration?.identity, in: database) else { return false }
                                 try database.execute(sql: "UPDATE clipboard_sync_subject_records SET purged = 0 WHERE account_id = ? AND epoch = ? AND record_id = ?",
                                     arguments: [account.identifier, control.epoch.uuidString, upload.record.recordID])
                                 return true
