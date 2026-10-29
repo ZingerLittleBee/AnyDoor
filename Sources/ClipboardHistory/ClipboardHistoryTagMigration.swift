@@ -38,6 +38,12 @@ extension ClipboardHistoryModule {
         _ source: ClipboardHistoryLegacyTagPreference
     ) async throws -> ClipboardHistoryLegacyTagPreference.Format? {
         guard legacyTagImportStoreTransitions == 0 else { throw ClipboardHistoryModuleError.operationUnavailable }
+        try Task.checkCancellation()
+        // A completed import is a read, including when invalid input was retained.
+        // Read the committed WAL snapshot before joining the index rebuild's writer.
+        // The worker below rechecks the marker atomically for a first import.
+        let completed = try Self.completedLegacyTagImport(in: requiredDatabase())
+        if let completed { return completed.recoveryFormat }
         let pool = try await writableDatabase()
         guard legacyTagImportStoreTransitions == 0 else { throw ClipboardHistoryModuleError.operationUnavailable }
         let epoch = storeEpoch
@@ -65,10 +71,7 @@ extension ClipboardHistoryModule {
         faultInjector: ClipboardHistoryFaultInjector) throws -> ClipboardHistoryLegacyTagImportResult {
         try Task.checkCancellation()
         return try pool.write { database in
-            let imported = try Bool.fetchOne(database, sql: """
-                SELECT integer_value FROM clipboard_maintenance_metadata WHERE key = 'legacyTagDefaultsImported'
-                """) ?? false
-            guard !imported else {
+            guard try !legacyTagDefinitionsImported(in: database) else {
                 return .init(didMutate: false, recoveryFormat: try legacyTagRecoveryFormat(in: database))
             }
             // Validate the complete input before writing any definitions. Only
@@ -156,5 +159,18 @@ extension ClipboardHistoryModule {
             INSERT INTO clipboard_maintenance_metadata(key, integer_value) VALUES ('legacyTagDefaultsImported', 1)
             ON CONFLICT(key) DO UPDATE SET integer_value = 1
             """)
+    }
+
+    private static func legacyTagDefinitionsImported(in database: Database) throws -> Bool {
+        try Bool.fetchOne(database, sql: """
+            SELECT integer_value FROM clipboard_maintenance_metadata WHERE key = 'legacyTagDefaultsImported'
+            """) ?? false
+    }
+
+    private static func completedLegacyTagImport(in pool: DatabasePool) throws -> ClipboardHistoryLegacyTagImportResult? {
+        try pool.read { database in
+            guard try legacyTagDefinitionsImported(in: database) else { return nil }
+            return .init(didMutate: false, recoveryFormat: try legacyTagRecoveryFormat(in: database))
+        }
     }
 }

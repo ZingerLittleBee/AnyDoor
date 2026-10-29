@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import os
 import XCTest
 import ClipboardHistoryTestSupport
@@ -6,6 +7,48 @@ import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 
 extension ClipboardHistoryLinkedFileTests {
+    @MainActor
+    func testCompletedLegacyTagImportDoesNotWaitForSearchRebuild() async throws {
+        for invalid in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-tag-fast-path-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let services = ClipboardSyncServices(transport: LinkedFileCloud(), keys: LinkedFileKeys(), pollingInterval: nil)
+            let original = makeLinkedModule(root: root, services: services, key: 0x74)
+            let source = ClipboardHistoryLegacyTagPreference(format: .json,
+                data: Data((invalid ? "{preserve invalid input" : "[{\"id\":\"imported\",\"name\":\"Imported\"}]").utf8))
+            _ = try await original.importLegacyTagDefinitions(source)
+            let pool = try await original.requiredDatabase()
+            try await pool.write { database in
+                try database.execute(sql: "UPDATE clipboard_maintenance_metadata SET integer_value = 0 WHERE key = 'searchIndexVersion'")
+            }
+            try await original.closeStoreForTesting()
+            let barrier = LinkedReplacementBarrier()
+            defer { barrier.release() }
+            let reopened = makeLinkedModule(root: root, services: services, key: 0x74, faultInjector: .init { point in
+                if point == .searchRebuildBeforePublish { barrier.pause() }
+                return false
+            })
+            let deadline = Date().addingTimeInterval(5)
+            while !barrier.isWaiting, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(barrier.isWaiting)
+            let served = expectation(description: "Completed import reads committed state during rebuild")
+            let importing = Task {
+                let result = try await reopened.importLegacyTagDefinitions(.init(format: .json,
+                    data: Data("[{\"id\":\"stale\",\"name\":\"Must not import again\"}]".utf8)))
+                served.fulfill()
+                return result
+            }
+            await fulfillment(of: [served], timeout: 2)
+            barrier.release()
+            let result = try await importing.value
+            XCTAssertEqual(result, invalid ? .json : nil)
+            let recovery = try await reopened.legacyTagRecovery()
+            XCTAssertEqual(recovery, invalid ? source : nil)
+            let tags = try await reopened.tagDefinitions()
+            XCTAssertEqual(tags.map(\.id), invalid ? [] : ["imported"])
+        }
+    }
+
     @MainActor
     func testLegacyTagImportIsCancelledBeforeStoreCloseRetryOrReset() async throws {
         for action in ["close", "retry", "reset"] {
