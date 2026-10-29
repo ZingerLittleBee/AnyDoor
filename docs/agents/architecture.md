@@ -306,9 +306,11 @@ retains both visible roots during post-exchange checking or interrupted rollback
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
 Top-level vnode handles share a process-wide budget of 64, including handles
-awaiting cancellation cleanup. One module-owned five-second reconciliation task
-covers overflow locations even when provider polling is disabled, through the
-same automatic retry admission and deadlines.
+awaiting cancellation cleanup. One module-owned five-second task rotates through
+at most sixteen unobserved locations, even when provider polling is disabled.
+These inspections use local account/epoch and generation admission; only changed
+observations request automatic sync, which retains provider authority checks and
+retry deadlines. Unchanged or unavailable locations do not poll the provider.
 A frozen local version and its originating location's new base commit in one
 transaction after rechecking the location revision, identity, and prior base.
 Pausing or reassociating the location during freezing therefore cannot publish

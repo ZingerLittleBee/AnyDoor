@@ -117,12 +117,12 @@ enum ClipboardSyncFilePublication {
             guard before.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
                   before.st_size == descriptor.originalByteCount,
                   try digest(existing, byteCount: before.st_size) == descriptor.contentDigest else {
-                throw ClipboardSyncServiceError.localStorage
+                throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
             }
             var after = stat()
             guard fstat(existing, &after) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             guard ClipboardSyncFileSnapshot(before) == ClipboardSyncFileSnapshot(after) else {
-                throw ClipboardSyncServiceError.localStorage
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
             }
             return .init(directory: url, name: descriptor.displayName, pendingName: nil,
                 parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(after))
