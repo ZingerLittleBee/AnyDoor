@@ -2,12 +2,14 @@ import Foundation
 import GRDB
 
 enum ClipboardSyncFileWork: Sendable {
+    case content(UUID)
     case download(UUID)
     case linkedLocation(UUID)
     case source(UUID)
 
     var identifier: String {
         switch self {
+        case .content(let operation): "content/\(operation.uuidString)"
         case .download(let version): "download/\(version.uuidString)"
         case .linkedLocation(let location): "location/\(location.uuidString)"
         case .source(let object): "source/\(object.uuidString)"
