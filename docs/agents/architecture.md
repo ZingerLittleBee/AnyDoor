@@ -316,6 +316,17 @@ This is local recovery, with no cloud deletion, new download consent, or
 automatic re-enablement of sync. Unverified outputs never materialize as complete
 history, and encrypted background stores still contain no plaintext file cache.
 
+After an output passes its complete ownership or authenticated-prefix proof,
+cleanup persists a removal manifest before deleting members. Each successful
+member deletion records the remaining set and the directly affected parent's
+snapshot before cancellation is observed. A later transient failure or restart
+can resume from that durable removal progress without acquiring another sync key.
+Recovery still requires the exact remaining set, identities, and snapshots;
+extra, replaced, or modified members remain for review. A crash after a native
+unlink but before its progress transaction remains conservative: recovery does
+not infer ownership from a missing member or relax directory timestamps. Native
+mutation and snapshot capture are not atomic with concurrent external edits.
+
 `ClipboardFileTree` extends that transfer with typed, canonical tree framing.
 The temporary inventory and path-validation tables use SQLCipher, including
 member identities, sorting, and metadata descriptions. A header never contains
@@ -387,13 +398,25 @@ History pages first capture SQL-only display plans. Native availability and
 application checks run on one dedicated serial Dispatch queue, outside database
 transactions and Swift's cooperative executor. Identical database/page snapshots
 share in-flight work, with independent waiter cancellation; cancelled queued work
-is discarded. A blocked native call cannot be interrupted, but cannot create
-additional native workers. SQL-only pages return their coherent snapshot without
-retrying on unrelated transfer revisions. Favorite and tag mutations commit and
-notify before optional native display work; responses use current SQL metadata
-and already-resolved display hints, never new native reads inside the writer.
+is discarded. Each waiter has a two-second display budget on an independent timer.
+A blocked native call cannot be interrupted, but cannot create additional native
+workers or hold a display response indefinitely. On timeout or repeated unrelated
+revision changes, the caller rereads the current SQL snapshot and uses only known
+display hints; uninspected identities remain unavailable. Store identity and
+cancellation checks still apply. SQL-only pages return their coherent snapshot
+without retrying on unrelated transfer revisions. Favorite and tag mutations
+commit and notify before optional native display work; responses use current SQL
+metadata and already-resolved display hints, never new native reads inside the
+writer.
 A malformed stored file descriptor marks only that display item unavailable;
 file actions still validate its authoritative descriptor and live identity.
+Linked Location rows with invalid identifiers or unknown kind/state values remain
+stored but are omitted from display and observation. They grant no action or
+materialization authority, including through an older file-reference fallback.
+If a tag creation commits before its entry is concurrently deleted, the Host
+refreshes current tag definitions even though the assignment can no longer be
+returned. A concurrently deleted entry or tag is never restored from the old
+creation result.
 
 Application packages use that same authenticated tree and aggregate, per-version
 download policy. Receiving a version does not replace an associated application.
@@ -554,9 +577,19 @@ stale confirmation. Recovered epochs remain durably retired even when an old
 control returns after recovery or races the next creation; another device's new
 epoch may still win, including a fresh device's different key. A recovered device
 loads and verifies that winning key before accepting the new control; a missing
-key remains waiting without discarding its recovery candidate. This does not
-permit replacing an established control or rejoining a retired epoch. An affected unfinished clear becomes
-superseded, never reported as successfully cleared.
+key remains waiting without discarding its recovery candidate. An affected
+unfinished clear becomes superseded, never reported as successfully cleared.
+
+A Mac that remained offline throughout deletion and recreation can still hold an
+established control for the previous key. An observed active replacement with a
+different, non-retired epoch exposes `canRecoverReplacedCloudCollection`. Its
+separate confirmation binds the account, previous local control, and observed
+replacement control; confirmation rechecks all three before retiring only local
+publication authority. The replacement's cloud records are not cleared or changed.
+Recovery preserves local history and saved work, leaves participation Off, and
+requires explicit activation and tag selection. Activation loads and verifies the
+replacement key before joining; a missing key remains waiting. A key change within
+the same epoch remains an integrity failure, and retired epochs cannot be joined.
 
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
 An interrupted clear for account A does not prevent explicit participation or

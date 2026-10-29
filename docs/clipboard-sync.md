@@ -84,6 +84,12 @@ checkpoint, unrecorded contents, or missing verification data keep the file in
 the review list. Review such files and choose Keep File before another attempt
 creates a new output.
 
+Once cleanup has verified an output and started removing it, completed deletion
+checkpoints let a later attempt continue after a temporary error or restart.
+This local cleanup does not enable sync or retrieve another encryption key.
+Changes to remaining files, or an interruption between deletion and its recorded
+checkpoint, still require review.
+
 **Reveal in Finder** shows the exact recorded location without searching for a
 renamed or moved file. **Keep File** leaves the current files untouched and
 dismisses the notice. It does not start a download, turn on sync, or clear cloud
@@ -148,6 +154,15 @@ Sync on and choose tags explicitly to share again. If the old collection returns
 AnyDoor will not resume sharing it automatically. If the account or collection changes
 before confirmation, recovery fails without reporting success; review the current
 status before trying again.
+
+If another Mac has already created a replacement collection while this Mac was
+offline, settings instead offers **Join the Replacement Collection**. Confirming
+checks that the account and both collections still match, then retires only this
+Mac's old participation. It preserves local history and saved changes without
+clearing the replacement's cloud data. Sync stays off and Sync Tags are deselected;
+turn it on to obtain the replacement's encryption key, then choose tags explicitly
+to share retained history. If that key has not arrived through iCloud Keychain,
+AnyDoor waits without replacing it or uploading old queued changes.
 
 ## Upgrading from Config Sync tag sharing
 
