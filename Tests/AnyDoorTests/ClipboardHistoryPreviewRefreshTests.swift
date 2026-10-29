@@ -6,6 +6,97 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryPreviewRefreshTests: XCTestCase {
+    func testStoreRefreshKeepsUnchangedCardsAndInvalidatesOnlyEditedPayloads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-entry-cache-\(UUID())")
+        removeClipboardHistoryDirectoryAfterTest(root)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
+            keyStore: FileConflictUILocalKey(byte: 0x67)))
+        let prefix = String(repeating: "a", count: 4_096)
+        let edited = try await module.capture(.init(source: .unknown, content: .text(prefix + "before")))
+        let unchanged = try await module.capture(.init(source: .unknown, content: .text("unchanged card")))
+        let model = ClipboardHistoryPresentationModel(module: module)
+        await model.reload()
+        let editedEntry = try XCTUnwrap(model.entries.first { $0.id == edited.entryID })
+        let unchangedEntry = try XCTUnwrap(model.entries.first { $0.id == unchanged.entryID })
+        let editedIdentity = model.materializationIdentity(for: editedEntry)
+        let unchangedIdentity = model.materializationIdentity(for: unchangedEntry)
+        _ = await model.materialization(for: edited.entryID, purpose: .fullPreview)
+        _ = await model.materialization(for: unchanged.entryID, purpose: .preview)
+        _ = await model.materialization(for: unchanged.entryID, purpose: .hostAction)
+
+        await model.apply(.setFavorite(unchanged.entryID, true))
+        let tagged = await model.createTagDefinition(named: "Metadata only", assigningTo: unchanged.entryID)
+        XCTAssertTrue(tagged)
+        let tag = try XCTUnwrap(model.tags.first { $0.displayName == "Metadata only" })
+        let deleted = await model.deleteTagDefinition(id: tag.id)
+        XCTAssertTrue(deleted)
+        await model.refreshForStoreChange()
+        XCTAssertNotNil(model.cachedMaterialization(for: unchanged.entryID, purpose: .hostAction))
+        _ = try await module.capture(.init(source: .unknown, content: .text("new unrelated capture")))
+        await model.refreshForStoreChange()
+        XCTAssertNotNil(model.cachedMaterialization(for: edited.entryID, purpose: .fullPreview))
+        XCTAssertNotNil(model.cachedMaterialization(for: unchanged.entryID, purpose: .preview))
+        XCTAssertEqual(model.materializationIdentity(for: try XCTUnwrap(model.entries.first { $0.id == edited.entryID })), editedIdentity)
+        XCTAssertEqual(model.materializationIdentity(for: try XCTUnwrap(model.entries.first { $0.id == unchanged.entryID })), unchangedIdentity)
+
+        let plan = try await module.textEditPlan(for: edited.entryID)
+        _ = try await module.saveTextEdit(prefix + "after", using: plan)
+        await model.apply(.setFavorite(edited.entryID, true))
+        XCTAssertNil(model.cachedMaterialization(for: edited.entryID, purpose: .fullPreview),
+            "A metadata response can also carry a concurrent payload edit")
+        await model.refreshForStoreChange()
+        let currentEntry = try XCTUnwrap(model.entries.first { $0.id == edited.entryID })
+        XCTAssertEqual(currentEntry.previewText, editedEntry.previewText)
+        XCTAssertNotEqual(model.materializationIdentity(for: currentEntry), editedIdentity)
+        XCTAssertEqual(model.materializationIdentity(for: try XCTUnwrap(model.entries.first { $0.id == unchanged.entryID })), unchangedIdentity)
+        XCTAssertNil(model.cachedMaterialization(for: edited.entryID, purpose: .fullPreview))
+        XCTAssertNotNil(model.cachedMaterialization(for: unchanged.entryID, purpose: .hostAction))
+        let refreshed = await model.materialization(for: edited.entryID, purpose: .fullPreview)
+        XCTAssertEqual(refreshed?.exactTexts, [prefix + "after"])
+
+        await model.reload()
+        XCTAssertNil(model.cachedMaterialization(for: unchanged.entryID, purpose: .hostAction))
+        XCTAssertNotEqual(model.materializationIdentity(for: unchangedEntry), unchangedIdentity)
+    }
+
+    func testRemovedFilteredAndUnlistedReadsCannotRepopulateThePreviewCache() async throws {
+        for scenario in ["removed", "filtered", "unlisted"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-outside-prefix-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let module = trackClipboardHistoryModule(ClipboardHistoryModule(testingStoreRoot: root,
+                keyStore: FileConflictUILocalKey(byte: 0x68)))
+            let capture = try await module.capture(.init(source: .unknown, content: .text("before")))
+            let delivery = PreviewDeliveryGate()
+            addTeardownBlock { await delivery.release() }
+            let model = ClipboardHistoryPresentationModel(operations: .init(
+                status: { await module.status() }, page: { try await module.page($0, after: $1) },
+                apply: { try await module.apply($0) }, materialize: { request in
+                    let value = try await module.materialize(request)
+                    await delivery.holdFirstDelivery()
+                    return value
+                }, tagDefinitions: { try await module.tagDefinitions() }))
+            if scenario != "unlisted" { await model.reload() }
+            let request = Task { await model.materialization(for: capture.entryID, purpose: .fullPreview) }
+            await delivery.waitUntilHeld()
+            if scenario == "removed" {
+                _ = try await module.apply(.delete(capture.entryID))
+                await model.refreshForStoreChange()
+            } else if scenario == "filtered" {
+                await model.setQuery(.init(text: "not present"))
+            } else {
+                let plan = try await module.textEditPlan(for: capture.entryID)
+                _ = try await module.saveTextEdit("after", using: plan)
+                await model.refreshForStoreChange()
+            }
+            await delivery.release()
+
+            let result = await request.value
+
+            XCTAssertNil(result, scenario)
+            XCTAssertNil(model.cachedMaterialization(for: capture.entryID, purpose: .fullPreview), scenario)
+        }
+    }
+
     func testExplicitPreviewBoundsRepeatedChangesAndKeepsCancellationSilent() async throws {
         for cancelled in [false, true] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("preview-bounded-\(UUID())")

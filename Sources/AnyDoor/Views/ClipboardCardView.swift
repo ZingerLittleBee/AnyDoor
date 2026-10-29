@@ -62,7 +62,7 @@ struct ClipboardCardView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.presentationTitle)
-        .task(id: entry.filePresentationIdentity + ":" + String(presentation.materializationGeneration)) {
+        .task(id: presentation.materializationIdentity(for: entry)) {
             previewMaterialization = nil
             hostMaterialization = nil
             async let preview = presentation.materialization(
