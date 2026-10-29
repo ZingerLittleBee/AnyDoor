@@ -55,6 +55,23 @@ extension ClipboardHistoryLinkedFileTests {
         print("LINKED_OBSERVATION_ROOT_HANDLES=\(observedPaths.count)")
         XCTAssertLessThanOrEqual(observedPaths.count, 64, "Native root observation must leave a bounded descriptor budget")
         let unobserved = files.filter { !observedPaths.contains($0.resolvingSymlinksInPath().path) }
+        XCTAssertGreaterThan(unobserved.count, 3)
+        // A missing overflow source remains unavailable without a native unlink
+        // event. Its availability transition must not turn every fallback tick
+        // into provider traffic, and unchanged accessible overflow stays local.
+        let missing = try XCTUnwrap(unobserved.first)
+        try FileManager.default.removeItem(at: missing)
+        await sender.retrySync()
+        await receiver.retrySync()
+        try await Task.sleep(for: .seconds(1))
+        let unavailable = try await sender.linkedFileLocations(for: capture.entryID)
+        XCTAssertEqual(unavailable.first { $0.url.lastPathComponent == missing.lastPathComponent }?.state, .unavailable)
+        let requestsBeforeQuietTicks = await cloud.observationProviderRequestCount()
+        try await Task.sleep(for: .seconds(11))
+        let requestsAfterQuietTicks = await cloud.observationProviderRequestCount()
+        print("LINKED_OBSERVATION_QUIET_PROVIDER_REQUESTS=\(requestsAfterQuietTicks - requestsBeforeQuietTicks)")
+        XCTAssertEqual(requestsAfterQuietTicks, requestsBeforeQuietTicks,
+            "Repeated fallback ticks for unchanged or unavailable sources must stay local")
         let changed = Array((unobserved.isEmpty ? files : unobserved).suffix(3))
         let saved = Data("saved without a native root watcher".utf8)
         for url in changed { try saved.write(to: url) }
