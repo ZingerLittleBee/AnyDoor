@@ -35,6 +35,8 @@ extension ClipboardHistoryModule {
             guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
             if !selection.hasConflict, selection.latest.versionID == source.baseVersionID,
                source.state == .current || !canPublish { continue }
+            let work = ClipboardSyncFileWork.linkedLocation(source.id)
+            guard try !shouldDeferSyncFileWork(work, account: account, control: control) else { continue }
             let inspection = Task.detached(priority: .utility) {
                 let proof = try ClipboardLinkedFileIO.inspect(source.url, expectedIdentity: source.identity)
                 return (proof, source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url))
@@ -67,8 +69,16 @@ extension ClipboardHistoryModule {
             }
             if proof.digest != source.baseDigest {
                 guard canPublish else { continue }
-                let versionID = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
-                    parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
+                let versionID: UUID
+                do {
+                    versionID = try await publishFileVersion(sourceURL: source.url, objectID: source.objectID,
+                        parents: [source.baseVersionID], expectedSourceIdentity: source.identity)
+                } catch {
+                    guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
+                    try deferSyncFileWork(work, error: error, account: account, control: control, generation: generation)
+                    publishMutation()
+                    continue
+                }
                 try await admitSync(generation, account: account, services: services)
                 guard let frozen = try syncFileSelection(objectID: source.objectID)?.complete,
                       frozen.descriptor.versionID == versionID, let digest = frozen.descriptor.contentDigest else {
@@ -87,6 +97,7 @@ extension ClipboardHistoryModule {
                         UPDATE clipboard_sync_linked_locations SET base_version_id = ?, base_digest = ?,
                           state = ?, pending_version_id = ?, observed_digest = ? WHERE id = ?
                         """, arguments: [versionID.uuidString, digest, state.rawValue, versionID.uuidString, saved?.digest, source.id.uuidString])
+                    try completeSyncFileWork(work, account: account, control: control, in: database)
                     try Self.bumpHistoryRevision(in: database)
                 }
                 publishMutation()
@@ -102,8 +113,6 @@ extension ClipboardHistoryModule {
             // Receiving a complete package does not authorize replacing an
             // application at a linked location. Only Apply Update can do that.
             guard !isApplication else { continue }
-            let work = ClipboardSyncFileWork.linkedLocation(source.id)
-            guard try !shouldDeferSyncFileWork(work, account: account, control: control) else { continue }
             do {
                 try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
                 try syncWrite { try completeSyncFileWork(work, account: account, control: control, in: $0) }
