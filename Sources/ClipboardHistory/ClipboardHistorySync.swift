@@ -620,6 +620,22 @@ extension ClipboardHistoryModule {
         try admitSync(generation)
     }
 
+    func admitSyncFileObservation(_ generation: UInt64, account: ClipboardSyncAccount, epoch: UUID,
+        services: ClipboardSyncServices, automatic: Bool) async throws {
+        guard automatic, try currentSyncRecovery().phase?.requiresExplicitRetry == true else {
+            try await admitSync(generation, account: account, services: services)
+            return
+        }
+        // Local saved-byte observation does not authorize provider access. Keep
+        // its account/epoch and generation fences while automatic retries pause.
+        try await waitForWriteTurn()
+        try admitSync(generation)
+        guard let context = try syncFileRead({ try syncFileContext(in: $0) }),
+              context.account == account, context.control.epoch == epoch, context.control.phase == "active" else {
+            throw ClipboardSyncServiceError.accountChanged
+        }
+    }
+
     func syncFailurePhase(_ error: Error) -> ClipboardHistorySyncPhase {
         if ClipboardSyncFileErrors.isAccessDenied(error) { return .failed(.localFileAccessDenied) }
         if ClipboardSyncFileErrors.isSourceChanged(error) { return .failed(.sourceChanged) }

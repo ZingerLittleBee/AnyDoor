@@ -10,6 +10,44 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testEstablishedFileWatcherObservesLocallyWithoutRetryingPermanentProviderFailure() async throws {
+        let initial = Data("shared before provider rejection".utf8)
+        let fixture = try await fileFixture(names: ["Observed.txt"], contents: [initial])
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.receiver.suspendSync()
+        try await Task.sleep(for: .milliseconds(400))
+        let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(.serverRejectedRequest) })
+        await fixture.cloud.failNextAccountReadWithNative(native)
+        await fixture.sender.retrySync()
+        let failed = await fixture.sender.syncStatus()
+        XCTAssertEqual(failed.phase, .failed(.providerRejected))
+        let readsBefore = await fixture.cloud.accountReadCount()
+        let senderEntries = try await fixture.sender.page(.init()).entries
+        let entry = try XCTUnwrap(senderEntries.first)
+        let saved = Data("saved while automatic provider access is paused".utf8)
+        try saved.write(to: fixture.sourceURLs[0])
+        var observed = false
+        for _ in 0..<400 {
+            let locations = try await fixture.sender.linkedFileLocations(for: entry.id)
+            if locations.first?.state == .localChanges { observed = true; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(observed, "Permanent provider failure must retain local file observation")
+        let readsAfter = await fixture.cloud.accountReadCount()
+        XCTAssertEqual(readsAfter, readsBefore, "An established native watcher cannot consult the provider before automatic retry admission")
+        let paused = await fixture.sender.syncStatus()
+        XCTAssertEqual(paused.phase, .failed(.providerRejected))
+        let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let oldFile) = old.items.first?.representations.first else { return XCTFail("Expected previous complete file") }
+        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), initial)
+        await fixture.sender.retrySync()
+        await fixture.receiver.resumeSync()
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let received) = content.items.first?.representations.first else { return XCTFail("Expected explicitly retried file") }
+        XCTAssertEqual(try Data(contentsOf: received.currentURL), saved)
+    }
+
     func testMembershipSnapshotPreservesLocalTagsChangedDuringRemoteDownload() async throws {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
