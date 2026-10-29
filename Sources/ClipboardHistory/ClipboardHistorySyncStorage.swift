@@ -266,6 +266,12 @@ extension ClipboardHistoryModule {
             preparedEntry = try prepareSyncEntryContent(entry)
         } else { preparedEntry = nil }
         let changed = try pool.write { database in
+            // Receipt and retry retirement commit together. A crash cannot leave
+            // a retry that future discovery skips because its inbox receipt won.
+            try database.execute(sql: """
+                DELETE FROM clipboard_sync_file_retries WHERE account_id = ? AND epoch = ? AND work_id = ?
+                """, arguments: [account.identifier, record.epoch.uuidString,
+                    ClipboardSyncFileWork.content(record.operationID).identifier])
             let exists = try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_inbox WHERE account_id = ? AND epoch = ? AND record_id = ?)
                 """, arguments: [account.identifier, record.epoch.uuidString, record.recordID]) ?? false

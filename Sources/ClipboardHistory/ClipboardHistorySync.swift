@@ -300,7 +300,6 @@ extension ClipboardHistoryModule {
                 try await waitForWriteTurn()
                 try admitSync(generation)
                 try importSyncContent(content, record: record, account: account)
-                try syncWrite { try completeSyncFileWork(work, account: account, control: control, in: $0) }
                 if case .deletion = content { try await resumeSyncFilePreservations() }
             }
             // An unreadable envelope may contain deletion or sharing authority.
