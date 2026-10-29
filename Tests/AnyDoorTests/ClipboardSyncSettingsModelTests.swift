@@ -19,6 +19,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         ))
         let model = ClipboardSyncSettingsModel(module: module)
         await model.setEnabled(true)
+        try await waitForStatus(model) { model.status.canClearCloudData }
         await model.prepareReset()
         await model.confirmReset(try XCTUnwrap(model.resetConfirmation))
         XCTAssertTrue(model.isResetPending)
@@ -26,11 +27,13 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
 
         await cloud.switchAccount(to: "account-b")
         await model.retry()
+        try await waitForStatus(model) { model.status.cloudReset?.failure == .failed(.accountChanged) }
 
         XCTAssertFalse(model.status.isEnabled)
         XCTAssertEqual(model.status.cloudReset?.failure, .failed(.accountChanged))
         XCTAssertTrue(model.canChangeEnabled, "Settings must allow explicit activation of the new account")
         if model.canChangeEnabled { await model.setEnabled(true) }
+        try await waitForStatus(model) { model.status.isEnabled && model.status.cloudReset == nil && model.status.canClearCloudData }
         XCTAssertTrue(model.status.isEnabled)
         XCTAssertNil(model.status.cloudReset)
         await model.prepareReset()
@@ -40,11 +43,13 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
 
         await cloud.switchAccount(to: "reset-settings")
         await model.retry()
+        try await waitForStatus(model) { model.status.cloudReset?.stage == .completed }
         XCTAssertEqual(model.status.cloudReset?.stage, .completed)
         await cloud.switchAccount(to: "account-b")
         let pendingB = await cloud.currentPhase()
         XCTAssertEqual(pendingB, "resetting")
         await model.retry()
+        try await waitForStatus(model) { model.status.cloudReset?.stage == .completed }
         XCTAssertEqual(model.status.cloudReset?.stage, .completed)
         XCTAssertFalse(model.status.isEnabled)
     }
@@ -80,6 +85,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
 
         await model.setEnabled(true)
 
+        try await waitForStatus(model) { model.status.phase == .failed(.localFileAccessDenied) }
         XCTAssertEqual(model.status.phase, .failed(.localFileAccessDenied))
         XCTAssertEqual(model.status.phase.presentationMessageKey, .settingsClipboardSyncFileAccessDenied)
         XCTAssertNil(model.recoveryHelpURL)
@@ -102,14 +108,17 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let model = ClipboardSyncSettingsModel(module: module)
         await model.setEnabled(true)
         await model.selectTag(tag.id)
+        try await waitForStatus(model) { model.tags.first?.withdrawalEntryCount == 1 }
         XCTAssertEqual(model.tags.first?.withdrawalEntryCount, 1)
         await model.selectTag(tag.id, selected: false)
+        try await waitForStatus(model) { model.status.phase == .upToDate && model.status.withdrawnEntryCount == 1 }
         XCTAssertFalse(model.operationFailed)
         XCTAssertEqual(model.status.phase, .upToDate)
         XCTAssertEqual(model.status.withdrawnEntryCount, 1)
         XCTAssertEqual(model.tags.first?.rejoinEntryCount, 1)
         XCTAssertEqual(model.tags.first?.isSelected, false)
         await model.selectTag(tag.id)
+        try await waitForStatus(model) { model.status.withdrawnEntryCount == 0 }
         XCTAssertEqual(model.status.withdrawnEntryCount, 0)
         XCTAssertEqual(model.tags.first?.isSelected, true)
         let retained = try await module.page(.init()).entries
@@ -127,6 +136,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let local = try await module.capture(.init(source: .unknown, content: .text("local history")))
         let model = ClipboardSyncSettingsModel(module: module)
         await model.setEnabled(true)
+        try await waitForStatus(model) { model.status.canClearCloudData }
         await model.prepareReset()
         XCTAssertNotNil(model.resetConfirmation)
         model.cancelResetConfirmation()
@@ -142,6 +152,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         XCTAssertTrue(model.isResetPending)
         XCTAssertEqual(model.status.cloudReset?.failure, .failed(.network))
         await model.retry()
+        try await waitForStatus(model) { model.status.cloudReset?.stage == .completed }
         XCTAssertEqual(model.status.cloudReset?.stage, .completed)
         XCTAssertFalse(model.isResetPending)
         let retained = try await module.page(.init())
@@ -159,6 +170,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         let local = try await module.capture(.init(source: .unknown, content: .text("local history stays available")))
         let model = ClipboardSyncSettingsModel(module: module)
         await model.setEnabled(true)
+        try await waitForStatus(model) { model.status.phase == .accessDenied }
         XCTAssertEqual(model.status.phase, .accessDenied)
         XCTAssertEqual(model.recoveryHelpURL?.absoluteString,
             "https://support.apple.com/guide/security/secure-icloud-keychain-recovery-secdeb202947/web")
@@ -297,6 +309,7 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
 
         await model.setEnabled(true)
 
+        try await waitForStatus(model) { model.status.phase == .capabilityUnavailable }
         XCTAssertTrue(model.status.isEnabled)
         XCTAssertEqual(model.status.phase, .capabilityUnavailable)
         XCTAssertNil(model.status.lastCompletedAt)
@@ -346,6 +359,18 @@ final class ClipboardSyncSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.tags.map(\.eligibleEntryCount), [1])
         let entries = try await module.page(ClipboardHistoryQuery()).entries
         XCTAssertEqual(entries.map(\.id), [capture.entryID])
+    }
+
+    /// Settings commands finish after admission. Observe the later public state
+    /// without issuing another retry, which would change reset/failure behavior.
+    private func waitForStatus(_ model: ClipboardSyncSettingsModel, until predicate: () -> Bool,
+                               file: StaticString = #filePath, line: UInt = #line) async throws {
+        for _ in 0..<1_000 {
+            await model.refresh()
+            if predicate() { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("Queued sync did not publish the expected Settings state", file: file, line: line)
     }
 }
 

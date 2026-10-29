@@ -7,6 +7,66 @@ import XCTest
 
 @MainActor
 final class ClipboardSyncSettingsTransferTests: XCTestCase {
+    func testActivationLeavesTagChoicesAvailableDuringFileUpload() async throws {
+        let fixture = try await makeFixture()
+        try await fixture.module.setSyncTagSelected(fixture.firstTag, selected: true)
+        let model = ClipboardSyncSettingsModel(module: fixture.module)
+        await fixture.cloud.holdNextUpload()
+        var returned = false
+        let activation = Task {
+            await model.setEnabled(true)
+            returned = true
+        }
+        addTeardownBlock {
+            await fixture.cloud.cancel()
+            await activation.value
+        }
+        try await waitForUpload(fixture.cloud)
+        for _ in 0..<100 where !returned { try await Task.sleep(for: .milliseconds(2)) }
+        await model.refresh()
+
+        XCTAssertTrue(returned, "Activation must return while provider work remains held")
+        XCTAssertTrue(model.canSelectTag)
+        XCTAssertFalse(model.isPerformingAction)
+
+        await model.setEnabled(false)
+        await activation.value
+        XCTAssertFalse(model.status.isEnabled)
+    }
+
+    func testRetryLeavesTagChoicesAvailableDuringAnExistingFileUpload() async throws {
+        let fixture = try await makeFixture()
+        try await fixture.module.setSyncEnabled(true)
+        let model = ClipboardSyncSettingsModel(module: fixture.module)
+        await model.refresh()
+        await fixture.cloud.holdNextUpload()
+        let transfer = Task { try await fixture.module.setSyncTagSelected(fixture.firstTag, selected: true) }
+        addTeardownBlock {
+            await fixture.cloud.cancel()
+            _ = await transfer.result
+        }
+        try await waitForUpload(fixture.cloud)
+        var returned = false
+        let retry = Task {
+            await model.retry()
+            returned = true
+        }
+        addTeardownBlock {
+            await fixture.cloud.cancel()
+            await retry.value
+        }
+        for _ in 0..<100 where !returned { try await Task.sleep(for: .milliseconds(2)) }
+
+        XCTAssertTrue(returned, "Retry must return while provider work remains held")
+        XCTAssertTrue(model.canSelectTag)
+        XCTAssertFalse(model.isPerformingAction)
+
+        await model.setEnabled(false)
+        await retry.value
+        try await transfer.value
+        XCTAssertFalse(model.status.isEnabled)
+    }
+
     func testTagSelectionAllowsAnotherChoiceDuringFileUpload() async throws {
         let fixture = try await makeFixture()
         try await fixture.module.setSyncEnabled(true)
