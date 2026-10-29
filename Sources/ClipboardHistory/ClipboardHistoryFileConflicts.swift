@@ -97,19 +97,14 @@ extension ClipboardHistoryModule {
         }
         let snapshot = ClipboardSyncFileConflictSnapshot(accountID: basis.account.identifier, epoch: basis.control.epoch,
             keyID: basis.control.keyID, entryID: entryID.value, objectID: objectID, heads: basis.heads, locations: locations)
-        let id = UUID()
-        try syncWrite { database in
+        let id = try syncWrite { database in
             let current = try fileConflictBasis(entryID: entryID, objectID: objectID, in: database)
             guard current.account == basis.account, current.control.epoch == basis.control.epoch,
                   current.control.keyID == basis.control.keyID, current.heads == basis.heads,
                   Self.conflictLocationFactsMatch(locations, sources: current.locations) else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
-            try database.execute(sql: """
-                INSERT INTO clipboard_sync_file_conflict_plans(id, account_id, epoch, object_id, snapshot)
-                VALUES (?, ?, ?, ?, ?)
-                """, arguments: [id.uuidString, basis.account.identifier, basis.control.epoch.uuidString,
-                    objectID.uuidString, try JSONEncoder().encode(snapshot)])
+            return try retainFileConflictPlan(snapshot, in: database)
         }
         return .init(id: id, entryID: entryID, objectID: objectID,
             displayName: basis.versions.first?.descriptor.displayName ?? "", candidates: candidates, ancestryComplete: complete)
