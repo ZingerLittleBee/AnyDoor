@@ -374,7 +374,11 @@ if "--sign" in argv:
 if "--verify" in argv:
     sys.exit(0)
 if "--extract-certificates" in argv:
-    pathlib.Path(argv[argv.index("--extract-certificates") + 1] + "0").write_bytes(b"fixture Developer ID certificate")
+    # A separate prefix is interpreted as a code target, not an option value.
+    sys.exit(1)
+extraction = next((argument for argument in argv if argument.startswith("--extract-certificates=")), None)
+if extraction is not None:
+    pathlib.Path(extraction.split("=", 1)[1] + "0").write_bytes(b"fixture Developer ID certificate")
     sys.exit(0)
 if "--entitlements" in argv:
     if "FAKE_ENTITLEMENTS" in os.environ:

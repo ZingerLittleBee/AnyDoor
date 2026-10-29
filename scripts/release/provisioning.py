@@ -259,8 +259,9 @@ def verify(args: argparse.Namespace, *, now: datetime) -> None:
             raise ProvisioningError("signed entitlements do not match the approved Clipboard Sync capabilities")
         with tempfile.TemporaryDirectory(prefix="anydoor-signing-certificate-") as directory:
             prefix = str(Path(directory) / "certificate")
+            # This optional value must stay attached to its long option.
             result = subprocess.run(
-                ["codesign", "-d", "--extract-certificates", prefix, str(target)], capture_output=True,
+                ["codesign", "-d", f"--extract-certificates={prefix}", str(target)], capture_output=True,
             )
             leaf = Path(prefix + "0")
             if result.returncode or not leaf.is_file() or hashlib.sha1(leaf.read_bytes()).hexdigest().upper() != args.identity.upper():

@@ -43,7 +43,11 @@ if "--verify" in sys.argv:
             sys.exit(1)
     sys.exit(1 if os.environ.get("FAKE_INVALID_SIGNATURE") else 0)
 if "--extract-certificates" in sys.argv:
-    prefix = sys.argv[sys.argv.index("--extract-certificates") + 1]
+    # A separate prefix is interpreted as a code target, not an option value.
+    sys.exit(1)
+extraction = next((argument for argument in sys.argv if argument.startswith("--extract-certificates=")), None)
+if extraction is not None:
+    prefix = extraction.split("=", 1)[1]
     value = b"wrong certificate" if os.environ.get("FAKE_WRONG_CERTIFICATE") else b"fixture Developer ID certificate"
     pathlib.Path(prefix + "0").write_bytes(value)
     sys.exit(0)
