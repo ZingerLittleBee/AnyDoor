@@ -11,6 +11,17 @@ struct ClipboardSyncFileRestoration: Codable, Sendable {
     var completedBytes: Int64 = 0
 }
 
+struct ClipboardSyncFileRestorationIdentity: Hashable, Sendable {
+    let sharedID: String
+    let activationID: String
+    let versionID: UUID
+}
+
+struct ClipboardSyncFileRestorationPreparation: Sendable {
+    let identity: ClipboardSyncFileRestorationIdentity
+    let upload: ClipboardSyncPendingUpload?
+}
+
 extension ClipboardHistoryModule {
     static func createSyncFileRejoinSchema(in database: Database) throws {
         try database.execute(sql: """
@@ -71,13 +82,18 @@ extension ClipboardHistoryModule {
                 row["shared_id"] as String, descriptor.objectID.uuidString]) ?? false
     }
 
-    func prepareSyncFileRejoins(account: ClipboardSyncAccount, control: ClipboardSyncControl,
-        key: Data, generation: UInt64) async throws {
-        guard let services = syncServices else { return }
+    /// Authenticate only the next body immediately before dispatch. Persisted
+    /// preparation is a candidate location, never evidence that bytes are valid.
+    func nextSyncFileRestoration(account: ClipboardSyncAccount, control: ClipboardSyncControl,
+        key: Data, generation: UInt64, excluding: Set<ClipboardSyncFileRestorationIdentity>) async throws -> ClipboardSyncFileRestorationPreparation? {
+        guard let services = syncServices else { return nil }
         let rows = try syncFileRead { try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: $0) }
         for row in rows {
             let files = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: row["journal"])
             for file in files where !file.acknowledged {
+                let identity = ClipboardSyncFileRestorationIdentity(sharedID: row["shared_id"],
+                    activationID: row["activation_id"], versionID: file.descriptor.versionID)
+                guard !excluding.contains(identity) else { continue }
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
                 guard let body = file.descriptor.body,
                       try syncFileRead({ try Self.syncFileRestorationHasMember(file.descriptor, row: row, in: $0) }) else { continue }
@@ -92,7 +108,7 @@ extension ClipboardHistoryModule {
                     for directory in Set(candidates) {
                         do {
                             try await ClipboardSyncFileTransfer.verify(file.descriptor, directory: directory,
-                                account: account, control: control, key: key)
+                                account: account, control: control, key: key, faults: faultInjector)
                             recovered.directory = directory
                             break
                         } catch is CancellationError { throw CancellationError() } catch { continue }
@@ -110,22 +126,28 @@ extension ClipboardHistoryModule {
                 try await admitSyncFilePublication(generation, account: account, control: control, services: services)
                 if recovered.directory == nil && recovered.inline == nil { recovered.completedBytes = 0 }
                 let prepared = recovered
-                try syncWrite { database in
+                let stored = try syncWrite { database in
                     guard let active = try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database)
                         .first(where: { ($0["shared_id"] as String) == (row["shared_id"] as String)
                             && ($0["activation_id"] as String) == (row["activation_id"] as String) }),
-                          try Self.syncFileRestorationHasMember(prepared.descriptor, row: active, in: database) else { return }
+                          try Self.syncFileRestorationHasMember(prepared.descriptor, row: active, in: database) else { return false }
                     var latest = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: active["journal"])
                     guard let index = latest.firstIndex(where: { $0.descriptor.versionID == prepared.descriptor.versionID }),
-                          !latest[index].acknowledged else { return }
+                          !latest[index].acknowledged else { return false }
                     latest[index] = prepared
                     try Self.saveSyncFileRestorations(latest, row: active, in: database)
+                    return true
                 }
-                if prepared.directory == nil && prepared.inline == nil {
-                    try await replaceUnrecoverableSyncFile(file, row: row, account: account, control: control, key: key, generation: generation)
+                guard stored else { return .init(identity: identity, upload: nil) }
+                if let directory = prepared.directory {
+                    return .init(identity: identity, upload: .file(.init(record: body, directory: directory)))
                 }
+                if let inline = prepared.inline { return .init(identity: identity, upload: .inline(inline)) }
+                try await replaceUnrecoverableSyncFile(file, row: row, account: account, control: control, key: key, generation: generation)
+                return .init(identity: identity, upload: nil)
             }
         }
+        return nil
     }
 
     /// Missing random ciphertext cannot be regenerated under its old identity.
@@ -196,24 +218,14 @@ extension ClipboardHistoryModule {
         if stored { publishMutation() }
     }
 
-    func nextSyncFileRestoration(account: ClipboardSyncAccount, control: ClipboardSyncControl) throws -> ClipboardSyncPendingUpload? {
-        try syncFileRead { database in
-            for row in try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database) {
-                for file in try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: row["journal"]) where !file.acknowledged {
-                    guard let body = file.descriptor.body, try Self.syncFileRestorationHasMember(file.descriptor, row: row, in: database) else { continue }
-                    if let directory = file.directory { return .file(.init(record: body, directory: directory)) }
-                    if let inline = file.inline { return .inline(inline) }
-                }
-            }
-            return nil
-        }
-    }
-
     func syncFileRestorationIsPending(_ record: ClipboardSyncRemoteRecord, account: ClipboardSyncAccount,
-        control: ClipboardSyncControl, in database: Database) throws -> Bool {
+        control: ClipboardSyncControl, identity: ClipboardSyncFileRestorationIdentity? = nil, in database: Database) throws -> Bool {
         for row in try Self.activeSyncFileRejoins(accountID: account.identifier, epoch: control.epoch, in: database) {
+            if let identity, (row["shared_id"] as String) != identity.sharedID
+                || (row["activation_id"] as String) != identity.activationID { continue }
             if let file = try JSONDecoder().decode([ClipboardSyncFileRestoration].self, from: row["journal"])
                 .first(where: { $0.descriptor.body == record && !$0.acknowledged && ($0.directory != nil || $0.inline != nil) }),
+               identity.map({ $0.versionID == file.descriptor.versionID }) ?? true,
                try Self.syncFileRestorationHasMember(file.descriptor, row: row, in: database) { return true }
         }
         return false
