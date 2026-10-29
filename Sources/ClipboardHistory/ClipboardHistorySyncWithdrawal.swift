@@ -84,6 +84,21 @@ extension ClipboardHistoryModule {
         }
     }
 
+    func recordSyncWithdrawal(sharedID: String, accountID: String, epoch: String, in database: Database) throws {
+        guard try !Self.isSyncWithdrawn(sharedID, accountID: accountID, epoch: epoch, in: database),
+              try !Self.isSyncDeleted(sharedID, accountID: accountID, epoch: epoch, in: database),
+              try Bool.fetchOne(database, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_entries AS shared
+                JOIN clipboard_entries AS entry ON entry.id = shared.local_entry_id
+                WHERE shared.account_id = ? AND shared.epoch = ? AND shared.shared_id = ? AND NOT EXISTS (
+                    SELECT 1 FROM clipboard_entry_tags AS membership
+                    JOIN clipboard_sync_tags AS selected ON selected.tag_id = membership.tag_id
+                    WHERE membership.entry_id = shared.local_entry_id AND selected.account_id = shared.account_id AND selected.selected = 1))
+                """, arguments: [accountID, epoch, sharedID]) == true else { return }
+        try saveSyncWithdrawal(.init(sharedID: sharedID, withdrawn: true, revision: nextSyncTagRevision(in: database)),
+            accountID: accountID, epoch: epoch, recordID: nil, pending: true, in: database)
+    }
+
     func saveSyncWithdrawal(_ value: ClipboardSyncWithdrawal, accountID: String, epoch: String,
                             recordID: String?, pending: Bool, in database: Database) throws {
         guard UUID(uuidString: value.sharedID) != nil else { throw ClipboardSyncServiceError.corruptData }

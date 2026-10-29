@@ -10,6 +10,50 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testPendingSyncMutationsCommitOnePreparedOperationPerWriterTurn() async throws {
+        let probe = ClipboardHistorySQLTransactionProbe()
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let module = makeModule(services: services, keyByte: 0xF4, time: 1_000,
+            databasePreparation: { probe.install(on: $0) })
+        var ids: [ClipboardHistoryEntryID] = []
+        for index in 0..<12 {
+            let captured = try await module.capture(.init(source: .unknown, content: .text("original \(index)")))
+            ids.append(captured.entryID)
+        }
+        let shared = try await module.createTagDefinition(named: "Shared", assigningTo: ids[0]).definition
+        let extra = try await module.createTagDefinition(named: "Extra", assigningTo: ids[0]).definition
+        try await module.setSyncTagSelected(shared.id, selected: true)
+        try await module.setSyncTagSelected(extra.id, selected: true)
+        for id in ids { _ = try await module.apply(.setTags(id, [shared.id])) }
+        try await module.setSyncEnabled(true)
+        await module.suspendSync()
+        for index in 0..<8 {
+            _ = try await module.apply(.setFavorite(ids[index], true))
+            _ = try await module.apply(.editText(ids[index], "edited \(index)"))
+            _ = try await module.apply(.setTags(ids[index], [shared.id, extra.id]))
+        }
+        _ = try await module.apply(.delete(ids[8]))
+        _ = try await module.apply(.delete(ids[9]))
+        _ = try await module.apply(.setTags(ids[10], []))
+        _ = try await module.apply(.setTags(ids[11], []))
+        _ = try await module.renameTagDefinition(id: shared.id, to: "Renamed shared")
+        _ = try await module.renameTagDefinition(id: extra.id, to: "Renamed extra")
+        probe.start()
+        await module.resumeSync()
+        let counts = probe.stop()
+        XCTAssertGreaterThanOrEqual(counts.total, 30, "The measurement must include the queued metadata, edits, memberships, deletions, withdrawals, and tag changes")
+        XCTAssertEqual(counts.largestCommit, 1, "Each encrypted operation must commit and yield independently of the total pending history")
+        let status = await module.syncStatus()
+        XCTAssertEqual(status.phase, .upToDate)
+        let peer = makeModule(services: services, keyByte: 0xF5, time: 2_000)
+        try await peer.setSyncEnabled(true)
+        let entries = try await peer.page(.init()).entries
+        XCTAssertEqual(Set(entries.map(\.id)), Set(ids.prefix(8)))
+        XCTAssertTrue(entries.allSatisfy { $0.isFavorite && Set($0.tagIDs) == [shared.id, extra.id] })
+        XCTAssertEqual(Set(entries.compactMap(\.previewText)), Set((0..<8).map { "edited \($0)" }))
+    }
+
     @MainActor
     func testSyncPayloadPreparationAllowsHistoryWorkAndOffRevokesBeforeDraining() async throws {
         try await assertSyncPayloadPreparationAllowsHistoryWork(rejoin: false)

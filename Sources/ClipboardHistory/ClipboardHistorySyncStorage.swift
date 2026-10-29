@@ -104,18 +104,13 @@ extension ClipboardHistoryModule {
     func stageSyncBackfill(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
         generation: UInt64) async throws -> Int64 {
         let revision = try syncFileRead { try Self.historyRevision(in: $0) }
-        try syncWrite { database in
-            try stageSyncDeletions(account: account, control: control, key: key, in: database)
-            try recordSyncWithdrawals(in: database)
-            try recordLocalSyncMemberships(account: account, epoch: control.epoch, in: database)
-        }
+        try await recordSyncStagingState(account: account, control: control, generation: generation)
+        try await stageSyncDeletions(account: account, control: control, key: key, generation: generation)
         try await stageSyncWithdrawals(account: account, control: control, key: key, generation: generation)
-        try syncWrite { database in
-            try stageSyncTagMerges(account: account, control: control, key: key, in: database)
-            try stageSyncTagDefinitions(account: account, control: control, key: key, in: database)
-            try stageSyncMemberships(account: account, control: control, key: key, in: database)
-            try stageSyncMetadata(account: account, control: control, key: key, in: database)
-        }
+        try await stageSyncTagMerges(account: account, control: control, key: key, generation: generation)
+        try await stageSyncTagDefinitions(account: account, control: control, key: key, generation: generation)
+        try await stageSyncMemberships(account: account, control: control, key: key, generation: generation)
+        try await stageSyncMetadata(account: account, control: control, key: key, generation: generation)
         let store = try requiredPayloadStore()
         var afterID = ""
         while true {
@@ -193,7 +188,7 @@ extension ClipboardHistoryModule {
             }
         }
         try admitSync(generation)
-        try syncWrite { try stageSyncTextEdits(account: account, control: control, key: key, in: $0) }
+        try await stageSyncTextEdits(account: account, control: control, key: key, generation: generation)
         // Concurrent intent is deliberately not covered by this pass's witness.
         return revision
     }
