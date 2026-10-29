@@ -9,6 +9,50 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testUnpublishedWithdrawalRetainsRemoteEditBeforeLaterReactivation() async throws {
+        for hasLocalEdit in [false, true] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("pending-withdrawal-\(UUID())")
+            let first = makeModule(services: services, keyByte: 0xE6, time: 1_000, root: root)
+            let peer = makeModule(services: services, keyByte: 0xE7, time: 2_000)
+            let captured = try await first.capture(.init(source: .unknown, content: .text("initial shared text")))
+            let tag = try await first.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+            try await first.setSyncTagSelected(tag.id, selected: true)
+            try await first.setSyncEnabled(true)
+            try await peer.setSyncEnabled(true)
+            try await first.setSyncEnabled(false)
+            try await first.setSyncTagSelected(tag.id, selected: false)
+            if hasLocalEdit { _ = try await first.apply(.editText(captured.entryID, "retained local edit")) }
+            _ = try await peer.apply(.editText(captured.entryID, "accepted remote edit"))
+            await peer.retrySync()
+            let unrelated = ClipboardHistoryTagDefinition(id: UUID().uuidString.lowercased(), displayName: "Advance tag clock")
+            _ = try await peer.replaceTagDefinitions(with: [tag, unrelated])
+            for _ in 0..<3 {
+                try await peer.setSyncTagSelected(unrelated.id, selected: true)
+                try await peer.setSyncTagSelected(unrelated.id, selected: false)
+            }
+            try await peer.setSyncTagSelected(tag.id, selected: true)
+            try await first.setSyncEnabled(true)
+            let expected = hasLocalEdit ? Set(["retained local edit", "accepted remote edit"]) : Set(["accepted remote edit"])
+            let plan = try await first.textEditPlan(for: captured.entryID)
+            XCTAssertEqual(Set(plan.versions.map(\.text)), expected)
+            XCTAssertEqual(plan.hasConflict, hasLocalEdit)
+            await peer.retrySync()
+            let peerPlan = try await peer.textEditPlan(for: captured.entryID)
+            XCTAssertEqual(Set(peerPlan.versions.map(\.text)), expected)
+            try await first.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xE6, time: 3_000, root: root)
+            await reopened.resumeSync()
+            let restored = try await reopened.textEditPlan(for: captured.entryID)
+            XCTAssertEqual(Set(restored.versions.map(\.text)), expected)
+            let fresh = makeModule(services: services, keyByte: 0xE8, time: 4_000)
+            try await fresh.setSyncEnabled(true)
+            let freshPlan = try await fresh.textEditPlan(for: captured.entryID)
+            XCTAssertEqual(Set(freshPlan.versions.map(\.text)), expected)
+        }
+    }
+
     @MainActor
     func testChangingInitialFileSourceDoesNotStarveSharingOrBypassRetryDeadline() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("changing-source-\(UUID())")

@@ -243,6 +243,13 @@ extension ClipboardHistoryModule {
             if let subject = content.entrySubjectID,
                try Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)
                 || (!removesMembership && !resumesSubject && Self.isSyncWithdrawn(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database)) {
+                if case .textEdit(let edit) = content,
+                   try !Self.isSyncDeleted(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database),
+                   try Self.hasUnpublishedSyncWithdrawal(subject, accountID: account.identifier, epoch: record.epoch.uuidString, in: database) {
+                    // Retain the authenticated immutable edit without changing
+                    // the withdrawn local text or authorizing its publication.
+                    try Self.receiveSyncTextEdit(edit, record: record, account: account, in: database)
+                }
                 try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                     arguments: [account.identifier, record.epoch.uuidString, record.recordID])
                 return false

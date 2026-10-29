@@ -36,6 +36,21 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, sharedID]) ?? false
     }
 
+    /// A local withdrawal cannot discard accepted peer ancestry before the
+    /// provider has acknowledged that withdrawal. A later activation may win.
+    static func hasUnpublishedSyncWithdrawal(_ sharedID: String, accountID: String, epoch: String,
+        in database: Database) throws -> Bool {
+        try Bool.fetchOne(database, sql: """
+            SELECT EXISTS (SELECT 1 FROM clipboard_sync_withdrawals AS withdrawal
+              WHERE withdrawal.account_id = ? AND withdrawal.epoch = ? AND withdrawal.shared_id = ?
+                AND withdrawal.withdrawn = 1 AND withdrawal.origin = 'local'
+                AND (withdrawal.pending = 1 OR EXISTS (
+                  SELECT 1 FROM clipboard_sync_outbox AS outbox
+                  WHERE outbox.account_id = withdrawal.account_id AND outbox.epoch = withdrawal.epoch
+                    AND outbox.record_id = withdrawal.record_id AND outbox.acknowledged = 0)))
+            """, arguments: [accountID, epoch, sharedID]) ?? false
+    }
+
     /// Losing sharing eligibility does not delete the local copy or its tags.
     /// The durable marker, rather than absence of a cloud record, fences replay.
     func recordSyncWithdrawals(in database: Database) throws {
@@ -74,7 +89,10 @@ extension ClipboardHistoryModule {
                 record_id = excluded.record_id, origin = excluded.origin
             """, arguments: [accountID, epoch, value.sharedID, value.withdrawn, value.revision.counter,
                 value.revision.operationID, pending, recordID, pending ? "local" : "remote"])
-        if !value.withdrawn { try recordSyncFileRejoin(value, accountID: accountID, epoch: epoch, in: database) }
+        if !value.withdrawn {
+            try reconcileSyncTextVersions(subjectID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
+            try recordSyncFileRejoin(value, accountID: accountID, epoch: epoch, in: database)
+        }
         if value.withdrawn {
             try Self.rememberSyncFileOwnership(sharedID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
             // Cancel publication, but keep whether each local version was ever
