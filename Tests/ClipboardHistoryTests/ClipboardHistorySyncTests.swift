@@ -10,6 +10,75 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testMembershipSnapshotPreservesLocalTagsChangedDuringRemoteDownload() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let sender = makeModule(services: services, keyByte: 0xF4, time: 1_000)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("membership-race-\(UUID())")
+        let receiver = makeModule(services: services, keyByte: 0xF5, time: 2_000, root: root)
+        let entry = try await sender.capture(.init(source: .unknown, content: .text("membership race")))
+        let work = try await sender.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let retained = try await sender.createTagDefinition(named: "Retained", assigningTo: entry.entryID).definition
+        let later = try await sender.createTagDefinition(named: "Later", assigningTo: entry.entryID).definition
+        _ = try await sender.apply(.setTags(entry.entryID, [work.id, retained.id]))
+        for tag in [work, retained, later] { try await sender.setSyncTagSelected(tag.id, selected: true) }
+        try await sender.setSyncEnabled(true)
+        try await receiver.setSyncEnabled(true)
+        let personal = try await receiver.createTagDefinition(named: "Private", assigningTo: entry.entryID).definition
+        _ = try await sender.apply(.setTags(entry.entryID, [retained.id]))
+        await sender.retrySync()
+        let held = SyncTestProviderGate()
+        await cloud.holdNextDownload(held)
+        let receive = Task { await receiver.retrySync() }
+        addTeardownBlock { await held.release(); await receive.value }
+        await held.waitUntilEntered()
+        _ = try await receiver.apply(.setTags(entry.entryID, [work.id, retained.id, later.id, personal.id]))
+        await held.release()
+        await receive.value
+        let updated = try await receiver.page(.init()).entries
+        XCTAssertEqual(updated.first?.tagIDs, [retained.id, later.id, personal.id])
+        try await receiver.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xF5, time: 2_001, root: root)
+        await reopened.resumeSync()
+        await sender.retrySync()
+        let remote = try await sender.page(.init()).entries
+        XCTAssertEqual(remote.first?.tagIDs, [retained.id, later.id])
+        let restored = try await reopened.page(.init()).entries
+        XCTAssertEqual(restored.first?.tagIDs, [retained.id, later.id, personal.id])
+    }
+
+    func testIncomingMembershipWorkScalesWithImportedSubjects() async throws {
+        var measurements: [Int64] = []
+        for count in [20, 40] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let sender = makeModule(services: services, keyByte: 0xF2, time: 1_000)
+            let first = try await sender.capture(.init(source: .unknown, content: .text("membership work 0")))
+            let tag = try await sender.createTagDefinition(named: "Shared", assigningTo: first.entryID).definition
+            try await sender.setSyncTagSelected(tag.id, selected: true)
+            for index in 1..<count {
+                let entry = try await sender.capture(.init(source: .unknown, content: .text("membership work \(index)")))
+                _ = try await sender.apply(.setTags(entry.entryID, [tag.id]))
+            }
+            try await sender.setSyncEnabled(true)
+            let probe = ClipboardHistorySQLWorkProbe(table: "clipboard_sync_memberships")
+            let receiver = makeModule(services: services, keyByte: 0xF3, time: 2_000,
+                databasePreparation: { probe.install(on: $0) })
+            probe.start()
+            try await receiver.setSyncEnabled(true)
+            let steps = probe.stop()
+            measurements.append(steps)
+            let received = try await receiver.page(.init()).entries
+            XCTAssertEqual(received.count, count)
+            XCTAssertEqual(Set(received.compactMap(\.previewText)), Set((0..<count).map { "membership work \($0)" }))
+            XCTAssertTrue(received.allSatisfy { $0.tagIDs.contains(tag.id) })
+            XCTAssertGreaterThan(steps, 0, "The actual SQLCipher connections must be observed")
+        }
+        print("Membership import VM steps for 20/40 subjects: \(measurements)")
+        XCTAssertLessThan(Double(measurements[1]) / Double(measurements[0]), 2.7,
+            "Doubling imported subjects must not resnapshot all earlier subjects before every operation")
+    }
+
     func testAutomaticResumeQueuedDuringPermanentFailureCannotAuthorizeRetry() async throws {
         let held = SyncTestProviderGate()
         let started = expectation(description: "Provider response is held for automatic resume")
@@ -4237,6 +4306,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
         faults: ClipboardHistoryFaultInjector = .init(),
         workingRoot: URL? = nil,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil,
         recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
@@ -4249,7 +4319,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
             now: clock ?? { Date(timeIntervalSince1970: time) },
             visionRecognizer: recognizer,
             syncServices: services,
-            testingSyncWorkingRoot: workingRoot
+            testingSyncWorkingRoot: workingRoot,
+            testingDatabasePreparation: databasePreparation
         ))
     }
 
@@ -4485,7 +4556,13 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return ClipboardSyncChanges(records: reversesDelivery ? Array(page.reversed()) : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
-    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+    private var nextDownloadGate: SyncTestProviderGate?
+    func holdNextDownload(_ gate: SyncTestProviderGate) { nextDownloadGate = gate }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) async throws -> [Data] {
+        if let gate = nextDownloadGate {
+            nextDownloadGate = nil
+            await gate.wait()
+        }
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
         if record.kind == .fileBody, corruptsControlAfterBody {
@@ -4781,8 +4858,17 @@ private actor SyncTestFaultKeys: ClipboardSyncKeyStoring {
 
 private actor SyncTestProviderGate {
     private var continuation: CheckedContinuation<Void, Never>?
+    private var enteredWaiter: CheckedContinuation<Void, Never>?
+    private var entered = false
     private var released = false
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { enteredWaiter = $0 }
+    }
     func wait() async {
+        entered = true
+        enteredWaiter?.resume()
+        enteredWaiter = nil
         guard !released else { return }
         await withCheckedContinuation { continuation = $0 }
     }

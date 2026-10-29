@@ -228,7 +228,7 @@ extension ClipboardHistoryModule {
                 epoch: record.epoch.uuidString, recordID: record.recordID, in: database)
             guard !exists || recoversRoot else { return false }
             try recordLocalSyncTags(accountID: account.identifier, in: database)
-            try recordLocalSyncMemberships(account: account, epoch: record.epoch, in: database)
+            try recordLocalSyncMemberships(before: content, account: account, epoch: record.epoch, in: database)
             if try rememberReceivedSyncFileContent(content, record: record, account: account, in: database) {
                 try database.execute(sql: "INSERT OR IGNORE INTO clipboard_sync_inbox(account_id, epoch, record_id) VALUES (?, ?, ?)",
                     arguments: [account.identifier, record.epoch.uuidString, record.recordID])

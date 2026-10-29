@@ -97,7 +97,11 @@ packages, and the shared content lifecycle implement the
 [Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Selected definitions and associations use independent encrypted operations;
-unselected names and memberships remain local. Initial content snapshots seed
+unselected names and memberships remain local. Before importing an entry operation,
+the same writer transaction snapshots local membership differences for that
+subject, including edits made during a provider await. Tag-state and merge
+operations retain their required global snapshot; file-body/version operations
+do not scan unrelated memberships. Initial content snapshots seed
 associations without overwriting later operations. Same-name tags remain distinct
 in Settings, history filters, and card menus. Explicit merge previews disclose the
 newly eligible local history and reject stale confirmation; persistent aliases

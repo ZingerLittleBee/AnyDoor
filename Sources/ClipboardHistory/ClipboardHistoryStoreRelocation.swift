@@ -574,13 +574,15 @@ extension ClipboardHistoryModule {
         relocation: ClipboardHistoryStoreRelocation?,
         at root: URL,
         keyStore: any ClipboardHistoryMasterKeyStoring,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) -> StoreResolution {
         guard let relocation else {
             return resolveStore(
                 at: root,
                 keyStore: keyStore,
-                maintenanceDate: maintenanceDate
+                maintenanceDate: maintenanceDate,
+                databasePreparation: databasePreparation
             )
         }
         do {
@@ -598,13 +600,15 @@ extension ClipboardHistoryModule {
             return resolveStore(
                 at: root,
                 keyStore: keyStore,
-                maintenanceDate: maintenanceDate
+                maintenanceDate: maintenanceDate,
+                databasePreparation: databasePreparation
             )
         }
         let resolution = resolveStore(
             at: root,
             keyStore: keyStore,
-            maintenanceDate: maintenanceDate
+            maintenanceDate: maintenanceDate,
+            databasePreparation: databasePreparation
         )
         return adoptPendingDisplacements(
             relocation: relocation,

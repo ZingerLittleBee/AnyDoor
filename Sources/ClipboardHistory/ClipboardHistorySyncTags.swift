@@ -79,11 +79,20 @@ extension ClipboardHistoryModule {
 
     /// Snapshot local differences before applying incoming operations. A local
     /// edit made while a provider request is suspended must not be overwritten.
-    func recordLocalSyncMemberships(account: ClipboardSyncAccount, epoch: UUID, in database: Database) throws {
+    func recordLocalSyncMemberships(account: ClipboardSyncAccount, epoch: UUID,
+        sharedID: String? = nil, in database: Database) throws {
         let selected = Set(try selectedSyncTags(accountID: account.identifier, in: database).map(\.id))
-        let entries = try Row.fetchAll(database, sql: """
-            SELECT shared_id, local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ?
-            """, arguments: [account.identifier, epoch.uuidString])
+        let entries: [Row]
+        if let sharedID {
+            entries = try Row.fetchAll(database, sql: """
+                SELECT shared_id, local_entry_id FROM clipboard_sync_entries
+                WHERE account_id = ? AND epoch = ? AND shared_id = ?
+                """, arguments: [account.identifier, epoch.uuidString, sharedID])
+        } else {
+            entries = try Row.fetchAll(database, sql: """
+                SELECT shared_id, local_entry_id FROM clipboard_sync_entries WHERE account_id = ? AND epoch = ?
+                """, arguments: [account.identifier, epoch.uuidString])
+        }
         for entry in entries {
             let sharedID: String = entry["shared_id"]
             let localID: String = entry["local_entry_id"]
@@ -101,6 +110,24 @@ extension ClipboardHistoryModule {
                 try saveSyncMembership(.init(sharedID: sharedID, tagID: tagID, present: present,
                     revision: nextSyncTagRevision(in: database)), account: account, epoch: epoch, pending: true, in: database)
             }
+        }
+    }
+
+    func recordLocalSyncMemberships(before content: ClipboardSyncContent, account: ClipboardSyncAccount,
+        epoch: UUID, in database: Database) throws {
+        switch content {
+        case .tagState, .tagMerge:
+            try recordLocalSyncMemberships(account: account, epoch: epoch, in: database)
+        case .withdrawal(let value):
+            try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: value.sharedID, in: database)
+        case .deletion(let value):
+            try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: value.sharedID, in: database)
+        case .entry, .text, .textEdit, .metadata, .rejoin, .tagMembership:
+            if let subject = content.entrySubjectID {
+                try recordLocalSyncMemberships(account: account, epoch: epoch, sharedID: subject, in: database)
+            }
+        case .tag, .fileBody, .fileVersion:
+            break
         }
     }
 
