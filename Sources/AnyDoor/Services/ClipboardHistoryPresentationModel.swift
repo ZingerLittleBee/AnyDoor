@@ -843,7 +843,7 @@ final class ClipboardHistoryPresentationModel {
         do {
             _ = try await operations.associateFileLocation(request)
             invalidateMaterializations(for: request.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -856,12 +856,12 @@ final class ClipboardHistoryPresentationModel {
         do {
             _ = try await operations.reassociateFileLocation(request)
             invalidateMaterializations(for: request.selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             let failure = ClipboardHistoryActionFailure(error)
             invalidateMaterializations(for: request.selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             actionFailure = failure
             return false
         }
@@ -872,12 +872,12 @@ final class ClipboardHistoryPresentationModel {
         do {
             try await operations.setFileLocationPaused(selection, paused)
             invalidateMaterializations(for: selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             let failure = ClipboardHistoryActionFailure(error)
             invalidateMaterializations(for: selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             actionFailure = failure
             return false
         }
