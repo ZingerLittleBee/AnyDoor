@@ -135,7 +135,11 @@ extension ClipboardHistoryModule {
     /// Passing false schedules the retry without awaiting provider transfer.
     public func retrySync(waitForSync: Bool = true) async {
         guard !syncSuspended else { return }
+        let generation = syncGeneration
         do {
+            try await waitForWriteTurn()
+            try Task.checkCancellation()
+            guard generation == syncGeneration, !syncSuspended else { return }
             try syncWrite { database in
                 try database.execute(sql: """
                     UPDATE clipboard_sync_file_retries SET retry_not_before = 0
@@ -143,6 +147,7 @@ extension ClipboardHistoryModule {
                     """)
             }
         } catch {
+            guard generation == syncGeneration, !syncSuspended, !Task.isCancelled else { return }
             setSyncPhase(.failed(.localStorage))
             return
         }
