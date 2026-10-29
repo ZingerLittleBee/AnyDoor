@@ -16,7 +16,9 @@ extension ClipboardSyncFilePublication {
         if fstatat(directory, descriptor.displayName, &status, AT_SYMLINK_NOFOLLOW) == 0 {
             let tree = try ClipboardFileTree(destination)
             let measurement = try tree.stream { _ in }
-            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount else { throw ClipboardSyncServiceError.localStorage }
+            guard measurement.digest == descriptor.contentDigest, measurement.original == descriptor.originalByteCount else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(EEXIST)
+            }
             return .init(directory: url, name: descriptor.displayName, pendingName: nil,
                 parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(status), treeWitness: tree)
         }

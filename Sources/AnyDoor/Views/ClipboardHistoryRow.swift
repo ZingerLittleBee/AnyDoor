@@ -36,12 +36,14 @@ struct ClipboardHistoryRow: View {
             isSelected ? Color.accentColor.opacity(0.18) : .clear,
             in: .rect(cornerRadius: 6)
         )
-        .task(id: entry.filePresentationIdentity) {
-            preview = await presentation.materialization(
+        .task(id: presentation.materializationIdentity(for: entry)) {
+            let loaded = await presentation.materialization(
                 for: entry.id,
                 purpose: .preview,
                 recordsFailure: false
             )
+            guard !Task.isCancelled else { return }
+            preview = loaded
         }
     }
 

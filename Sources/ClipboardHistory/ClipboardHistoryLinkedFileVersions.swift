@@ -28,12 +28,13 @@ extension ClipboardHistoryModule {
         for source in sources {
             try await admitSync(generation, account: account, services: services)
             guard !activeApplicationUpdates.contains(source.id) else { continue }
-            guard !source.hasPendingApplication else { continue }
             if try linkedRead({ try Bool.fetchOne($0, sql: """
                 SELECT EXISTS(SELECT 1 FROM clipboard_sync_file_resolutions
                   WHERE account_id = ? AND epoch = ? AND object_id = ? AND phase = 'preparing')
                 """, arguments: [account.identifier, control.epoch.uuidString, source.objectID.uuidString]) }) == true { continue }
             guard let selection = try syncFileSelection(objectID: source.objectID) else { continue }
+            if source.hasPendingApplication,
+               try !linkedApplicationCanRetry(source, descriptor: selection.latest) { continue }
             if !selection.hasConflict, selection.latest.versionID == source.baseVersionID {
                 if source.state == .current {
                     if !source.hasPendingApplication {
@@ -164,13 +165,36 @@ extension ClipboardHistoryModule {
         guard applicationPlan != nil || !(source.isApplication || ClipboardApplicationPackage.requiresExplicitUpdate(source.url)) else {
             throw ClipboardHistoryApplicationUpdateError.stalePlan
         }
-        let preparation = Task.detached(priority: .utility) { try ClipboardLinkedFileIO.prepareReplacement(version, at: source.url) }
+        if source.hasPendingApplication,
+           try !linkedApplicationCanRetry(source, descriptor: version.descriptor) { throw CancellationError() }
+        let pending: (url: URL, identity: Data)? = try linkedRead { database in
+            guard source.hasPendingApplication else { return nil }
+            guard let row = try Row.fetchOne(database, sql: "SELECT replacement_path, replacement_identity FROM clipboard_sync_linked_locations WHERE id = ?",
+                    arguments: [source.id.uuidString]),
+                  let path: String = row["replacement_path"], let identity: Data = row["replacement_identity"] else { throw CancellationError() }
+            return (URL(fileURLWithPath: path), identity)
+        }
+        let preparation = Task.detached(priority: .utility) {
+            if let pending {
+                let proof = try ClipboardLinkedFileIO.inspect(pending.url, expectedIdentity: pending.identity)
+                guard proof.digest == version.descriptor.contentDigest, proof.byteCount == version.descriptor.originalByteCount else {
+                    throw ClipboardSyncServiceError.corruptData
+                }
+                return proof
+            }
+            return try ClipboardLinkedFileIO.prepareReplacement(version, at: source.url)
+        }
         let replacement = try await withTaskCancellationHandler { try await preparation.value } onCancel: { preparation.cancel() }
-        var journaled = false
+        var journaled = pending != nil
         defer { if !journaled { try? FileManager.default.removeItem(at: replacement.url) } }
         try await admitSync(generation, account: account, services: services)
         guard try linkedSourceIsCurrent(source, account: account, control: control) else { return }
         try syncWrite { database in
+            guard let current = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ?",
+                arguments: [source.id.uuidString]),
+                  (current["applying_version_id"] as String?) == (pending == nil ? nil : version.descriptor.versionID.uuidString),
+                  (current["replacement_path"] as String?) == pending?.url.path,
+                  (current["replacement_identity"] as Data?) == pending?.identity else { throw CancellationError() }
             try database.execute(sql: """
                 UPDATE clipboard_sync_linked_locations SET applying_version_id = ?, applying_digest = ?,
                   replacement_path = ?, replacement_identity = ? WHERE id = ?
@@ -214,7 +238,22 @@ extension ClipboardHistoryModule {
         } else {
             try setLinkedConflict(source, remoteVersion: version.descriptor.versionID)
             try clearLinkedApplication(source.id)
-            try? FileManager.default.removeItem(at: replacement.url)
+            // A failed exchange or rollback can race an editor save. Retiring
+            // the journal does not authorize deleting either visible output.
+        }
+    }
+
+    func linkedApplicationCanRetry(_ source: ClipboardLinkedLocationSource,
+        descriptor: ClipboardSyncFileDescriptor) throws -> Bool {
+        guard descriptor.objectID == source.objectID else { return false }
+        return try linkedRead { database in
+            try Bool.fetchOne(database, sql: """
+                SELECT EXISTS(SELECT 1 FROM clipboard_sync_linked_locations
+                  WHERE id = ? AND revision = ? AND identity = ? AND base_version_id = ?
+                    AND applying_version_id = ? AND applying_digest = ?
+                    AND replacement_path IS NOT NULL AND replacement_identity IS NOT NULL)
+                """, arguments: [source.id.uuidString, source.revision, source.identity, source.baseVersionID.uuidString,
+                    descriptor.versionID.uuidString, descriptor.contentDigest]) == true
         }
     }
 
@@ -278,14 +317,20 @@ extension ClipboardHistoryModule {
                 guard try linkedApplicationJournalIsCurrent(source, version: version, digest: digest,
                     replacementIdentity: identity, replacementPath: path, account: account, control: control) else { continue }
                 try finishLinkedApplication(source, versionID: version, digest: digest, proof: proof)
-            } else if let original, let prepared, original.digest == source.baseDigest, prepared.digest == digest,
+            } else if let original, let prepared,
                       original.stamp.matches(source.url), prepared.stamp.matches(replacementURL) {
-                // Both original names and complete contents positively prove
-                // that no exchange is pending. Keep the visible prepared output:
-                // it can be independently edited after this inspection.
-                try clearLinkedApplication(source.id)
+                // Both recorded identities still occupy their original names.
+                // Keep an unchanged candidate journal for exact-version reuse,
+                // so a persistent no-swap failure cannot allocate another tree.
+                // Saved edits or a different selected version retire this intent
+                // without deleting either file or blocking the current choice.
+                let selection = try syncFileSelection(objectID: source.objectID)
+                if original.digest != source.baseDigest || prepared.digest != digest ||
+                    selection?.latest.versionID != version || selection?.hasConflict == true {
+                    try clearLinkedApplication(source.id)
+                }
             }
-            // An unreadable, moved, or changed root proves neither outcome.
+            // An unreadable, moved, or replaced root proves neither outcome.
             // Retain the exact journal and both outputs for a later recovery.
         }
     }

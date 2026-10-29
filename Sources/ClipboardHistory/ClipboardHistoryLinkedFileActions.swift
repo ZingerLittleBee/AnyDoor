@@ -5,7 +5,6 @@ extension ClipboardHistoryModule {
     public func reassociateFileLocation(_ request: ClipboardHistoryFileLocationReassociation) async throws -> ClipboardHistoryLinkedFileLocation {
         let generation = syncGeneration
         let baseline = try linkedRead { try Self.linkedFileActionRow(request.selection, in: $0) }
-        guard (baseline["applying_version_id"] as String?) == nil else { throw ClipboardHistoryModuleError.operationUnavailable }
         let inspection = Task.detached(priority: .userInitiated) { try ClipboardLinkedFileIO.inspect(request.url) }
         let proof = try await withTaskCancellationHandler { try await inspection.value } onCancel: { inspection.cancel() }
         try Task.checkCancellation()
@@ -15,7 +14,14 @@ extension ClipboardHistoryModule {
             let current = try Self.linkedFileActionRow(request.selection, in: database)
             guard (current["account_id"] as String) == (baseline["account_id"] as String),
                   (current["epoch"] as String) == (baseline["epoch"] as String),
-                  (current["applying_version_id"] as String?) == nil else { throw ClipboardHistoryModuleError.operationUnavailable }
+                  (current["base_version_id"] as String) == (baseline["base_version_id"] as String),
+                  (current["base_digest"] as Data) == (baseline["base_digest"] as Data),
+                  (current["identity"] as Data) == (baseline["identity"] as Data),
+                  (current["applying_version_id"] as String?) == (baseline["applying_version_id"] as String?),
+                  (current["applying_digest"] as Data?) == (baseline["applying_digest"] as Data?),
+                  (current["replacement_identity"] as Data?) == (baseline["replacement_identity"] as Data?),
+                  (current["replacement_path"] as String?) == (baseline["replacement_path"] as String?),
+                  proof.stamp.matches(proof.url) else { throw ClipboardHistoryModuleError.operationUnavailable }
             let occupied = try Bool.fetchOne(database, sql: """
                 SELECT EXISTS (SELECT 1 FROM clipboard_sync_linked_locations
                 WHERE account_id = ? AND epoch = ? AND id != ? AND (path = ? OR identity = ?))
@@ -23,11 +29,16 @@ extension ClipboardHistoryModule {
                     request.selection.locationID.uuidString, proof.url.path, proof.identity]) == true
             guard !occupied else { throw ClipboardHistoryModuleError.fileLocationAlreadyAssociated }
             let digest: Data = current["base_digest"]
+            // Explicit reassociation retires uncertain exchange authority, not
+            // either visible output. The revision also revokes a queued exchange
+            // at its serialized final admission; no swap outcome is inferred.
             try database.execute(sql: """
                 UPDATE clipboard_sync_linked_locations SET path = ?, bookmark = ?, identity = ?, native_identity = ?,
-                  observed_digest = ?, state = ?, pending_version_id = NULL, revision = revision + 1 WHERE id = ?
+                  observed_digest = ?, state = ?, pending_version_id = NULL, revision = revision + 1,
+                  applying_version_id = NULL, applying_digest = NULL, replacement_path = NULL, replacement_identity = NULL WHERE id = ?
                 """, arguments: [proof.url.path, proof.bookmark, proof.identity, try proof.nativeIdentity?.encoded(),
                     proof.digest, proof.digest == digest ? "current" : "localChanges", request.selection.locationID.uuidString])
+            try Self.completeLinkedSyncFileWork(request.selection.locationID, in: database)
             try Self.bumpHistoryRevision(in: database)
             guard let row = try Row.fetchOne(database, sql: "SELECT * FROM clipboard_sync_linked_locations WHERE id = ?",
                 arguments: [request.selection.locationID.uuidString]) else { throw ClipboardHistoryModuleError.operationUnavailable }

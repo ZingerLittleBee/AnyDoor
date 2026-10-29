@@ -104,7 +104,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             try await module.materialize(request)
         }
         requestSyncFileDownload = { entryID, objectID, versionID in
-            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID)
+            try await module.requestSyncFileDownload(entryID: entryID, objectID: objectID, versionID: versionID, waitForSync: false)
         }
         requestFileConflictDownload = { try await module.requestFileConflictDownload($0, versionID: $1) }
         resolveFileConflict = { try await module.resolveFileConflict($0, choosing: $1) }
@@ -315,6 +315,7 @@ struct ClipboardHistoryPresentationSource: Equatable, Identifiable {
 }
 
 enum ClipboardHistoryActionFailure: Equatable {
+    case previewChanged
     case operationUnavailable
     case entryNotFound
     case storeUnavailable
@@ -449,6 +450,8 @@ final class ClipboardHistoryPresentationModel {
     /// `cacheMaterialization` / `pruneMaterializations`.
     private var materializationOrder: [MaterializationKey] = []
     private(set) var materializationGeneration: UInt64 = 0
+    private var entryMaterializationGenerations: [ClipboardHistoryEntryID: UInt64] = [:]
+    private var unlistedMaterializationGeneration: UInt64 = 0
     /// Whether an entry's host-action materialization had exact text on every
     /// item, which is what the ⌥↵ hint offers. Kept apart from the bounded
     /// cache, which the wall's mounted cards churn, and recorded whatever
@@ -501,6 +504,12 @@ final class ClipboardHistoryPresentationModel {
         self.operations = operations
     }
 
+    func materializationIdentity(for entry: ClipboardHistoryEntry) -> String {
+        entry.filePresentationIdentity + ":" + String(entry.materializationRevision)
+            + ":" + String(materializationGeneration)
+            + ":" + String(entryMaterializationGenerations[entry.id, default: 0])
+    }
+
     func reload() async {
         invalidateAllMaterializations()
         await loadFirstPage(preservingSelection: true)
@@ -517,10 +526,7 @@ final class ClipboardHistoryPresentationModel {
     /// published in one step, keeping the selection by id. Changes that land
     /// while a refresh runs coalesce into one more pass.
     func refreshForStoreChange() async {
-        // A row contains only a bounded text preview. Even an identical row
-        // can now have different exact text, so file identity cannot validate
-        // decrypted payloads after an authoritative store change.
-        invalidateAllMaterializations()
+        invalidateUnlistedMaterializations()
         guard !isRefreshingForStoreChange else {
             storeChangePending = true
             return
@@ -704,7 +710,7 @@ final class ClipboardHistoryPresentationModel {
             applicationUpdatePlan = nil
             applicationUpdateNotice = .applied
             invalidateMaterializations(for: plan.entryID)
-            await reload()
+            await refreshForStoreChange()
         } catch {
             guard generation == applicationUpdateGeneration else { return }
             await loadApplicationUpdate(generation: generation)
@@ -934,7 +940,11 @@ final class ClipboardHistoryPresentationModel {
                     facets: entry.facets,
                     isFavorite: entry.isFavorite,
                     tagIDs: entry.tagIDs.subtracting([id]),
-                    source: entry.source
+                    source: entry.source,
+                    materializationRevision: entry.materializationRevision,
+                    hasTextConflict: entry.hasTextConflict,
+                    syncFiles: entry.syncFiles,
+                    linkedFileLocations: entry.linkedFileLocations
                 )
             }
             return true
@@ -1259,7 +1269,7 @@ final class ClipboardHistoryPresentationModel {
         guard requestRevision == revision, requestQuery == query else {
             return
         }
-        invalidateChangedFileMaterializations(in: rebasedEntries)
+        invalidateChangedMaterializations(in: rebasedEntries)
         entries = rebasedEntries
         nextCursor = cursor
         totalCount = refreshedCount
@@ -1336,12 +1346,14 @@ final class ClipboardHistoryPresentationModel {
             let outcome = try await operations.apply(mutation)
             switch outcome {
             case .updated(let entry):
+                var payloadChanged = mutation.changesPayload
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    payloadChanged = payloadChanged || materializationIdentity(for: entries[index]) != materializationIdentity(for: entry)
                     entries[index] = entry
                 }
                 invalidateMaterializations(
                     for: entry.id,
-                    payloadChanged: mutation.changesPayload
+                    payloadChanged: payloadChanged
                 )
                 if Self.requiresRefetch(for: mutation, query: query) {
                     await loadFirstPage(preservingSelection: true)
@@ -1383,6 +1395,18 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    func previewMaterialization(for entryID: ClipboardHistoryEntryID) async -> ClipboardHistoryMaterialization? {
+        for _ in 0..<2 {
+            guard !Task.isCancelled else { return nil }
+            let value = await materialization(for: entryID, purpose: .fullPreview)
+            guard !Task.isCancelled else { return nil }
+            if let value { return value }
+            if actionFailure != nil { return nil }
+        }
+        actionFailure = .previewChanged
+        return nil
+    }
+
     func materialization(
         for entryID: ClipboardHistoryEntryID,
         purpose: ClipboardHistoryMaterializationPurpose,
@@ -1396,6 +1420,9 @@ final class ClipboardHistoryPresentationModel {
         }
         let requestRevision = revision
         let requestMaterializationGeneration = materializationGeneration
+        let requestEntryGeneration = entryMaterializationGenerations[entryID, default: 0]
+        let requestWasUnlisted = !entries.contains { $0.id == entryID }
+        let requestUnlistedGeneration = unlistedMaterializationGeneration
         if recordsFailure {
             actionFailure = nil
         }
@@ -1406,7 +1433,9 @@ final class ClipboardHistoryPresentationModel {
                     purpose: purpose
                 )
             )
-            guard !usesCache || requestMaterializationGeneration == materializationGeneration else {
+            guard !usesCache || (requestMaterializationGeneration == materializationGeneration
+                && requestEntryGeneration == entryMaterializationGenerations[entryID, default: 0]
+                && (!requestWasUnlisted || requestUnlistedGeneration == unlistedMaterializationGeneration)) else {
                 return nil
             }
             if usesCache, requestRevision == revision {
@@ -1421,7 +1450,9 @@ final class ClipboardHistoryPresentationModel {
             return value
         } catch {
             if recordsFailure, requestRevision == revision,
-               (!usesCache || requestMaterializationGeneration == materializationGeneration) {
+               (!usesCache || (requestMaterializationGeneration == materializationGeneration
+                && requestEntryGeneration == entryMaterializationGenerations[entryID, default: 0]
+                && (!requestWasUnlisted || requestUnlistedGeneration == unlistedMaterializationGeneration))) {
                 actionFailure = ClipboardHistoryActionFailure(error)
             }
             return nil
@@ -1477,6 +1508,7 @@ final class ClipboardHistoryPresentationModel {
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
+        invalidateUnlistedMaterializations()
         // This load reads the store after any change announced so far.
         storeChangePending = false
         firstPageTask?.cancel()
@@ -1538,6 +1570,7 @@ final class ClipboardHistoryPresentationModel {
             }
             let status = result.status
             guard status.availability == .ready else {
+                invalidateAllMaterializations()
                 entries = []
                 selectedID = nil
                 contentState = .unavailable(status.reason)
@@ -1562,7 +1595,7 @@ final class ClipboardHistoryPresentationModel {
             }
             switch loadedPage.state {
             case .ready:
-                invalidateChangedFileMaterializations(in: loadedPage.entries)
+                invalidateChangedMaterializations(in: loadedPage.entries)
                 entries = loadedPage.entries
                 nextCursor = loadedPage.nextCursor
                 pagingState = loadedPage.nextCursor == nil
@@ -1573,6 +1606,7 @@ final class ClipboardHistoryPresentationModel {
                 let currentIDs = Set(entries.map(\.id))
                 pruneMaterializations { currentIDs.contains($0) }
             case .indexing:
+                invalidateChangedMaterializations(in: [])
                 entries = []
                 selectedID = nil
                 nextCursor = nil
@@ -1580,6 +1614,7 @@ final class ClipboardHistoryPresentationModel {
                 totalCount = nil
                 contentState = .indexing
             case .failed(let failure):
+                invalidateChangedMaterializations(in: [])
                 entries = []
                 selectedID = nil
                 nextCursor = nil
@@ -1593,6 +1628,7 @@ final class ClipboardHistoryPresentationModel {
             // the current revision came from below, and nothing else would
             // settle this load.
             guard requestRevision == revision else { return }
+            invalidateAllMaterializations()
             entries = []
             selectedID = nil
             nextCursor = nil
@@ -1628,24 +1664,39 @@ final class ClipboardHistoryPresentationModel {
         for entryID: ClipboardHistoryEntryID,
         payloadChanged: Bool = true
     ) {
-        if payloadChanged { materializationGeneration &+= 1 }
-        pruneMaterializations(keepsEligibility: !payloadChanged) {
+        guard payloadChanged else { return }
+        entryMaterializationGenerations[entryID, default: 0] &+= 1
+        pruneMaterializations {
             $0 != entryID
         }
     }
 
     private func invalidateAllMaterializations() {
         materializationGeneration &+= 1
+        entryMaterializationGenerations.removeAll()
         pruneMaterializations { _ in false }
     }
 
-    private func invalidateChangedFileMaterializations(in incoming: [ClipboardHistoryEntry]) {
-        let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.filePresentationIdentity) })
+    private func invalidateChangedMaterializations(in incoming: [ClipboardHistoryEntry]) {
+        invalidateUnlistedMaterializations()
+        let previous = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, materializationIdentity(for: $0)) })
+        let incomingIDs = Set(incoming.map(\.id))
+        for id in previous.keys where !incomingIDs.contains(id) {
+            invalidateMaterializations(for: id)
+        }
         for entry in incoming {
-            if let identity = previous[entry.id], identity != entry.filePresentationIdentity {
+            if let identity = previous[entry.id], identity != materializationIdentity(for: entry) {
                 invalidateMaterializations(for: entry.id)
             }
         }
+    }
+
+    /// Unlisted requests have no published content token to compare. Keep
+    /// their conservative invalidation separate from visible card identity.
+    private func invalidateUnlistedMaterializations() {
+        unlistedMaterializationGeneration &+= 1
+        let listedIDs = Set(entries.map(\.id))
+        pruneMaterializations { listedIDs.contains($0) }
     }
 
     private func cacheMaterialization(
@@ -1671,16 +1722,14 @@ final class ClipboardHistoryPresentationModel {
     }
 
     /// Keeps what is cached for the entries `isKept` accepts and drops the
-    /// rest, along with their plain-text eligibility unless `keepsEligibility`.
+    /// rest, along with their plain-text eligibility.
     private func pruneMaterializations(
-        keepsEligibility: Bool = false,
         keeping isKept: (ClipboardHistoryEntryID) -> Bool
     ) {
         materializationCache = materializationCache.filter {
             isKept($0.key.entryID)
         }
         materializationOrder.removeAll { !isKept($0.entryID) }
-        guard !keepsEligibility else { return }
         plainTextEligibility = plainTextEligibility.filter { isKept($0.key) }
     }
 
@@ -1702,9 +1751,9 @@ final class ClipboardHistoryPresentationModel {
         }) else {
             return
         }
+        let payloadChanged = materializationIdentity(for: entries[index]) != materializationIdentity(for: entry)
         entries[index] = entry
-        // Only tag creation replaces an entry, and a tag is no payload.
-        invalidateMaterializations(for: entry.id, payloadChanged: false)
+        invalidateMaterializations(for: entry.id, payloadChanged: payloadChanged)
     }
 
     private static func sourceName(

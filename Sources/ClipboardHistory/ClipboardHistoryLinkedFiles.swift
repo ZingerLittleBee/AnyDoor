@@ -207,6 +207,7 @@ extension ClipboardHistoryModule {
         let nativeIdentity: Data? = row["native_identity"]
         let storedApplication = row["is_application"] as Bool? ?? false
         let revision: UInt64 = row["revision"]
+        let pendingApplication = (row["applying_version_id"] as String?) != nil
         let applicationVersion = row.hasColumn("application_update_version")
             ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
         return .init { facts in
@@ -214,7 +215,7 @@ extension ClipboardHistoryModule {
             let isApplication = storedApplication || facts.isApplication(path: path)
             return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
                 url: URL(fileURLWithPath: path), kind: kind,
-                state: [.detached, .identityUncertain, .paused].contains(storedState) || available ? storedState : .unavailable,
+                state: [.detached, .identityUncertain, .paused].contains(storedState) || (available && !pendingApplication) ? storedState : .unavailable,
                 revision: revision, applicationUpdateVersionID: isApplication && applicationVersion != base ? applicationVersion : nil)
         }
     }

@@ -108,6 +108,7 @@ public actor ClipboardHistoryModule {
     var syncPollTask: Task<Void, Never>?
     var syncRerunRequested = false
     var syncExplicitRerunRequested = false
+    var prioritizedSyncFileDownloads: Set<UUID> = []
     var linkedFileObservers: [UUID: ClipboardLinkedFileObservation] = [:]
     var linkedFileReconciliationTask: Task<Void, Never>?
     let linkedFileMutationGate = ClipboardLinkedFileMutationGate()

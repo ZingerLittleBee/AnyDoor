@@ -1121,9 +1121,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                 panel.canCreateDirectories = true
                 panel.allowsMultipleSelection = false
                 guard panel.runModal() == .OK, let directory = panel.url else { return }
-                var usedNames = Set<String>()
-                destinations = content.fileURLs.map {
-                    directory.appendingPathComponent(uniqueRestoreName($0.lastPathComponent, usedNames: &usedNames))
+                do {
+                    destinations = try ClipboardFileExportPicker().destinations(for: content.fileURLs, in: directory)
+                } catch {
+                    ClipboardHistoryActionFailurePresenter.present(ClipboardHistoryActionFailure(error))
+                    return
                 }
             }
             if !(await state.presentation.exportFiles(entry.id, to: destinations)) { presentActionFailure() }
@@ -1263,12 +1265,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func presentPreview(for entry: ClipboardHistoryEntry) {
         previewTask?.cancel()
         previewTask = Task {
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .fullPreview
-                ),
-                !Task.isCancelled,
+            let content = await state.presentation.previewMaterialization(for: entry.id)
+            guard !Task.isCancelled else { return }
+            guard let materialization = content,
                 state.selectedItem?.id == entry.id
             else {
                 if state.presentation.actionFailure != nil {

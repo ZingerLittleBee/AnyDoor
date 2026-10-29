@@ -117,6 +117,7 @@ extension ClipboardHistoryModule {
             """, arguments: [accountID, epoch, value.sharedID, value.withdrawn, value.revision.counter,
                 value.revision.operationID, pending, recordID, pending ? "local" : "remote"])
         if !value.withdrawn {
+            try applyRetainedSyncMetadata(sharedID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
             try reconcileSyncTextVersions(subjectID: value.sharedID, accountID: accountID, epoch: epoch, in: database)
             try recordSyncFileRejoin(value, accountID: accountID, epoch: epoch, in: database)
         }
