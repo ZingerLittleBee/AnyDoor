@@ -152,6 +152,63 @@ final class ClipboardHistorySyncTests: XCTestCase {
     }
 
     @MainActor
+    func testExplicitSyncRetryWaitsForSearchWriterWithoutBlockingHistoryReads() async throws {
+        let rebuild = LinkedReplacementBarrier()
+        defer { rebuild.release() }
+        let holdsRebuild = OSAllocatedUnfairLock(initialState: false)
+        let faults = ClipboardHistoryFaultInjector { point in
+            guard point == .searchRebuildBeforePublish else { return false }
+            if holdsRebuild.withLock({ $0 }) { rebuild.pause(); return false }
+            return true
+        }
+        let services = ClipboardSyncServices(transport: SyncTestCloud(), keys: SyncTestKeys(), pollingInterval: nil)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sync-retry-writer-\(UUID())")
+        let original = makeModule(services: services, keyByte: 0xF2, time: 1_000, root: root)
+        let anchor = try await original.capture(.init(source: .unknown, content: .text("shared before rebuild")))
+        let tag = try await original.createTagDefinition(named: "Shared", assigningTo: anchor.entryID).definition
+        try await original.setSyncTagSelected(tag.id, selected: true)
+        try await original.setSyncEnabled(true)
+        let database = try await original.requiredDatabase()
+        try await database.write { try $0.execute(sql: """
+            UPDATE clipboard_maintenance_metadata SET integer_value = 0 WHERE key = 'searchIndexVersion'
+            """) }
+        try await original.closeStoreForTesting()
+        let module = makeModule(services: services, keyByte: 0xF2, time: 2_000, root: root, faults: faults)
+        await module.awaitSearchIndexRebuildForTesting()
+        let failed = await module.status()
+        XCTAssertEqual(failed.searchIndex, .failed(.rebuildFailed))
+        await module.resumeSync()
+        let added = try await module.capture(.init(source: .unknown, content: .text("share after writer turn")))
+        _ = try await module.apply(.setTags(added.entryID, [tag.id]))
+        holdsRebuild.withLock { $0 = true }
+        let rebuilding = try await module.retrySearchIndex()
+        XCTAssertEqual(rebuilding, .indexing)
+        for _ in 0..<400 {
+            if rebuild.isWaiting { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(rebuild.isWaiting)
+        let retry = Task { await module.retrySync() }
+        addTeardownBlock { rebuild.release(); await retry.value }
+        try await Task.sleep(for: .milliseconds(100))
+        var served = false
+        let read = Task { let page = try await module.page(.init()); served = true; return page }
+        for _ in 0..<200 {
+            if served { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(served, "Explicit Retry must await the documented writer turn without blocking the history actor")
+        rebuild.release()
+        let page = try await read.value
+        XCTAssertEqual(Set(page.entries.map(\.id)), [anchor.entryID, added.entryID])
+        await retry.value
+        let peer = makeModule(services: services, keyByte: 0xF3, time: 3_000)
+        try await peer.setSyncEnabled(true)
+        let entries = try await peer.page(.init()).entries
+        XCTAssertEqual(Set(entries.map(\.id)), [anchor.entryID, added.entryID])
+    }
+
+    @MainActor
     func testStalePayloadPreparationKeepsHistoryReadableDuringSearchRecovery() async throws {
         let payload = LinkedReplacementBarrier()
         let rebuild = LinkedReplacementBarrier()
