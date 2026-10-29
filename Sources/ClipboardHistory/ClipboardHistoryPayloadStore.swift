@@ -85,15 +85,19 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
 
 struct ClipboardHistoryFaultInjector: Sendable {
     private let shouldFail: @Sendable (ClipboardHistoryFaultPoint) -> Bool
+    let nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting
 
-    init(points: Set<ClipboardHistoryFaultPoint> = []) {
+    init(points: Set<ClipboardHistoryFaultPoint> = [], nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting = .live) {
         shouldFail = { points.contains($0) }
+        self.nativeDisplayWaiting = nativeDisplayWaiting
     }
 
     init(
+        nativeDisplayWaiting: ClipboardHistoryNativeDisplayWaiting = .live,
         shouldFail: @escaping @Sendable (ClipboardHistoryFaultPoint) -> Bool
     ) {
         self.shouldFail = shouldFail
+        self.nativeDisplayWaiting = nativeDisplayWaiting
     }
 
     func check(_ point: ClipboardHistoryFaultPoint) throws {

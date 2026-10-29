@@ -903,7 +903,14 @@ final class ClipboardHistoryPresentationModel {
             replaceEntry(assignment.entry)
             return true
         } catch {
-            actionFailure = ClipboardHistoryActionFailure(error)
+            let failure = ClipboardHistoryActionFailure(error)
+            // Creation can commit before its display reply discovers a
+            // concurrent deletion. Read current definitions without restoring
+            // either the stale assignment or a subsequently deleted tag.
+            if let current = try? await operations.tagDefinitions() {
+                tags = current
+            }
+            actionFailure = failure
             return false
         }
     }

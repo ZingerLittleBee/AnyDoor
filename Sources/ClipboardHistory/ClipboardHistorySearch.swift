@@ -220,30 +220,50 @@ extension ClipboardHistoryModule {
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor?
     ) async throws -> ClipboardHistoryPage {
+        let epoch = storeEpoch
+        let sourceDatabase = try requiredDatabase()
+        var facts = ClipboardHistoryFileDisplayFacts()
         for _ in 0..<3 {
             try Task.checkCancellation()
-            let epoch = storeEpoch
-            let sourceDatabase = try requiredDatabase()
             let (snapshot, revision) = try indexedPageSnapshot(query, after: cursor)
             // A SQL-only result is already coherent. Do not add a suspension
             // or invalidate text browsing for unrelated file progress.
             guard snapshot.hasNativeFacts else { return snapshot.page }
             let faults = faultInjector
-            let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
-                pool: sourceDatabase, epoch: epoch, revision: revision, request: .page(query, cursor), page: snapshot.page)) { checkCancellation in
-                try checkCancellation()
-                try faults.check(.pageNativeFileFacts)
-                return try snapshot.resolve(faults: faults, checkCancellation: checkCancellation)
+            let previousFacts = facts
+            do {
+                let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
+                    pool: sourceDatabase, epoch: epoch, revision: revision, request: .page(query, cursor), page: snapshot.page),
+                    waiting: faults.nativeDisplayWaiting) { checkCancellation in
+                    try checkCancellation()
+                    try faults.check(.pageNativeFileFacts)
+                    return try snapshot.resolve(facts: previousFacts, faults: faults, checkCancellation: checkCancellation)
+                }
+                facts = resolved.facts
+            } catch ClipboardHistoryNativeDisplayQueue.WaitError.timedOut {
+                // A timeout ends this request's native attempts. It never
+                // starts another worker or waits through three timer budgets.
+                return try currentDisplayPage(query, after: cursor, facts: facts, pool: sourceDatabase, epoch: epoch)
             }
             try Task.checkCancellation()
             guard epoch == storeEpoch, database === sourceDatabase else { throw ClipboardHistoryModuleError.storeUnavailable }
             if try linkedRead({ try Self.historyRevision(in: $0) }) == revision {
                 // Coalescing shares only native facts. SQL-only transfer state
                 // may change without advancing the history revision.
-                return try snapshot.resolve(facts: resolved.facts.cacheOnly()).page
+                return try snapshot.resolve(facts: facts.cacheOnly()).page
             }
         }
-        throw ClipboardHistoryModuleError.operationUnavailable
+        return try currentDisplayPage(query, after: cursor, facts: facts, pool: sourceDatabase, epoch: epoch)
+    }
+
+    private func currentDisplayPage(_ query: ClipboardHistoryQuery, after cursor: ClipboardHistoryCursor?,
+        facts: ClipboardHistoryFileDisplayFacts, pool: DatabasePool, epoch: Int) throws -> ClipboardHistoryPage {
+        try Task.checkCancellation()
+        guard epoch == storeEpoch, database === pool else { throw ClipboardHistoryModuleError.storeUnavailable }
+        // Native facts are display hints. Refresh SQL authority, membership,
+        // filters, and cursor generation without another suspension or I/O.
+        let (latest, _) = try indexedPageSnapshot(query, after: cursor)
+        return try latest.resolve(facts: facts.cacheOnly()).page
     }
 
     static func entryMutationResult(from row: Row, in database: Database, didMutate: Bool) throws -> MutationApplyResult {
@@ -263,11 +283,19 @@ extension ClipboardHistoryModule {
         guard let snapshot = result.displaySnapshot, snapshot.hasNativeFacts,
               case .updated(let entry) = result.outcome else { return result.outcome }
         let faults = faultInjector
-        let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
-            pool: pool, epoch: epoch, revision: result.displayRevision, request: .mutation(entry.id), page: snapshot.page)) { checkCancellation in
-            try checkCancellation()
-            try faults.check(.entryNativeFileFacts)
-            return try snapshot.resolve(faults: faults, checkCancellation: checkCancellation)
+        var facts = ClipboardHistoryFileDisplayFacts()
+        do {
+            let resolved = try await ClipboardHistoryNativeDisplayQueue.shared.resolve(key: .init(
+                pool: pool, epoch: epoch, revision: result.displayRevision, request: .mutation(entry.id), page: snapshot.page),
+                waiting: faults.nativeDisplayWaiting) { checkCancellation in
+                try checkCancellation()
+                try faults.check(.entryNativeFileFacts)
+                return try snapshot.resolve(faults: faults, checkCancellation: checkCancellation)
+            }
+            facts = resolved.facts
+        } catch ClipboardHistoryNativeDisplayQueue.WaitError.timedOut {
+            // Metadata has already committed. Return current SQL with
+            // conservative hints rather than an error for optional display I/O.
         }
         try Task.checkCancellation()
         guard epoch == storeEpoch, database === pool else { throw ClipboardHistoryModuleError.storeUnavailable }
@@ -282,7 +310,7 @@ extension ClipboardHistoryModule {
         // than failing on unrelated revisions or restoring an older favorite.
         // Native facts are display hints: newly encountered identities remain
         // unavailable until a fresh page inspects them; no I/O occurs here.
-        let page = try latest.resolve(facts: resolved.facts.cacheOnly()).page
+        let page = try latest.resolve(facts: facts.cacheOnly()).page
         return .updated(page.entries[0])
     }
 

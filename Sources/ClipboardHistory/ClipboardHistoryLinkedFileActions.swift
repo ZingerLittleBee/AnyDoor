@@ -118,7 +118,8 @@ extension ClipboardHistoryModule {
                   AND location.epoch = \(control.epoch.uuidString)
                   AND entry.id = \(selection.entryID.value.uuidString.lowercased())
                   AND \(SQL(sql: liveSyncFileMember)) AND (\(syncEntryPublicationAuthority(accountID: accountID)))
-                """)), (row["revision"] as UInt64) == selection.expectedRevision else {
+                """)), isSupportedLinkedFileLocation(row),
+              (row["revision"] as UInt64) == selection.expectedRevision else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         return row

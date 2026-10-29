@@ -2,11 +2,30 @@ import Foundation
 import GRDB
 import os
 
+/// The timer belongs to one waiter, never the potentially blocked native worker.
+/// Tests replace scheduling and admission observation, not filesystem results.
+struct ClipboardHistoryNativeDisplayWaiting: Sendable {
+    typealias Cancellation = @Sendable () -> Void
+    let scheduleTimeout: @Sendable (@escaping @Sendable () -> Void) -> Cancellation
+    let didAdmit: @Sendable () -> Void
+
+    static let live = ClipboardHistoryNativeDisplayWaiting(scheduleTimeout: { expired in
+        let timeoutTask = Task<Void, Never> {
+            do {
+                try await Task.sleep(for: .seconds(2))
+                expired()
+            } catch {}
+        }
+        return { timeoutTask.cancel() }
+    }, didAdmit: {})
+}
+
 /// Synchronous filesystem calls have no cooperative cancellation deadline.
 /// One serial worker confines them to Dispatch; cancelled queued requests are
 /// removed and identical snapshots share work without sharing cancellation.
 final class ClipboardHistoryNativeDisplayQueue: Sendable {
     static let shared = ClipboardHistoryNativeDisplayQueue()
+    enum WaitError: Error { case timedOut }
 
     struct Key: Equatable, Sendable {
         enum Request: Equatable, Sendable {
@@ -37,6 +56,7 @@ final class ClipboardHistoryNativeDisplayQueue: Sendable {
             var continuation: Continuation?
             var cancelled = false
             var completed = false
+            var cancelTimeout: ClipboardHistoryNativeDisplayWaiting.Cancellation?
         }
         private let state = OSAllocatedUnfairLock(initialState: State())
         var isCancelled: Bool { state.withLock { $0.cancelled } }
@@ -49,26 +69,40 @@ final class ClipboardHistoryNativeDisplayQueue: Sendable {
             }
         }
 
-        func cancel() {
-            let continuation = state.withLock { value -> Continuation? in
-                value.cancelled = true
-                guard !value.completed, let continuation = value.continuation else { return nil }
-                value.completed = true
-                value.continuation = nil
-                return continuation
+        func installTimeoutCancellation(_ cancel: @escaping ClipboardHistoryNativeDisplayWaiting.Cancellation) {
+            let completed = state.withLock { value in
+                guard !value.completed, !value.cancelled else { return true }
+                value.cancelTimeout = cancel
+                return false
             }
-            continuation?.resume(throwing: CancellationError())
+            if completed { cancel() }
+        }
+
+        func cancel(with error: any Error = CancellationError()) {
+            let pending = state.withLock { value -> (Continuation?, ClipboardHistoryNativeDisplayWaiting.Cancellation?) in
+                value.cancelled = true
+                guard !value.completed else { return (nil, nil) }
+                value.completed = true
+                let pending = (value.continuation, value.cancelTimeout)
+                value.continuation = nil
+                value.cancelTimeout = nil
+                return pending
+            }
+            pending.1?()
+            pending.0?.resume(throwing: error)
         }
 
         func finish(_ result: Result<ClipboardHistoryResolvedDisplay, any Error>) {
-            let continuation = state.withLock { value -> Continuation? in
-                guard !value.completed else { return nil }
+            let pending = state.withLock { value -> (Continuation?, ClipboardHistoryNativeDisplayWaiting.Cancellation?) in
+                guard !value.completed else { return (nil, nil) }
                 value.completed = true
-                let continuation = value.continuation
+                let pending = (value.continuation, value.cancelTimeout)
                 value.continuation = nil
-                return continuation
+                value.cancelTimeout = nil
+                return pending
             }
-            continuation?.resume(with: result)
+            pending.1?()
+            pending.0?.resume(with: result)
         }
     }
 
@@ -87,7 +121,8 @@ final class ClipboardHistoryNativeDisplayQueue: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let queue = DispatchQueue(label: "dev.bybee.AnyDoor.clipboard-native-display", qos: .userInitiated)
 
-    func resolve(key: Key, work: @escaping Work) async throws -> ClipboardHistoryResolvedDisplay {
+    func resolve(key: Key, waiting: ClipboardHistoryNativeDisplayWaiting = .live,
+        work: @escaping Work) async throws -> ClipboardHistoryResolvedDisplay {
         let waiter = Waiter()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
@@ -96,8 +131,8 @@ final class ClipboardHistoryNativeDisplayQueue: Sendable {
                     continuation.resume(throwing: CancellationError())
                     return
                 }
-                let startsWorker = state.withLock { value -> Bool in
-                    guard !waiter.isCancelled else { return false }
+                let admission = state.withLock { value -> (admitted: Bool, startsWorker: Bool) in
+                    guard !waiter.isCancelled else { return (false, false) }
                     if value.active?.key == key, value.active?.cancelled == false {
                         value.active?.waiters.append(waiter)
                     } else if let index = value.queued.firstIndex(where: { $0.key == key }) {
@@ -105,11 +140,19 @@ final class ClipboardHistoryNativeDisplayQueue: Sendable {
                     } else {
                         value.queued.append(Job(key: key, work: work, waiters: [waiter]))
                     }
-                    guard !value.draining else { return false }
+                    guard !value.draining else { return (true, false) }
                     value.draining = true
-                    return true
+                    return (true, true)
                 }
-                if startsWorker { queue.async { self.drain() } }
+                if admission.admitted {
+                    let cancelTimeout = waiting.scheduleTimeout {
+                        waiter.cancel(with: WaitError.timedOut)
+                        self.remove(waiter)
+                    }
+                    waiter.installTimeoutCancellation(cancelTimeout)
+                    waiting.didAdmit()
+                }
+                if admission.startsWorker { queue.async { self.drain() } }
             }
             try Task.checkCancellation()
             return result

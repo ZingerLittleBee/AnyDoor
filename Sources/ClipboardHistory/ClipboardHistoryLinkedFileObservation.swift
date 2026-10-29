@@ -306,11 +306,12 @@ extension ClipboardHistoryModule {
                   AND member.object_id = location.object_id AND \(SQL(sql: liveSyncFileMember))
                   AND (\(syncEntryPublicationAuthority(accountID: accountID))))
             ORDER BY location.id
-            """)).map(linkedLocationSource)
+            """)).filter(isSupportedLinkedFileLocation).map(linkedLocationSource)
     }
 
     static func linkedLocationSource(_ row: Row) throws -> ClipboardLinkedLocationSource {
-                guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
+                guard isSupportedLinkedFileLocation(row),
+                      let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
                       let base = UUID(uuidString: row["base_version_id"]),
                       let state = ClipboardHistoryLinkedFileLocationState(rawValue: row["state"]) else {
                     throw ClipboardHistoryModuleError.storageFailure

@@ -28,6 +28,7 @@ extension ClipboardHistoryModule {
         let nativeIdentity: Data?
         let state: String
         let versionID: UUID?
+        let isSupported: Bool
     }
 
     private struct FileSummaryFacts: Sendable {
@@ -200,18 +201,21 @@ extension ClipboardHistoryModule {
     private static func linkedDisplayReferences(objectID: UUID, accountID: String, epoch: String,
         in database: Database) throws -> [LinkedDisplayReference] {
         try Row.fetchAll(database, sql: """
-            SELECT path, bookmark, identity, native_identity, state, base_version_id FROM clipboard_sync_linked_locations
+            SELECT id, object_id, kind, path, bookmark, identity, native_identity, state, base_version_id
+            FROM clipboard_sync_linked_locations
             WHERE account_id = ? AND epoch = ? AND object_id = ?
             ORDER BY CASE kind WHEN 'original' THEN 0 WHEN 'workingCopy' THEN 1 ELSE 2 END, id
             """, arguments: [accountID, epoch, objectID.uuidString]).map { row in
                 .init(path: row["path"], bookmark: row["bookmark"], identity: row["identity"], nativeIdentity: row["native_identity"],
-                    state: row["state"], versionID: UUID(uuidString: row["base_version_id"]))
+                    state: row["state"], versionID: UUID(uuidString: row["base_version_id"]),
+                    isSupported: isSupportedLinkedFileLocation(row))
             }
     }
 
     private static func usableLinkedFileReference(_ references: [LinkedDisplayReference],
         facts: inout ClipboardHistoryFileDisplayFacts) -> (exists: Bool, reference: (path: String, bookmark: Data, identity: Data, versionID: UUID)?) {
-        for reference in references where !["unavailable", "detached", "identityUncertain"].contains(reference.state) {
+        for reference in references where reference.isSupported
+            && !["unavailable", "detached", "identityUncertain"].contains(reference.state) {
             if facts.isAvailable(path: reference.path, identity: reference.identity, nativeIdentity: reference.nativeIdentity),
                let versionID = reference.versionID {
                 return (true, (reference.path, reference.bookmark, reference.identity, versionID))

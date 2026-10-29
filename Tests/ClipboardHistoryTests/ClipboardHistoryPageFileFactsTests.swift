@@ -10,7 +10,7 @@ extension ClipboardHistoryLinkedFileTests {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
         let armed = OSAllocatedUnfairLock(initialState: false)
-        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+        let fixture = try await makeLinkedFixture(receiverFault: .init(nativeDisplayWaiting: .untimedForTests) { point in
             if point == .pageNativeFileFacts, armed.withLock({ value in
                 let held = value
                 value = false
@@ -36,11 +36,12 @@ extension ClipboardHistoryLinkedFileTests {
     }
 
     @MainActor
-    func testPageFileInspectionBoundsRetriesDuringRepeatedMutations() async throws {
+    func testPageFileInspectionReturnsLatestSnapshotAfterBoundedRetries() async throws {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
-        let gate = OSAllocatedUnfairLock(initialState: (armed: false, passes: 0))
-        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+        let gate = OSAllocatedUnfairLock(initialState: (armed: false, passes: 0, probes: 0))
+        let fixture = try await makeLinkedFixture(receiverFault: .init(nativeDisplayWaiting: .untimedForTests) { point in
+            if point == .nativeFileDisplayProbe { gate.withLock { if $0.armed { $0.probes += 1 } } }
             if point == .pageNativeFileFacts, gate.withLock({ state in
                 guard state.armed else { return false }
                 state.passes += 1
@@ -53,18 +54,28 @@ extension ClipboardHistoryLinkedFileTests {
         let unrelated = try await fixture.receiver.capture(.init(source: .unknown, content: .text("unrelated revision")))
         gate.withLock { $0.armed = true }
         let page = Task { try await fixture.receiver.page(.init()) }
+        var firstPassProbes = 0
+        var latestID: ClipboardHistoryEntryID?
         for pass in 1...3 {
             let deadline = Date().addingTimeInterval(5)
             while gate.withLock({ $0.passes }) < pass, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
             XCTAssertEqual(gate.withLock { $0.passes }, pass)
+            if pass == 2 { firstPassProbes = gate.withLock { $0.probes } }
             _ = try await fixture.receiver.apply(.setFavorite(unrelated.entryID, pass.isMultiple(of: 2) == false))
+            if pass == 3 {
+                _ = try await fixture.receiver.apply(.delete(unrelated.entryID))
+                latestID = try await fixture.receiver.capture(.init(source: .unknown, content: .text("latest fallback row"))).entryID
+            }
             barrier.release()
         }
-        do {
-            _ = try await page.value
-            XCTFail("A continuously changing page must return a bounded retry outcome")
-        } catch ClipboardHistoryModuleError.operationUnavailable {}
+        let result = try await page.value
+        XCTAssertFalse(result.entries.contains { $0.id == unrelated.entryID })
+        XCTAssertTrue(result.entries.contains { $0.id == latestID })
+        XCTAssertEqual(result.entries.first { $0.id == fixture.entryID }?.syncFiles.first?.state, .complete)
         XCTAssertEqual(gate.withLock { $0.passes }, 3)
+        XCTAssertGreaterThan(firstPassProbes, 0)
+        XCTAssertEqual(gate.withLock { $0.probes }, firstPassProbes,
+            "Unchanged native identities must reuse facts across unrelated revisions")
     }
 
     @MainActor
@@ -72,7 +83,7 @@ extension ClipboardHistoryLinkedFileTests {
         let barrier = LinkedReplacementBarrier()
         defer { barrier.release() }
         let armed = OSAllocatedUnfairLock(initialState: false)
-        let fixture = try await makeLinkedFixture(receiverFault: .init { point in
+        let fixture = try await makeLinkedFixture(receiverFault: .init(nativeDisplayWaiting: .untimedForTests) { point in
             if point == .pageNativeFileFacts, armed.withLock({ value in
                 let held = value
                 value = false

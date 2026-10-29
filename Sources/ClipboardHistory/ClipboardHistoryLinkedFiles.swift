@@ -15,7 +15,7 @@ struct ClipboardHistoryFileDisplayFacts: Sendable {
         var requiresReadable: Bool = true
     }
     private var availability: [Identity: Bool] = [:]
-    private var applications: [String: Bool] = [:]
+    private var applications: [Identity: Bool] = [:]
     private var permitsNativeReads = true
     private var beforeNativeRead: @Sendable () throws -> Void = {}
     private var nativeReadError: (any Error)?
@@ -50,11 +50,12 @@ struct ClipboardHistoryFileDisplayFacts: Sendable {
         return available
     }
 
-    mutating func isApplication(path: String) -> Bool {
-        if let cached = applications[path] { return cached }
+    mutating func isApplication(path: String, identity: Data, nativeIdentity: Data?) -> Bool {
+        let key = Identity(path: path, identity: identity, nativeIdentity: nativeIdentity)
+        if let cached = applications[key] { return cached }
         guard admitsNativeRead() else { return false }
         let application = ClipboardApplicationPackage.isApplication(URL(fileURLWithPath: path))
-        applications[path] = application
+        applications[key] = application
         return application
     }
 
@@ -152,6 +153,9 @@ extension ClipboardHistoryModule {
         var result: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>]] = [:]
         var locations: [String: ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>] = [:]
         for row in rows {
+            // A future or damaged location cannot hide the rest of history.
+            // Retain its row, but expose no location action for it.
+            guard isSupportedLinkedFileLocation(row) else { continue }
             let id: String = row["id"]
             let location: ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation>
             if let cached = locations[id] { location = cached }
@@ -222,6 +226,14 @@ extension ClipboardHistoryModule {
         return try linkedFileLocationPlan(row).resolve(&facts)
     }
 
+    static func isSupportedLinkedFileLocation(_ row: Row) -> Bool {
+        UUID(uuidString: row["id"]) != nil
+            && UUID(uuidString: row["object_id"]) != nil
+            && UUID(uuidString: row["base_version_id"]) != nil
+            && ClipboardHistoryLinkedFileLocationKind(rawValue: row["kind"]) != nil
+            && ClipboardHistoryLinkedFileLocationState(rawValue: row["state"]) != nil
+    }
+
     private static func linkedFileLocationPlan(_ row: Row) throws -> ClipboardHistoryFileDisplayPlan<ClipboardHistoryLinkedFileLocation> {
         guard let id = UUID(uuidString: row["id"]), let objectID = UUID(uuidString: row["object_id"]),
               let base = UUID(uuidString: row["base_version_id"]),
@@ -239,7 +251,7 @@ extension ClipboardHistoryModule {
             ? (row["application_update_version"] as String?).flatMap(UUID.init(uuidString:)) : nil
         return .init { facts in
             let available = facts.isAvailable(path: path, identity: identity, nativeIdentity: nativeIdentity)
-            let isApplication = storedApplication || facts.isApplication(path: path)
+            let isApplication = storedApplication || facts.isApplication(path: path, identity: identity, nativeIdentity: nativeIdentity)
             return ClipboardHistoryLinkedFileLocation(id: id, objectID: objectID, baseVersionID: base,
                 url: URL(fileURLWithPath: path), kind: kind,
                 state: [.detached, .identityUncertain, .paused].contains(storedState) || (available && !pendingApplication) ? storedState : .unavailable,
