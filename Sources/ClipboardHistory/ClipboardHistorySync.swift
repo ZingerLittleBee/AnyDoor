@@ -310,6 +310,7 @@ extension ClipboardHistoryModule {
                     try database.execute(sql: "UPDATE clipboard_sync_settings SET account_id = ?, enabled = 0 WHERE id = 1",
                         arguments: [account.identifier])
                 }
+                syncAccountBindingGeneration = nil
                 await performCloudReset(generation: generation)
                 return
             }

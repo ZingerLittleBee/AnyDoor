@@ -103,6 +103,55 @@ final class ClipboardHistoryResetRetryTests: XCTestCase {
         XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
     }
 
+    func testExplicitActivationOfPreviousResetAccountKeepsOffRetryUsable() async throws {
+        for waitForSync in [true, false] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("reset-reactivation-\(UUID())")
+            removeClipboardHistoryDirectoryAfterTest(root)
+            let cloud = ResetRetryCloud()
+            let module = makeModule(root: root, cloud: cloud, keys: ResetRetryKeys())
+            let local = try await module.capture(.init(source: .unknown, content: .text("retained after explicit account return")))
+            try await module.setSyncEnabled(true)
+            let confirmation = try await module.prepareCloudReset()
+            await cloud.rejectReset(at: .transition, using: ClipboardSyncCloudKit(recordReader: { _, _, _ in
+                throw CKError(.serverRejectedRequest)
+            }))
+            try await module.clearCloudDataAndStopSync(confirmation)
+            let oldAttempts = await cloud.resetRequestCount()
+
+            await cloud.switchAccount(to: "new-owner")
+            try await module.setSyncEnabled(true)
+            let active = await module.syncStatus()
+            XCTAssertTrue(active.isEnabled)
+            XCTAssertEqual(active.phase, .upToDate)
+            // Drain polling before changing the external account so this return
+            // exercises explicit On, not the separately tested automatic discovery.
+            await module.suspendSync()
+            await cloud.switchAccount(to: "reset-owner")
+            try await module.setSyncEnabled(true)
+            let returned = await module.syncStatus()
+            XCTAssertFalse(returned.isEnabled)
+            XCTAssertEqual(returned.cloudReset?.failure, .failed(.providerRejected))
+            let returnedAttempts = await cloud.resetRequestCount()
+            XCTAssertEqual(returnedAttempts, oldAttempts + 1, "Explicit On must reach the previous pending reset")
+
+            await cloud.allowReset()
+            await module.retrySync(waitForSync: waitForSync)
+            if !waitForSync {
+                for _ in 0..<200 {
+                    if await module.syncStatus().cloudReset?.stage == .completed { break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+            }
+            let completed = await module.syncStatus()
+            XCTAssertFalse(completed.isEnabled)
+            XCTAssertEqual(completed.cloudReset?.stage, .completed, "A consumed account activation must not prevent Retry while the reset keeps ordinary sync Off")
+            let completedAttempts = await cloud.resetRequestCount()
+            XCTAssertGreaterThan(completedAttempts, returnedAttempts, "Retry must execute the pending reset after the provider recovers")
+            let retained = try await module.page(.init())
+            XCTAssertEqual(retained.entries.map(\.id), [local.entryID])
+        }
+    }
+
     func testPendingResetProviderDeadlineSurvivesManualRetryAndRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("reset-deadline-\(UUID())")
         removeClipboardHistoryDirectoryAfterTest(root)
