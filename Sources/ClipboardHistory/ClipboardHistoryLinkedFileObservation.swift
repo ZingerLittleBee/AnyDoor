@@ -2,6 +2,7 @@ import Darwin
 import Dispatch
 import Foundation
 import GRDB
+import os
 
 /// Dispatch owns the descriptor until its cancellation handler runs. Both event
 /// sources use the same serial queue, and the subtree stream stops before the
@@ -9,12 +10,23 @@ import GRDB
 /// justify this SDK boundary's Sendable conformance.
 final class ClipboardLinkedFileObservation: @unchecked Sendable {
     private static let queue = DispatchQueue(label: "dev.bybee.AnyDoor.clipboard.linked-files")
+    // Count live native descriptors, including asynchronous cancellation, across
+    // all module instances. Recursive members do not consume separate slots.
+    private static let descriptorCount = OSAllocatedUnfairLock(initialState: 0)
+    private static let maximumDescriptors = 64
     let path: String
     let identity: Data
     private let source: any DispatchSourceFileSystemObject
     private let tree: ClipboardLinkedTreeObservation?
 
     init?(url: URL, identity: Data, onChange: @escaping @Sendable (ClipboardLinkedFileIdentityEvent) -> Void) {
+        guard Self.descriptorCount.withLock({ count in
+            guard count < Self.maximumDescriptors else { return false }
+            count += 1
+            return true
+        }) else { return nil }
+        var reserved = true
+        defer { if reserved { Self.descriptorCount.withLock { $0 -= 1 } } }
         let descriptor = open(url.path, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW)
         guard descriptor >= 0 else { return nil }
         var status = stat()
@@ -50,7 +62,11 @@ final class ClipboardLinkedFileObservation: @unchecked Sendable {
         source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
             eventMask: [.write, .extend, .attrib, .rename, .delete, .revoke], queue: Self.queue)
         source.setEventHandler(handler: notify)
-        source.setCancelHandler { close(descriptor) }
+        source.setCancelHandler {
+            close(descriptor)
+            Self.descriptorCount.withLock { $0 -= 1 }
+        }
+        reserved = false
         source.activate()
     }
 
@@ -78,6 +94,8 @@ struct ClipboardLinkedLocationSource: Codable, Sendable {
 
 extension ClipboardHistoryModule {
     func stopLinkedFileObservers() {
+        linkedFileReconciliationTask?.cancel()
+        linkedFileReconciliationTask = nil
         linkedFileMutationGate.revoke()
         for observer in linkedFileObservers.values { observer.cancel() }
         linkedFileObservers.removeAll()
@@ -105,6 +123,26 @@ extension ClipboardHistoryModule {
                 Task { await self?.linkedFileDidChange(source.id, event: event, account: account, epoch: control.epoch, generation: generation) }
             }
         }
+        if linkedFileObservers.count == sources.count {
+            linkedFileReconciliationTask?.cancel()
+            linkedFileReconciliationTask = nil
+        } else if linkedFileReconciliationTask == nil {
+            // One owned wakeup covers every overflow or temporarily unwatchable
+            // location fairly, even when provider polling is disabled. Reuse
+            // automatic sync so file/provider retry deadlines remain intact.
+            linkedFileReconciliationTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                    guard await self?.reconcileUnobservedLinkedFiles(generation: generation) == true else { return }
+                }
+            }
+        }
+    }
+
+    private func reconcileUnobservedLinkedFiles(generation: UInt64) async -> Bool {
+        guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return false }
+        await retrySyncAutomatically()
+        return !Task.isCancelled && generation == syncGeneration && !syncSuspended
     }
 
     private func linkedFileDidChange(_ id: UUID, event: ClipboardLinkedFileIdentityEvent, account: ClipboardSyncAccount, epoch: UUID, generation: UInt64) {
