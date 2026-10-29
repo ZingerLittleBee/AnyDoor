@@ -177,10 +177,11 @@ extension ClipboardHistoryModule {
         let nodes = try Self.syncVersionNodes(subjectID: sharedID, accountID: accountID, epoch: epoch, in: database)
         let byID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0.parents) })
         var ancestors = Set<UUID>()
-        func addAncestors(_ id: UUID) {
-            for parent in byID[id] ?? [] where ancestors.insert(parent).inserted { addAncestors(parent) }
+        var pendingAncestors = edits.flatMap { Array(byID[$0.versionID] ?? []) }
+        while let parent = pendingAncestors.popLast() {
+            guard ancestors.insert(parent).inserted else { continue }
+            pendingAncestors.append(contentsOf: byID[parent] ?? [])
         }
-        for edit in edits { addAncestors(edit.versionID) }
         for edit in edits where !ancestors.contains(edit.versionID) {
             let localID = UUID().uuidString.lowercased()
             try database.execute(sql: """

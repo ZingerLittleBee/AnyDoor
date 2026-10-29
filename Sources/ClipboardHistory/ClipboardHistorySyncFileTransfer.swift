@@ -16,6 +16,12 @@ struct ClipboardSyncFrozenFile: Sendable {
     var encodedByteCount: Int64? = nil
 }
 
+struct ClipboardSyncFileCacheFailure: Error {
+    let underlying: any Error
+
+    fileprivate init(underlying: any Error) { self.underlying = underlying }
+}
+
 /// Background persistence contains only bounded authenticated ciphertext units.
 /// A URL identifies one immutable unit, never the user's original plaintext.
 enum ClipboardSyncFileTransfer {
@@ -111,8 +117,10 @@ enum ClipboardSyncFileTransfer {
         let unit = Int64(ClipboardSyncCodec.chunkByteCount)
         let count = max(1, size / unit + (size % unit == 0 ? 0 : 1))
         guard let chunkCount = Int(exactly: count) else { throw ClipboardSyncServiceError.localStorage }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
+        try cacheOperation {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+        }
         var succeeded = false
         defer { if !succeeded { try? FileManager.default.removeItem(at: directory) } }
         var plaintextDigest = SHA256()
@@ -126,7 +134,7 @@ enum ClipboardSyncFileTransfer {
             let encrypted = try ClipboardSyncCodec.sealFileSegment(bytes, account: account, control: control,
                 key: key, objectID: objectID, versionID: versionID, originalByteCount: size,
                 index: index, count: chunkCount)
-            try persistSegment(encrypted, in: directory, index: index)
+            try persistFrozenSegment(encrypted, in: directory, index: index, faults: faults)
             ciphertextDigest.update(data: encrypted)
             let addition = encryptedCount.addingReportingOverflow(Int64(encrypted.count))
             guard !addition.overflow else { throw ClipboardSyncServiceError.localStorage }
@@ -142,13 +150,33 @@ enum ClipboardSyncFileTransfer {
               try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
-        try syncDirectory(directory)
+        try cacheOperation { try syncDirectory(directory) }
         succeeded = true
         return ClipboardSyncFrozenFile(upload: .init(record: .init(
             recordID: "v1-\(versionID.uuidString.lowercased())", operationID: versionID,
             epoch: control.epoch, keyID: control.keyID, kind: .fileBody, chunkCount: chunkCount,
             encryptedByteCount: encryptedCount, digest: Data(ciphertextDigest.finalize())
         ), directory: directory), originalByteCount: size, contentDigest: Data(plaintextDigest.finalize()))
+    }
+
+    static func cacheOperation<Value>(_ operation: () throws -> Value) throws -> Value {
+        do { return try operation() }
+        catch {
+            guard ClipboardSyncFileErrors.isLocalOperationFailure(error)
+                || ClipboardSyncFileErrors.isAccessDenied(error) else { throw error }
+            throw ClipboardSyncFileCacheFailure(underlying: error)
+        }
+    }
+
+    static func persistFrozenSegment(_ bytes: Data, in directory: URL, index: Int,
+        faults: ClipboardHistoryFaultInjector) throws {
+        try cacheOperation {
+            do { try faults.check(.diskFull) }
+            catch ClipboardHistoryStorageError.injected(.diskFull) {
+                throw ClipboardHistoryStorageError.fileOperationFailed(ENOSPC)
+            }
+            try persistSegment(bytes, in: directory, index: index)
+        }
     }
 
     static func persistSegment(_ bytes: Data, in directory: URL, index: Int) throws {

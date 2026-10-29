@@ -20,24 +20,32 @@ enum ClipboardSyncFileWork: Sendable {
 private struct ClipboardSyncFileRetryFailure: Codable {
     let phase: ClipboardHistorySyncPhase
     let recordUnavailable: Bool
+    let failureCount: Int
 
-    init(phase: ClipboardHistorySyncPhase, recordUnavailable: Bool) {
+    init(phase: ClipboardHistorySyncPhase, recordUnavailable: Bool, failureCount: Int = 1) {
         self.phase = phase
         self.recordUnavailable = recordUnavailable
+        self.failureCount = failureCount
     }
 
-    private enum CodingKeys: String, CodingKey { case phase, recordUnavailable }
+    private enum CodingKeys: String, CodingKey { case phase, recordUnavailable, failureCount }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if container.contains(.phase) {
             phase = try container.decode(ClipboardHistorySyncPhase.self, forKey: .phase)
             recordUnavailable = try container.decode(Bool.self, forKey: .recordUnavailable)
+            failureCount = try container.decodeIfPresent(Int.self, forKey: .failureCount) ?? 1
+            guard failureCount > 0 else {
+                throw DecodingError.dataCorruptedError(forKey: .failureCount, in: container,
+                    debugDescription: "A retry must retain at least one failure")
+            }
         } else {
             // Legacy rows have only a display phase, which does not prove the
             // original error. Keep reporting them until the existing retry is due.
             phase = try ClipboardHistorySyncPhase(from: decoder)
             recordUnavailable = false
+            failureCount = 1
         }
     }
 }
@@ -56,6 +64,7 @@ extension ClipboardHistoryModule {
     /// Only errors attributable to one file may defer its work. Account, key,
     /// control, provider backoff, and database failures retain pass-wide authority.
     static func isIsolatedSyncFileFailure(_ error: Error) -> Bool {
+        if error is ClipboardSyncFileCacheFailure { return true }
         if error is ClipboardWorkingOutputRecoveryRequired { return true }
         if ClipboardSyncFileErrors.isAccessDenied(error) || ClipboardSyncFileErrors.isSourceChanged(error)
             || ClipboardSyncFileErrors.isLocalOperationFailure(error) { return true }
@@ -65,10 +74,11 @@ extension ClipboardHistoryModule {
         }
     }
 
-    /// Source publication also reads keys and stored metadata. Only native
-    /// source-access/identity failures are local to that publication attempt.
+    /// Source publication also reads keys and stored metadata. Only identified
+    /// native source/cache failures are local to that publication attempt.
     static func isIsolatedSyncSourceFailure(_ error: Error) -> Bool {
-        ClipboardSyncFileErrors.isAccessDenied(error) || ClipboardSyncFileErrors.isSourceChanged(error)
+        error is ClipboardSyncFileCacheFailure
+            || ClipboardSyncFileErrors.isAccessDenied(error) || ClipboardSyncFileErrors.isSourceChanged(error)
             || ClipboardSyncFileErrors.isLocalOperationFailure(error)
             || (error as? ClipboardSyncServiceError) == .localFileAccessDenied
     }
@@ -90,19 +100,33 @@ extension ClipboardHistoryModule {
     func deferSyncFileWork(_ work: ClipboardSyncFileWork, error: Error, account: ClipboardSyncAccount,
         control: ClipboardSyncControl, generation: UInt64, reportMissingRecord: Bool = true) throws {
         try admitSync(generation)
-        let failure = ClipboardSyncFileRetryFailure(phase: syncFailurePhase(error),
-            recordUnavailable: (error as? ClipboardSyncServiceError) == .recordUnavailable)
+        let phase = syncFailurePhase(error)
+        let recordUnavailable = (error as? ClipboardSyncServiceError) == .recordUnavailable
         try syncWrite { database in
+            var failureCount = 1
+            if case .content = work, (error as? ClipboardSyncServiceError) == .corruptData,
+               let previous = try Data.fetchOne(database, sql: """
+                   SELECT phase FROM clipboard_sync_file_retries
+                   WHERE account_id = ? AND epoch = ? AND work_id = ?
+                   """, arguments: [account.identifier, control.epoch.uuidString, work.identifier]) {
+                let retained = try JSONDecoder().decode(ClipboardSyncFileRetryFailure.self, from: previous)
+                failureCount = min(retained.failureCount, 5) + 1
+            }
+            // Content may hide retirement authority. Keep discovering changes,
+            // but retry an unchanged broken body less often across normal polls.
+            let delay: TimeInterval = [30, 60, 120, 240, 480, 900][failureCount - 1]
+            let failure = ClipboardSyncFileRetryFailure(phase: phase,
+                recordUnavailable: recordUnavailable, failureCount: failureCount)
             try database.execute(sql: """
                 INSERT INTO clipboard_sync_file_retries(account_id, epoch, work_id, phase, retry_not_before)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(account_id, epoch, work_id) DO UPDATE SET
                     phase = excluded.phase, retry_not_before = excluded.retry_not_before
                 """, arguments: [account.identifier, control.epoch.uuidString, work.identifier,
-                    try JSONEncoder().encode(failure), now().addingTimeInterval(30).timeIntervalSince1970])
+                    try JSONEncoder().encode(failure), now().addingTimeInterval(delay).timeIntervalSince1970])
         }
-        if deferredSyncFileFailure == nil, reportMissingRecord || !failure.recordUnavailable {
-            deferredSyncFileFailure = failure.phase
+        if deferredSyncFileFailure == nil, reportMissingRecord || !recordUnavailable {
+            deferredSyncFileFailure = phase
         }
     }
 

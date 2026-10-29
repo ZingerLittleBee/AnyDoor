@@ -60,7 +60,8 @@ extension ClipboardHistoryModule {
                 displayName: descriptor.displayName, originalByteCount: descriptor.originalByteCount, state: state,
                 availableVersionID: available ? availableVersion : nil, transferredByteCount: transfer.bytes,
                 transferFailure: transfer.failure, downloadRequested: transfer.requested,
-                uploadPending: transfer.uploadPending || (descriptor.state == .sourceUnavailable && hasRetrySource),
+                uploadPending: transfer.uploadPending || (hasRetrySource &&
+                    (descriptor.state == .sourceUnavailable || descriptor.state == .pendingUpload)),
                 hasConflict: conflict, transferTotalByteCount: descriptor.streamByteCount)
         }
     }
@@ -71,12 +72,14 @@ extension ClipboardHistoryModule {
         let placeholders = Array(repeating: "?", count: entryIDs.count).joined(separator: ",")
         let rows = try Row.fetchAll(database, sql: """
             SELECT member.entry_id, member.object_id, member.account_id, member.epoch, version.descriptor,
+                   version.version_id, COALESCE(source.display_name, entry.preview_text, member.object_id) AS display_name,
                    completed.version_id AS complete_version_id,
                    completed.transfer_state, completed.local_path, completed.local_identity,
                    (member.origin = 'local' AND COALESCE(source.reference_provenance, '') IN ('ordinary', 'legacyUnverified')
                      AND COALESCE(version.local_bookmark, source.bookmark_data) IS NOT NULL
                      AND COALESCE(version.local_identity, source.identity_data) IS NOT NULL) AS has_retry_source
             FROM clipboard_sync_file_members AS member
+            JOIN clipboard_entries AS entry ON entry.id = member.entry_id
             LEFT JOIN clipboard_file_members AS source ON source.entry_id = member.entry_id AND source.item_index = member.item_index
             JOIN clipboard_sync_file_selections AS choice USING(account_id, epoch, object_id)
             JOIN clipboard_sync_file_versions AS version ON version.account_id = member.account_id
@@ -88,17 +91,37 @@ extension ClipboardHistoryModule {
             """, arguments: StatementArguments(entryIDs))
         var result: [String: [ClipboardHistoryFileDisplayPlan<ClipboardHistorySyncFileSummary>]] = [:]
         var objects: [FileSummaryObject: FileSummaryFacts] = [:]
+        var unavailable: [FileSummaryObject: ClipboardHistorySyncFileSummary] = [:]
         var journals: [FileSummaryScope: ClipboardSyncFileRestorationSnapshot] = [:]
         for row in rows {
             let scope = FileSummaryScope(accountID: row["account_id"], epoch: row["epoch"])
             let object = FileSummaryObject(scope: scope, objectID: row["object_id"])
+            if let failed = unavailable[object] {
+                result[row["entry_id"], default: []].append(.init { _ in failed })
+                continue
+            }
             let summary: FileSummaryFacts
             if let cached = objects[object] { summary = cached }
             else {
+                let descriptor: ClipboardSyncFileDescriptor
+                do {
+                    descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
+                } catch is DecodingError {
+                    // Optional display enrichment must not hide healthy history.
+                    // Action paths still decode and validate the authoritative row.
+                    guard let objectID = UUID(uuidString: object.objectID),
+                          let versionID = UUID(uuidString: row["version_id"]) else { throw ClipboardHistoryModuleError.storageFailure }
+                    let failed = ClipboardHistorySyncFileSummary(id: objectID, versionID: versionID,
+                        displayName: row["display_name"], originalByteCount: nil, state: .localUnavailable,
+                        transferFailure: .corruptData)
+                    unavailable[object] = failed
+                    result[row["entry_id"], default: []].append(.init { _ in failed })
+                    continue
+                }
                 if journals[scope] == nil, let epoch = UUID(uuidString: scope.epoch) {
                     journals[scope] = try syncFileRestorationSnapshot(accountID: scope.accountID, epoch: epoch, in: database)
                 }
-                summary = try syncFileSummaryFacts(row, restorations: journals[scope], in: database)
+                summary = try syncFileSummaryFacts(row, descriptor: descriptor, restorations: journals[scope], in: database)
                 objects[object] = summary
             }
             let hasRetrySource: Bool = row["has_retry_source"]
@@ -109,9 +132,8 @@ extension ClipboardHistoryModule {
         return result
     }
 
-    private static func syncFileSummaryFacts(_ row: Row,
+    private static func syncFileSummaryFacts(_ row: Row, descriptor: ClipboardSyncFileDescriptor,
         restorations: ClipboardSyncFileRestorationSnapshot?, in database: Database) throws -> FileSummaryFacts {
-        let descriptor = try JSONDecoder().decode(ClipboardSyncFileDescriptor.self, from: row["descriptor"])
         let completeVersion = (row["complete_version_id"] as String?).flatMap(UUID.init(uuidString:))
         let linked = try linkedDisplayReferences(objectID: descriptor.objectID,
             accountID: row["account_id"], epoch: row["epoch"], in: database)
@@ -262,7 +284,8 @@ extension ClipboardHistoryModule {
             let objectID = UUID()
             let versionID = UUID()
             var frozen: ClipboardSyncFrozenFile?
-            var sourceFailure: Error?
+            var preparationFailure: Error?
+            var preparationState = sampled.state
             if sampled.state == .pendingUpload, let url = sampled.url,
                let bookmark = sampled.bookmark, let identity = source.identity {
                 do {
@@ -271,7 +294,8 @@ extension ClipboardHistoryModule {
                         account: account, control: control, key: key, objectID: objectID, versionID: versionID, faults: faultInjector)
                 } catch {
                     guard Self.isIsolatedSyncSourceFailure(error) else { throw error }
-                    sourceFailure = error
+                    preparationFailure = error
+                    if !(error is ClipboardSyncFileCacheFailure) { preparationState = .sourceUnavailable }
                 }
             }
             var stored = false
@@ -290,7 +314,7 @@ extension ClipboardHistoryModule {
                 originalByteCount: frozen?.originalByteCount ?? sampled.byteCount,
                 contentDigest: frozen?.contentDigest ?? sampled.bytes.map { Data(SHA256.hash(data: $0)) },
                 body: frozen?.upload.record ?? body?.record,
-                state: sourceFailure != nil ? .sourceUnavailable : (frozen == nil ? sampled.state : .available),
+                state: frozen == nil ? preparationState : .available,
                 bodyFormat: frozen?.bodyFormat, kind: frozen?.kind, encodedByteCount: frozen?.encodedByteCount
             )
             stored = try syncWrite { database in
@@ -310,9 +334,9 @@ extension ClipboardHistoryModule {
                         source.itemIndex, source.representationIndex, objectID.uuidString, versionID.uuidString])
                 return true
             }
-            if stored, let sourceFailure {
-                try recordSyncFileFailure(sourceFailure, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
-                try deferSyncFileWork(.source(objectID), error: sourceFailure, account: account, control: control, generation: generation)
+            if stored, let preparationFailure {
+                try recordSyncFileFailure(preparationFailure, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
+                try deferSyncFileWork(.source(objectID), error: preparationFailure, account: account, control: control, generation: generation)
             }
         }
         // Retry the captured identity once its initial descriptor is staged.

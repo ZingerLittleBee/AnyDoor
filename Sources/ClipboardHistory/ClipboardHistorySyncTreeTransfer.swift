@@ -14,7 +14,9 @@ extension ClipboardSyncFileTransfer {
         let unit = Int64(ClipboardSyncCodec.chunkByteCount)
         let count = measurement.encoded / unit + (measurement.encoded % unit == 0 ? 0 : 1)
         guard let chunks = Int(exactly: count) else { throw ClipboardSyncServiceError.localStorage }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try cacheOperation {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
         var succeeded = false
         defer { if !succeeded { try? FileManager.default.removeItem(at: directory) } }
         var buffer = Data()
@@ -25,7 +27,7 @@ extension ClipboardSyncFileTransfer {
             let encrypted = try ClipboardSyncCodec.sealFileSegment(buffer, account: account, control: control, key: key,
                 objectID: objectID, versionID: versionID, originalByteCount: measurement.original,
                 index: index, count: chunks, encodedByteCount: measurement.encoded)
-            try persistSegment(encrypted, in: directory, index: index)
+            try persistFrozenSegment(encrypted, in: directory, index: index, faults: faults)
             hash.update(data: encrypted)
             encryptedCount = try ClipboardFileTree.add(encryptedCount, Int64(encrypted.count))
             buffer.removeAll(keepingCapacity: true)
@@ -47,7 +49,7 @@ extension ClipboardSyncFileTransfer {
               try ClipboardSyncFileIO.resolve(bookmark: bookmark, identity: identity).standardizedFileURL == url.standardizedFileURL else {
             throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
         }
-        try syncDirectory(directory)
+        try cacheOperation { try syncDirectory(directory) }
         succeeded = true
         var status = stat()
         guard lstat(url.path, &status) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
