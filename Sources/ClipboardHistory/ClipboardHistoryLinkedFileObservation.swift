@@ -103,6 +103,7 @@ extension ClipboardHistoryModule {
         linkedFileObservationTasks.removeAll()
         linkedFileObservationRevisions.removeAll()
         linkedFileIdentityEvents.removeAll()
+        linkedFileObservationCache.removeAll()
         applicationRunningGuards.removeAll()
     }
 
@@ -110,6 +111,7 @@ extension ClipboardHistoryModule {
         try admitSync(generation)
         let sources = try linkedRead { try Self.linkedLocationSources(accountID: account.identifier, epoch: control.epoch, in: $0) }
         let liveIDs = Set(sources.map(\.id))
+        linkedFileObservationCache = linkedFileObservationCache.filter { liveIDs.contains($0.key) }
         for id in linkedFileObservers.keys where !liveIDs.contains(id) {
             linkedFileObservers.removeValue(forKey: id)?.cancel()
             linkedFileObservationTasks.removeValue(forKey: id)?.cancel()
@@ -214,15 +216,29 @@ extension ClipboardHistoryModule {
         guard let source = try linkedRead({ try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: $0).first }) else { return false }
         guard !source.hasPendingApplication else { return false }
         let event = linkedFileIdentityEvents[id].flatMap { $0.identity == source.identity ? $0 : nil }
+        let cached = providerIndependent && event == nil ? linkedFileObservationCache[id] : nil
+        let faults = faultInjector
         let inspection = Task.detached(priority: .utility) {
-            Result { try ClipboardLinkedIdentityResolution.inspect(source, event: event) }
+            if Task.isCancelled { return .failure(CancellationError()) as Result<(ClipboardLinkedFileProof, ClipboardLinkedObservationCache?), any Error>? }
+            if let cached, (try? cached.isUnchanged(source)) == true {
+                return nil as Result<(ClipboardLinkedFileProof, ClipboardLinkedObservationCache?), any Error>?
+            }
+            return Result {
+                try Task.checkCancellation()
+                let proof = try ClipboardLinkedIdentityResolution.inspect(source, event: event, faults: faults)
+                return (proof, try? ClipboardLinkedObservationCache(source: source, proof: proof))
+            }
         }
-        let result = await withTaskCancellationHandler {
+        let inspected = await withTaskCancellationHandler {
             await inspection.value
         } onCancel: { inspection.cancel() }
         try Task.checkCancellation()
         try await admitLinkedFileObservation(generation, account: account, epoch: epoch, services: services,
             automatic: automatic, providerIndependent: providerIndependent)
+        guard let inspected else { return false }
+        let result = inspected.map { $0.0 }
+        if case .success(let value) = inspected { linkedFileObservationCache[id] = value.1 }
+        else { linkedFileObservationCache.removeValue(forKey: id) }
         let changed = try syncWrite { database in
             guard let current = try Self.linkedLocationSources(accountID: account.identifier, epoch: epoch, id: id, in: database).first,
                   current.revision == source.revision,

@@ -117,7 +117,8 @@ enum ClipboardLinkedIdentityResolution {
         return access(path, R_OK) == 0 && ClipboardSyncFileIO.isAvailable(path: path, identity: identity)
     }
 
-    static func inspect(_ source: ClipboardLinkedLocationSource, event: ClipboardLinkedFileIdentityEvent? = nil) throws -> ClipboardLinkedFileProof {
+    static func inspect(_ source: ClipboardLinkedLocationSource, event: ClipboardLinkedFileIdentityEvent? = nil,
+        faults: ClipboardHistoryFaultInjector = .init()) throws -> ClipboardLinkedFileProof {
         var stale = false
         let bookmarkURL = try? URL(resolvingBookmarkData: source.bookmark, options: [.withoutUI, .withoutMounting],
             relativeTo: nil, bookmarkDataIsStale: &stale)
@@ -133,6 +134,7 @@ enum ClipboardLinkedIdentityResolution {
             let sameObject = ClipboardSyncFileIO.isAvailable(path: url.path, identity: source.identity)
             let proven = source.nativeIdentity.map { expected in native.map { expected.provesContinuity(with: $0) } == true } ?? sameObject
             guard proven else { continue }
+            try faults.check(.linkedFileObservationBeforeContentRead)
             let proof = try ClipboardLinkedFileIO.inspect(url, expectedIdentity: sameObject ? source.identity : nil)
             guard source.nativeIdentity.map({ expected in proof.nativeIdentity.map { expected.provesContinuity(with: $0) } == true }) ?? sameObject else {
                 throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)

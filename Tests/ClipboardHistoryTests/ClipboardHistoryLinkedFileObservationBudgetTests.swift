@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 import XCTest
+import os
 import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
@@ -29,7 +30,11 @@ extension ClipboardHistoryLinkedFileTests {
         let cloud = LinkedFileCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: LinkedFileKeys(), pollingInterval: nil)
         let senderRoot = root.appendingPathComponent("Sender")
-        let sender = makeLinkedModule(root: senderRoot, services: services, key: 0x71)
+        let contentInspections = OSAllocatedUnfairLock(initialState: 0)
+        let sender = makeLinkedModule(root: senderRoot, services: services, key: 0x71, faultInjector: .init { point in
+            if point == .linkedFileObservationBeforeContentRead { contentInspections.withLock { $0 += 1 } }
+            return false
+        })
         let receiver = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x72)
         guard case .captured(let capture) = try await sender.capture(.init(pasteboard: board), source: .unknown) else {
             return XCTFail("Expected separate top-level file references")
@@ -67,11 +72,14 @@ extension ClipboardHistoryLinkedFileTests {
         let unavailable = try await sender.linkedFileLocations(for: capture.entryID)
         XCTAssertEqual(unavailable.first { $0.url.lastPathComponent == missing.lastPathComponent }?.state, .unavailable)
         let requestsBeforeQuietTicks = await cloud.observationProviderRequestCount()
+        let inspectionsBeforeQuietTicks = contentInspections.withLock { $0 }
         try await Task.sleep(for: .seconds(11))
         let requestsAfterQuietTicks = await cloud.observationProviderRequestCount()
         print("LINKED_OBSERVATION_QUIET_PROVIDER_REQUESTS=\(requestsAfterQuietTicks - requestsBeforeQuietTicks)")
         XCTAssertEqual(requestsAfterQuietTicks, requestsBeforeQuietTicks,
             "Repeated fallback ticks for unchanged or unavailable sources must stay local")
+        XCTAssertEqual(contentInspections.withLock { $0 }, inspectionsBeforeQuietTicks,
+            "Quiet overflow polling must inspect metadata without rereading unchanged file bodies")
         let changed = Array((unobserved.isEmpty ? files : unobserved).suffix(3))
         let saved = Data("saved without a native root watcher".utf8)
         for url in changed { try saved.write(to: url) }

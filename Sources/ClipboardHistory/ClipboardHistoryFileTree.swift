@@ -47,6 +47,7 @@ final class ClipboardFileTree: @unchecked Sendable {
     private var rootMetadataDigest = Data()
 
     init(_ root: URL) throws {
+        try Task.checkCancellation()
         self.root = root
         scratch = FileManager.default.temporaryDirectory.appendingPathComponent("AnyDoor-tree-\(UUID())")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -65,10 +66,12 @@ final class ClipboardFileTree: @unchecked Sendable {
         }
         try insert(path: "", parent: nil, name: nil)
         while let path = try database.read({ try String.fetchOne($0, sql: "SELECT path FROM entries WHERE scanned = 0 ORDER BY path LIMIT 1") }) {
+            try Task.checkCancellation()
             let fd = try openEntry(path, directory: true)
             guard let stream = fdopendir(fd) else { close(fd); throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             defer { closedir(stream) }
             while true {
+                try Task.checkCancellation()
                 // Member inspection can set errno, so reset it for every read.
                 errno = 0
                 guard let entry = readdir(stream) else {
@@ -92,6 +95,7 @@ final class ClipboardFileTree: @unchecked Sendable {
     }
 
     private func insert(path: String, parent: Int32?, name: String?) throws {
+        try Task.checkCancellation()
         var status = stat()
         let result = if let parent, let name { fstatat(parent, name, &status, AT_SYMLINK_NOFOLLOW) } else { fstat(rootDescriptor, &status) }
         guard result == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
@@ -212,6 +216,26 @@ final class ClipboardFileTree: @unchecked Sendable {
     func ownershipFingerprint() throws -> Data {
         var hash = SHA256()
         hash.update(data: try stream { _ in }.digest)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        try database.read { db in
+            let cursor = try Row.fetchCursor(db, sql: "SELECT path, snapshot FROM entries ORDER BY path")
+            while let row = try cursor.next() {
+                try Task.checkCancellation()
+                let path: String = row["path"]
+                hash.update(data: Data(path.utf8) + Data([0]))
+                hash.update(data: try encoder.encode(JSONDecoder().decode(ClipboardSyncFileSnapshot.self, from: row["snapshot"])))
+            }
+        }
+        try verify()
+        return Data(hash.finalize())
+    }
+
+    /// A local observation hint, never content or deletion authority. Include
+    /// all descendants: the root directory's stamp cannot detect an in-place save.
+    /// No regular-file body or resource fork is streamed by this method.
+    func observationFingerprint() throws -> Data {
+        var hash = SHA256()
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         try database.read { db in

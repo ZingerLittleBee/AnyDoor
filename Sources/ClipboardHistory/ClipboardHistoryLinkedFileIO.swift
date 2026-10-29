@@ -9,6 +9,7 @@ struct ClipboardLinkedFileProof: Sendable {
     let digest: Data
     let byteCount: Int64
     let stamp: ClipboardLinkedFileStamp
+    let observationSnapshot: ClipboardSyncFileSnapshot
     let nativeIdentity: ClipboardLinkedNativeIdentity?
     var treeWitness: ClipboardFileTree? = nil
 }
@@ -247,6 +248,7 @@ enum ClipboardLinkedFileIO {
             bookmark: try url.bookmarkData(options: [], includingResourceValuesForKeys: [.fileResourceIdentifierKey], relativeTo: nil),
             identity: try NSKeyedArchiver.archivedData(withRootObject: identifier, requiringSecureCoding: true),
             digest: tree?.digest ?? Data(hasher.finalize()), byteCount: tree?.original ?? offset, stamp: ClipboardLinkedFileStamp(after),
+            observationSnapshot: .init(after),
             nativeIdentity: nativeIdentity, treeWitness: treeWitness)
     }
 }
