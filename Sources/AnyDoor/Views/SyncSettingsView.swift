@@ -235,8 +235,9 @@ struct SyncSettingsView: View {
             // Synchronous on purpose: the modal panel already blocked the main
             // thread, and the backup file is small.
             try data.write(to: url, options: .atomic)
-            statusMessage = L(.settingsSyncExportSuccess)
-            isError = false
+            let omittedTags = snapshot.omittedSections.contains(.clipboardTags)
+            statusMessage = L(omittedTags ? .settingsSyncExportTagsOmitted : .settingsSyncExportSuccess)
+            isError = omittedTags
         } catch {
             logger.error("Export failed: \(error)")
             statusMessage = L(.settingsSyncExportFailed, error.localizedDescription)

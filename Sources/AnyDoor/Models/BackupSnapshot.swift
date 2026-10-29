@@ -115,6 +115,10 @@ extension QuicklinkDTO {
     }
 }
 
+enum BackupSection: String, Codable, Equatable, Sendable {
+    case clipboardTags
+}
+
 /// The portable backup payload. `schemaVersion` gates future format migrations.
 struct BackupSnapshot: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 2
@@ -127,6 +131,7 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
     var builtinPreferences: [BuiltinPreferenceDTO]
     var quicklinks: [QuicklinkDTO]
     var settings: [String: SettingValue]
+    var omittedSections: [BackupSection]
 
     init(
         schemaVersion: Int,
@@ -136,7 +141,8 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
         appShortcuts: [AppShortcutDTO],
         builtinPreferences: [BuiltinPreferenceDTO],
         quicklinks: [QuicklinkDTO] = [],
-        settings: [String: SettingValue]
+        settings: [String: SettingValue],
+        omittedSections: [BackupSection] = []
     ) {
         self.schemaVersion = schemaVersion
         self.exportedAt = exportedAt
@@ -146,6 +152,7 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
         self.builtinPreferences = builtinPreferences
         self.quicklinks = quicklinks
         self.settings = settings
+        self.omittedSections = omittedSections
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -157,6 +164,7 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
         case builtinPreferences
         case quicklinks
         case settings
+        case omittedSections
     }
 
     init(from decoder: Decoder) throws {
@@ -169,5 +177,6 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
         builtinPreferences = try c.decode([BuiltinPreferenceDTO].self, forKey: .builtinPreferences)
         quicklinks = try c.decodeIfPresent([QuicklinkDTO].self, forKey: .quicklinks) ?? []
         settings = try c.decode([String: SettingValue].self, forKey: .settings)
+        omittedSections = try c.decodeIfPresent([BackupSection].self, forKey: .omittedSections) ?? []
     }
 }

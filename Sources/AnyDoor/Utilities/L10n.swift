@@ -647,6 +647,7 @@ enum L10n {
         case settingsSyncExportButton = "settings.sync.exportButton"
         case settingsSyncExportFailed = "settings.sync.exportFailed"
         case settingsSyncExportSuccess = "settings.sync.exportSuccess"
+        case settingsSyncExportTagsOmitted = "settings.sync.exportTagsOmitted"
         case settingsSyncImportButton = "settings.sync.importButton"
         case settingsSyncImportFailed = "settings.sync.importFailed"
         case settingsSyncImportPartialFailure = "settings.sync.importPartialFailure"

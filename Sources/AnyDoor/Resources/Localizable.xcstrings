@@ -12854,6 +12854,23 @@
         }
       }
     },
+    "settings.sync.exportTagsOmitted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuration exported without clipboard tags. Export again when Clipboard History is available to include them."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已导出配置，但未包含剪贴板标签。请在剪贴板历史恢复可用后重新导出，以包含标签。"
+          }
+        }
+      }
+    },
     "settings.sync.importButton": {
       "extractionState": "manual",
       "localizations": {

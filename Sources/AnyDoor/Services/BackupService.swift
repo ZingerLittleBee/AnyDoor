@@ -77,11 +77,17 @@ final class BackupService {
     // MARK: - Export
 
     func exportCurrentSnapshot() async throws -> BackupSnapshot {
-        guard let definitions = try await currentClipboardTags() else {
-            throw ClipboardHistoryModuleError.operationUnavailable
-        }
         var snapshot = try exportSnapshot()
-        snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string(try ClipboardHistoryPortableSettings.encode(definitions))
+        do {
+            guard let definitions = try await currentClipboardTags() else {
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
+            snapshot.settings[ClipboardHistoryPortableKeys.customTags] = .string(try ClipboardHistoryPortableSettings.encode(definitions))
+        } catch {
+            // A missing field leaves destination tags unchanged on import;
+            // an empty list would instead explicitly remove them.
+            snapshot.omittedSections = [.clipboardTags]
+        }
         return snapshot
     }
 
