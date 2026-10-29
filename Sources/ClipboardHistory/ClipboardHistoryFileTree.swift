@@ -236,6 +236,19 @@ final class ClipboardFileTree: @unchecked Sendable {
         }
     }
 
+    func ownershipHeader(_ path: String) throws -> Header {
+        try database.read { db in
+            guard let data = try Data.fetchOne(db, sql: "SELECT header FROM entries WHERE path = ?", arguments: [path]) else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+            }
+            return try JSONDecoder().decode(Header.self, from: data)
+        }
+    }
+
+    func openOwnershipEntry(_ path: String, symlink: Bool) throws -> Int32 {
+        try openEntry(path, symlink: symlink)
+    }
+
     /// One encrypted inventory row at a time; callers may consult ancestors
     /// without recursively entering the inventory's database connection.
     func forEachOwnershipEntry(_ consume: (String, ClipboardSyncFileSnapshot) throws -> Void) throws {

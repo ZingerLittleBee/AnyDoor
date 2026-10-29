@@ -8,8 +8,10 @@ final class ClipboardFileTreeOutput {
     private let name: String
     private var root: Int32 = -1
     private let rootCreated: ((Int32) throws -> Void)?
+    private let ownership: ClipboardWorkingOutputOwner?
 
-    init(destination: URL, parentDescriptor: Int32, rootCreated: ((Int32) throws -> Void)? = nil) throws {
+    init(destination: URL, parentDescriptor: Int32, rootCreated: ((Int32) throws -> Void)? = nil,
+        ownership: ClipboardWorkingOutputOwner? = nil) throws {
         let handle = dup(parentDescriptor)
         guard handle >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         var expected = stat(), atPath = stat()
@@ -25,6 +27,7 @@ final class ClipboardFileTreeOutput {
         parent = handle
         name = destination.lastPathComponent
         self.rootCreated = rootCreated
+        self.ownership = ownership
     }
 
     deinit { if root >= 0 { close(root) }; close(parent) }
@@ -32,6 +35,7 @@ final class ClipboardFileTreeOutput {
     func create(_ header: ClipboardFileTree.Header) throws -> Int32 {
         let directory = try parentFor(header.path)
         defer { close(directory) }
+        try ownership?.willCreateMember(path: header.path, parent: directory)
         let leaf = header.path.isEmpty ? name : String(header.path.split(separator: "/").last ?? "")
         let fd: Int32
         switch header.kind {
@@ -60,6 +64,8 @@ final class ClipboardFileTreeOutput {
             root = dup(fd)
             guard root >= 0 else { close(fd); throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
             do { try rootCreated?(fd) } catch { close(fd); throw error }
+        } else {
+            do { try ownership?.memberCreated(path: header.path, descriptor: fd, parent: directory) } catch { close(fd); throw error }
         }
         return fd
     }
@@ -85,6 +91,8 @@ final class ClipboardFileTreeOutput {
         var times = [timespec(tv_sec: 0, tv_nsec: Int(UTIME_OMIT)), timespec(tv_sec: header.modifiedSeconds, tv_nsec: header.modifiedNanoseconds)]
         guard futimens(fd, &times) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         if header.kind != "link", fsync(fd) != 0 { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+        try ownership?.checkpointMember(path: header.path, descriptor: fd, metadataApplied: true,
+            expectedSize: header.kind == "file" ? header.size : nil)
     }
 
     func snapshot() throws -> ClipboardSyncFileSnapshot {

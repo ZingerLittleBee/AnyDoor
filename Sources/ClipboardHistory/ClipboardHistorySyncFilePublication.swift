@@ -46,6 +46,9 @@ enum ClipboardSyncFilePublication {
         try ownership.recover()
         let (directory, url) = try openDirectory(root: root, accountID: accountID, descriptor: descriptor)
         defer { close(directory) }
+        try ownership.recover(directory: url, descriptor: descriptor) { replay in
+            try replay.raw(size: Int64(data.count)) { try $0(data) }
+        }
         var parent = stat()
         guard fstat(directory, &parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         let existing = openat(directory, descriptor.displayName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
@@ -62,7 +65,7 @@ enum ClipboardSyncFilePublication {
                 parentDevice: parent.st_dev, parentInode: parent.st_ino, snapshot: .init(after))
         }
         guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
-        let owner = try ownership.reserve(directory: directory, url: url)
+        let owner = try ownership.reserve(directory: directory, url: url, descriptor: descriptor)
         let output = openat(directory, owner.name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard output >= 0 else {
             let failure = errno
@@ -75,12 +78,17 @@ enum ClipboardSyncFilePublication {
             try faults.check(.syncWorkingOutputAfterOwnership)
             try data.withUnsafeBytes { buffer in
                 var written = 0
+                var nextProgress = ClipboardWorkingOutputOwner.progressByteCount
                 while written < buffer.count {
                     try Task.checkCancellation()
                     let amount = Darwin.write(output, buffer.baseAddress?.advanced(by: written), min(64 * 1_024, buffer.count - written))
                     if amount < 0, errno == EINTR { continue }
                     guard amount > 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(amount == 0 ? EIO : errno) }
                     written += amount
+                    if Int64(written) >= nextProgress {
+                        try owner.checkpointMember(path: "", descriptor: output, expectedSize: Int64(written))
+                        nextProgress = Int64(written) + ClipboardWorkingOutputOwner.progressByteCount
+                    }
                     try faults.check(.syncWorkingOutputDuringConstruction)
                 }
             }
@@ -107,6 +115,22 @@ enum ClipboardSyncFilePublication {
         }
         let (directory, url) = try openDirectory(root: root, accountID: account.identifier, descriptor: descriptor)
         defer { close(directory) }
+        try ownership.recover(directory: url, descriptor: descriptor) { replay in
+            guard let body = descriptor.body, let size = descriptor.originalByteCount else { throw ClipboardSyncServiceError.corruptData }
+            try replay.raw(size: size) { consume in
+                var hash = SHA256()
+                var count: Int64 = 0
+                for index in 0..<body.chunkCount {
+                    try Task.checkCancellation()
+                    let bytes = try ClipboardSyncCodec.openFileSegment(ClipboardSyncFileTransfer.readSegment(in: encryptedDirectory, index: index),
+                        descriptor: descriptor, account: account, control: control, key: key, index: index)
+                    hash.update(data: bytes)
+                    count += Int64(bytes.count)
+                    try consume(bytes)
+                }
+                guard count == size, Data(hash.finalize()) == descriptor.contentDigest else { throw ClipboardSyncServiceError.corruptData }
+            }
+        }
         var parent = stat()
         guard fstat(directory, &parent) == 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         let existing = openat(directory, descriptor.displayName, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
@@ -129,7 +153,7 @@ enum ClipboardSyncFilePublication {
         }
         guard errno == ENOENT else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
         guard let body = descriptor.body else { throw ClipboardSyncServiceError.localStorage }
-        let owner = try ownership.reserve(directory: directory, url: url)
+        let owner = try ownership.reserve(directory: directory, url: url, descriptor: descriptor)
         let pendingName = owner.name
         let output = openat(directory, pendingName, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard output >= 0 else {
@@ -159,6 +183,7 @@ enum ClipboardSyncFilePublication {
                         written += count
                     }
                 }
+                try owner.checkpointMember(path: "", descriptor: output, expectedSize: byteCount)
                 try faults.check(.syncWorkingOutputDuringConstruction)
             }
             guard byteCount == descriptor.originalByteCount, Data(hash.finalize()) == descriptor.contentDigest else {

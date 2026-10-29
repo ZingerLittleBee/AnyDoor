@@ -15,6 +15,194 @@ private struct WorkingOutputStoreKey: ClipboardHistoryMasterKeyStoring {
 
 extension ClipboardHistoryLinkedFileTests {
     @MainActor
+    func testInterruptedPrefixTruncationAndTimestampEditsRequireReview() async throws {
+        if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
+            try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))
+            return XCTFail("Expected interrupted production tree write")
+        }
+        for change in ["truncate", "touch"] {
+            let root = try workingOutputScenario(kind: "tree", stage: "checkpoint")
+            let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+                test: "ClipboardHistoryLinkedFileTests/testInterruptedPrefixTruncationAndTimestampEditsRequireReview")
+            XCTAssertEqual(result.status, 73, result.output)
+            guard result.status == 73 else { continue }
+            let pending = try workingOutputPath(in: root)
+            let member = pending.appendingPathComponent("member.txt")
+            if change == "truncate" {
+                let file = try FileHandle(forWritingTo: member)
+                try file.truncate(atOffset: 32 * 1_024)
+                try file.close()
+            } else {
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: member.path)
+            }
+            let bytes = try Data(contentsOf: member)
+            let services = try await restoreWorkingOutputServices(in: root)
+            let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+            try await module.setSyncEnabled(true)
+            await module.retrySync()
+            let notices = try await module.workingOutputRecoveries()
+            XCTAssertEqual(notices.count, 1, "Preserve active-member \(change)")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: member.path), change)
+            if FileManager.default.fileExists(atPath: member.path) { XCTAssertEqual(try Data(contentsOf: member), bytes) }
+            if let notice = notices.first {
+                try await module.keepWorkingOutput(notice.id)
+                await module.retrySync()
+                let entries = try await module.page(.init()).entries
+                let entry = try XCTUnwrap(entries.first)
+                let materialized = try await module.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+                guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Expected complete tree after Keep") }
+                XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member.txt")),
+                    Data(repeating: 0x63, count: 8 * 1_024 * 1_024 + 256 * 1_024))
+                XCTAssertEqual(try Data(contentsOf: member), bytes)
+            }
+        }
+    }
+
+    @MainActor
+    func testInterruptedPrefixEditsAndReplacementIdentitiesRemainOwnedNotDeleted() async throws {
+        if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
+            try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))
+            return XCTFail("Expected interrupted production tree write")
+        }
+        for change in ["bytes", "identity", "extra", "attribute", "completed-time", "directory-time", "root", "parent"] {
+            let root = try workingOutputScenario(kind: "tree", stage: "progress")
+            let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+                test: "ClipboardHistoryLinkedFileTests/testInterruptedPrefixEditsAndReplacementIdentitiesRemainOwnedNotDeleted")
+            XCTAssertEqual(result.status, 73, result.output)
+            guard result.status == 73 else { continue }
+            let pending = try workingOutputPath(in: root)
+            let member = pending.appendingPathComponent("member.txt")
+            let userBytes = Data("user-edited partial".utf8)
+            switch change {
+            case "bytes":
+                let handle = try FileHandle(forWritingTo: member)
+                try handle.write(contentsOf: userBytes)
+                try handle.close()
+            case "identity":
+                let identical = try Data(contentsOf: member)
+                try identical.write(to: member, options: .atomic)
+            case "extra": try userBytes.write(to: pending.appendingPathComponent("user.txt"))
+            case "attribute":
+                XCTAssertEqual(userBytes.withUnsafeBytes { setxattr(member.path, "com.anydoor.test-user", $0.baseAddress, $0.count, 0, 0) }, 0)
+            case "completed-time":
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)],
+                    ofItemAtPath: pending.appendingPathComponent("aaa.txt").path)
+            case "directory-time":
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: pending.path)
+            case "root":
+                try FileManager.default.moveItem(at: pending, to: pending.appendingPathExtension("user-kept"))
+                try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: false)
+                try userBytes.write(to: member)
+            default:
+                let parent = pending.deletingLastPathComponent()
+                try FileManager.default.moveItem(at: parent, to: parent.appendingPathExtension("user-kept"))
+                try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+                try userBytes.write(to: member)
+            }
+            let expected = try Data(contentsOf: member)
+            let services = try await restoreWorkingOutputServices(in: root)
+            let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+            try await module.setSyncEnabled(true)
+            await module.retrySync()
+            let notices = try await module.workingOutputRecoveries()
+            let notice = try XCTUnwrap(notices.first, change)
+            XCTAssertEqual(notices.count, 1, change)
+            XCTAssertEqual(notice.reason, .changed, change)
+            XCTAssertEqual(try Data(contentsOf: member), expected, change)
+            for _ in 0..<2 { await module.retrySync() }
+            let repeated = try await module.workingOutputRecoveries()
+            XCTAssertEqual(repeated.map(\.id), [notice.id], change)
+            XCTAssertEqual(try Data(contentsOf: member), expected, change)
+            try await module.closeStoreForTesting()
+            let reopened = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+            let persisted = try await reopened.workingOutputRecoveries()
+            XCTAssertEqual(persisted.map(\.id), [notice.id], change)
+            try await reopened.keepWorkingOutput(notice.id)
+            XCTAssertEqual(try Data(contentsOf: member), expected, change)
+        }
+    }
+
+    @MainActor
+    func testInterruptedRawPrefixIsReplayedByAuthorizedRetry() async throws {
+        if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
+            try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))
+            return XCTFail("Expected interrupted production raw write")
+        }
+        let root = try workingOutputScenario(kind: "raw", stage: "raw-progress")
+        let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+            test: "ClipboardHistoryLinkedFileTests/testInterruptedRawPrefixIsReplayedByAuthorizedRetry")
+        XCTAssertEqual(result.status, 73, result.output)
+        guard result.status == 73 else { return }
+        let pending = try workingOutputPath(in: root)
+        let original = try Data(contentsOf: root.appendingPathComponent("Notes.txt"))
+        let prefix = try Data(contentsOf: pending)
+        XCTAssertFalse(prefix.isEmpty)
+        XCTAssertLessThan(prefix.count, original.count)
+        XCTAssertEqual(prefix, original.prefix(prefix.count))
+        let services = try await restoreWorkingOutputServices(in: root)
+        let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+        try await module.setSyncEnabled(true)
+        await module.retrySync()
+        let notices = try await module.workingOutputRecoveries()
+        XCTAssertTrue(notices.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pending.path))
+        let entries = try await module.page(.init()).entries
+        let entry = try XCTUnwrap(entries.first)
+        let materialized = try await module.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Expected complete raw file") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL), original)
+    }
+
+    @MainActor
+    func testInterruptedAuthenticatedTreePrefixIsReclaimedAndRetryCompletes() async throws {
+        if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
+            try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))
+            return XCTFail("Expected interrupted production tree write")
+        }
+        let root = try workingOutputScenario(kind: "tree", stage: "checkpoint")
+        let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+            test: "ClipboardHistoryLinkedFileTests/testInterruptedAuthenticatedTreePrefixIsReclaimedAndRetryCompletes")
+        XCTAssertEqual(result.status, 73, result.output)
+        guard result.status == 73 else { return }
+        let pending = try workingOutputPath(in: root)
+        XCTAssertEqual(try Data(contentsOf: pending.appendingPathComponent("member.txt")).count, 4 * 1_024 * 1_024)
+        XCTAssertEqual(try Data(contentsOf: pending.appendingPathComponent("aaa.txt")), Data("completed member".utf8))
+        let parent = pending.deletingLastPathComponent()
+        let unrelated = parent.appendingPathComponent("Receiving-unowned.partial")
+        let retained = parent.appendingPathComponent("Notes (AnyDoor update retained)")
+        try Data("unowned".utf8).write(to: unrelated)
+        try Data("retained".utf8).write(to: retained)
+        let services = try await restoreWorkingOutputServices(in: root)
+        let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+        try await module.setSyncEnabled(false)
+        let notices = try await module.workingOutputRecoveries()
+        XCTAssertEqual(notices.count, 1, "Off must not obtain the replay key")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pending.path))
+        XCTAssertEqual(try Data(contentsOf: unrelated), Data("unowned".utf8))
+        XCTAssertEqual(try Data(contentsOf: retained), Data("retained".utf8))
+        try await module.setSyncEnabled(true)
+        await module.retrySync()
+        let remaining = try await module.workingOutputRecoveries()
+        XCTAssertTrue(remaining.isEmpty, "Authorized retry should verify the prefix without Keep: \(remaining)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pending.path))
+        guard remaining.isEmpty else { return }
+        let entries = try await module.page(.init()).entries
+        let entry = try XCTUnwrap(entries.first)
+        let materialized = try await module.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else {
+            return XCTFail("Expected complete tree after retry")
+        }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member.txt")), Data(repeating: 0x63, count: 8 * 1_024 * 1_024 + 256 * 1_024))
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("aaa.txt")), Data("completed member".utf8))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: file.currentURL.appendingPathComponent("aaa.txt").path + "/..namedfork/rsrc")),
+            Data(repeating: 0x76, count: 8 * 1_024))
+        var attribute = Data(count: 4)
+        XCTAssertEqual(attribute.withUnsafeMutableBytes { getxattr(file.currentURL.appendingPathComponent("aaa.txt").path,
+            "com.anydoor.test-source", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW) }, 4)
+        XCTAssertEqual(attribute, Data([1, 2, 3, 4]))
+    }
+
+    @MainActor
     func testStoreReplacementCreatesMissingExclusiveLeaseBeforeDiscard() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("working-output-missing-lock-\(UUID())")
         removeClipboardHistoryDirectoryAfterTest(root)
@@ -203,6 +391,89 @@ extension ClipboardHistoryLinkedFileTests {
     }
 
     @MainActor
+    func testUncheckpointedTreePrefixRequiresKeepBeforeRetry() async throws {
+        if let childRoot = ProcessInfo.processInfo.environment[WorkingOutputCrash.rootKey] {
+            try await createInterruptedWorkingOutput(at: URL(fileURLWithPath: childRoot))
+            return XCTFail("Expected uncheckpointed production write")
+        }
+        let root = try workingOutputScenario(kind: "tree", stage: "progress")
+        let result = try await WorkingOutputCrash.run(root: root, bundle: Bundle(for: Self.self).bundleURL,
+            test: "ClipboardHistoryLinkedFileTests/testUncheckpointedTreePrefixRequiresKeepBeforeRetry")
+        XCTAssertEqual(result.status, 73, result.output)
+        guard result.status == 73 else { return }
+        let pending = try workingOutputPath(in: root)
+        let member = pending.appendingPathComponent("member.txt")
+        let bytes = try Data(contentsOf: member)
+        XCTAssertEqual(bytes.count, 64 * 1_024)
+        let services = try await restoreWorkingOutputServices(in: root)
+        let module = makeLinkedModule(root: root.appendingPathComponent("Receiver"), services: services, key: 0x52)
+        try await module.setSyncEnabled(true)
+        await module.retrySync()
+        let notices = try await module.workingOutputRecoveries()
+        let notice = try XCTUnwrap(notices.first)
+        XCTAssertEqual(notices.count, 1)
+        XCTAssertEqual(try Data(contentsOf: member), bytes)
+        try await module.keepWorkingOutput(notice.id)
+        await module.retrySync()
+        let entries = try await module.page(.init()).entries
+        let entry = try XCTUnwrap(entries.first)
+        let materialized = try await module.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Expected complete tree after Keep") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member.txt")), Data(repeating: 0x63, count: 256 * 1_024))
+        XCTAssertEqual(try Data(contentsOf: member), bytes)
+    }
+
+    @MainActor
+    func testRepeatedInterruptedPrefixesAreReclaimedAcrossRestartWithoutKeep() async throws {
+        let failures = OSAllocatedUnfairLock(initialState: (enabled: true, writes: 0, pieces: 0))
+        let faults = ClipboardHistoryFaultInjector { point in
+            guard point == .syncWorkingOutputDuringConstruction else { return false }
+            return failures.withLock { state in
+                state.pieces += 1
+                guard state.pieces % 64 == 0 else { return false }
+                state.writes += 1
+                return state.enabled
+            }
+        }
+        let fixture = try await makeLinkedFixture(receiverFault: faults, prepareSource: { root in
+            try FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data(repeating: 0x74, count: 8 * 1_024 * 1_024).write(to: root.appendingPathComponent("member.txt"))
+        })
+        let firstPage = try await fixture.receiver.page(.init()).entries
+        let first = try XCTUnwrap(firstPage.first?.syncFiles.first)
+        try await fixture.receiver.requestSyncFileDownload(entryID: fixture.entryID, objectID: first.id, versionID: first.versionID)
+        var previous: URL?
+        for _ in 0..<3 {
+            let notices = try await fixture.receiver.workingOutputRecoveries()
+            XCTAssertEqual(notices.count, 1)
+            let pending = try XCTUnwrap(notices.first).url
+            if let previous { XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path)) }
+            let siblings = try FileManager.default.contentsOfDirectory(at: pending.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            XCTAssertEqual(siblings.filter { $0.lastPathComponent.hasPrefix("Receiving-") }.count, 1)
+            previous = pending
+            await fixture.receiver.retrySync()
+        }
+        XCTAssertGreaterThan(failures.withLock { $0.writes }, 1)
+        try await fixture.receiver.closeStoreForTesting()
+        let reopened = makeLinkedModule(root: fixture.receiverRoot, services: fixture.services, key: 0x52, faultInjector: faults)
+        await reopened.resumeSync()
+        await reopened.retrySync()
+        let afterRestart = try await reopened.workingOutputRecoveries()
+        let last = try XCTUnwrap(afterRestart.first).url
+        XCTAssertEqual(afterRestart.count, 1)
+        if let previous { XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path)) }
+        failures.withLock { $0.enabled = false }
+        await reopened.retrySync()
+        let complete = try await reopened.workingOutputRecoveries()
+        XCTAssertTrue(complete.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: last.path))
+        let materialized = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
+        guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Expected complete tree") }
+        XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member.txt")), Data(repeating: 0x74, count: 8 * 1_024 * 1_024))
+    }
+
+    @MainActor
     func testRepeatedConstructionFailureKeepsOneNoticeWhileIndependentSyncContinues() async throws {
         let failures = OSAllocatedUnfairLock(initialState: (enabled: true, writes: 0))
         let faults = ClipboardHistoryFaultInjector { point in
@@ -218,6 +489,7 @@ extension ClipboardHistoryLinkedFileTests {
         let notice = try XCTUnwrap(initial.first)
         XCTAssertEqual(initial.count, 1)
         let bytes = try Data(contentsOf: notice.url.appendingPathComponent("member.txt"))
+        try Data("user added after interruption".utf8).write(to: notice.url.appendingPathComponent("user.txt"))
         let choices = try await fixture.receiver.syncTags()
         let tag = try XCTUnwrap(choices.first)
         try await fixture.receiver.setSyncTagSelected(tag.id, selected: true)
@@ -237,7 +509,8 @@ extension ClipboardHistoryLinkedFileTests {
         XCTAssertFalse(peer.contains { $0.id == removed.entryID })
         let retained = try await fixture.receiver.workingOutputRecoveries()
         XCTAssertEqual(retained.map(\.id), [notice.id])
-        XCTAssertEqual(failures.withLock { $0.writes }, 1, "Retry must not start another incomplete output for this version")
+        XCTAssertEqual(retained.first?.reason, .changed)
+        XCTAssertEqual(failures.withLock { $0.writes }, 1, "User changes prevent automatic reclamation and repeated construction")
         let children = try FileManager.default.contentsOfDirectory(at: notice.url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
         XCTAssertEqual(children.filter { $0.lastPathComponent.hasPrefix("Receiving-") }.count, 1)
         try await fixture.receiver.closeStoreForTesting()
@@ -253,8 +526,8 @@ extension ClipboardHistoryLinkedFileTests {
         let materialized = try await reopened.materialize(.init(entryID: fixture.entryID, purpose: .normalPaste))
         guard case .file(let file) = materialized.items.first?.representations.first else { return XCTFail("Expected complete retried tree") }
         XCTAssertEqual(try Data(contentsOf: file.currentURL.appendingPathComponent("member.txt")), bytes)
-        XCTAssertEqual(try Data(contentsOf: notice.url.appendingPathComponent("member.txt")), bytes,
-            "Keep relinquishes the old candidate instead of deleting it")
+        XCTAssertEqual(try Data(contentsOf: notice.url.appendingPathComponent("member.txt")), bytes)
+        XCTAssertEqual(try Data(contentsOf: notice.url.appendingPathComponent("user.txt")), Data("user added after interruption".utf8))
         let complete = try await reopened.workingOutputRecoveries()
         XCTAssertTrue(complete.isEmpty)
     }
@@ -453,24 +726,48 @@ extension ClipboardHistoryLinkedFileTests {
         let source = root.appendingPathComponent(kind == "tree" ? "Notes" : "Notes.txt")
         if kind == "tree" {
             try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
-            try Data("owned complete member".utf8).write(to: source.appendingPathComponent("member.txt"))
+            let content = stage == "checkpoint" ? Data(repeating: 0x63, count: 8 * 1_024 * 1_024 + 256 * 1_024)
+                : stage == "progress" ? Data(repeating: 0x63, count: 256 * 1_024) : Data("owned complete member".utf8)
+            try content.write(to: source.appendingPathComponent("member.txt"))
+            if ["progress", "checkpoint"].contains(stage) {
+                let completed = source.appendingPathComponent("aaa.txt")
+                try Data("completed member".utf8).write(to: completed)
+                let fork = open(completed.path + "/..namedfork/rsrc", O_WRONLY | O_CREAT | O_CLOEXEC, 0o600)
+                guard fork >= 0 else { throw ClipboardHistoryStorageError.fileOperationFailed(errno) }
+                defer { close(fork) }
+                let forkBytes = Data(repeating: 0x76, count: 8 * 1_024)
+                XCTAssertEqual(forkBytes.withUnsafeBytes { Darwin.write(fork, $0.baseAddress, $0.count) }, forkBytes.count)
+                let attribute = Data([1, 2, 3, 4])
+                XCTAssertEqual(attribute.withUnsafeBytes { setxattr(completed.path, "com.anydoor.test-source", $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW) }, 0)
+            }
             try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000_000)], ofItemAtPath: source.path)
-        } else { try Data("owned complete raw file".utf8).write(to: source) }
+        } else {
+            let content = stage == "raw-progress" ? Data(repeating: 0x72, count: ClipboardSyncCodec.chunkByteCount * 2 + 7)
+                : Data("owned complete raw file".utf8)
+            try content.write(to: source)
+        }
         let cloud = LinkedFileCloud(), keys = LinkedFileKeys()
         let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
         let sender = makeLinkedModule(root: root.appendingPathComponent("Sender"), services: services, key: 0x51)
         let receiverRoot = root.appendingPathComponent("Receiver")
+        let writes = OSAllocatedUnfairLock(initialState: 0)
         let receiver = makeLinkedModule(root: receiverRoot, services: services, key: 0x52, faultInjector: .init { point in
-            let checkpoint: ClipboardHistoryFaultPoint = stage == "middle" ? .syncWorkingOutputDuringConstruction
+            let checkpoint: ClipboardHistoryFaultPoint = ["middle", "progress", "raw-progress", "checkpoint"].contains(stage) ? .syncWorkingOutputDuringConstruction
                 : stage == "after" ? .syncFileAfterPublication
                 : stage == "owned" ? .syncWorkingOutputAfterOwnership : .syncFileBeforePublication
             guard point == checkpoint else { return false }
+            if stage == "progress", writes.withLock({ $0 += 1; return $0 }) < 2 { return false }
             let working = receiverRoot.appendingPathComponent("Linked Working Copies")
             let paths = FileManager.default.enumerator(at: working, includingPropertiesForKeys: nil)
             while let url = paths?.nextObject() as? URL {
                 let matches = stage == "after" ? url.lastPathComponent == source.lastPathComponent
                     : url.lastPathComponent.hasPrefix("Receiving-") && url.pathExtension == "partial"
                 if matches {
+                    if stage == "checkpoint" {
+                        var status = stat()
+                        guard lstat(url.appendingPathComponent("member.txt").path, &status) == 0,
+                              status.st_size == 4 * 1_024 * 1_024 else { return false }
+                    }
                     do { try Data(url.path.utf8).write(to: root.appendingPathComponent("pending-path"), options: .atomic) }
                     catch { _exit(74) }
                     if stage == "held" {
@@ -496,6 +793,12 @@ extension ClipboardHistoryLinkedFileTests {
         let transcript = WorkingOutputTranscript(control: control, key: try XCTUnwrap(sharedKey), uploads: await cloud.uploadedRecords())
         try JSONEncoder().encode(transcript).write(to: root.appendingPathComponent("external-transcript"))
         try await receiver.setSyncEnabled(true)
+        if ["raw-progress", "checkpoint"].contains(stage) {
+            let page = try await receiver.page(.init()).entries
+            let received = try XCTUnwrap(page.first)
+            let file = try XCTUnwrap(received.syncFiles.first)
+            try await receiver.requestSyncFileDownload(entryID: received.id, objectID: file.id, versionID: file.versionID)
+        }
     }
 
     private func workingOutputScenario(kind: String, stage: String) throws -> URL {
@@ -550,13 +853,23 @@ private enum WorkingOutputCrash {
         process.environment = environment
         process.standardOutput = output
         process.standardError = output
+        let completion = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+        process.terminationHandler = { child in
+            completion.withLock { $0 = child.terminationReason == .exit ? child.terminationStatus : -1 }
+        }
         try process.run()
-        defer { if process.isRunning { kill(process.processIdentifier, SIGKILL); process.waitUntilExit() } }
+        defer { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
         let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while process.isRunning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
-        return .init(status: process.terminationReason == .exit ? process.terminationStatus : -1,
+        while completion.withLock({ $0 }) == nil && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        if completion.withLock({ $0 }) == nil {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            let terminationDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+            while completion.withLock({ $0 }) == nil && ContinuousClock.now < terminationDeadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        guard let status = completion.withLock({ $0 }) else { throw CocoaError(.executableRuntimeMismatch) }
+        return .init(status: status,
             output: try String(contentsOf: log, encoding: .utf8))
     }
 }

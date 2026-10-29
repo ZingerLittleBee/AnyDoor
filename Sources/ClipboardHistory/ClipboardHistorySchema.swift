@@ -275,6 +275,9 @@ extension ClipboardHistoryModule {
                     ON clipboard_sync_file_members(entry_id, account_id, epoch);
                 """)
         }
+        migrator.registerMigration("v34_working_output_members") { database in
+            try Self.createWorkingOutputMemberSchema(in: database)
+        }
         return migrator
     }
 
