@@ -448,6 +448,7 @@ final class ClipboardHistoryPresentationModel {
     /// Least-recently-used first. Kept in step with `materializationCache` by
     /// `cacheMaterialization` / `pruneMaterializations`.
     private var materializationOrder: [MaterializationKey] = []
+    private(set) var materializationGeneration: UInt64 = 0
     /// Whether an entry's host-action materialization had exact text on every
     /// item, which is what the ⌥↵ hint offers. Kept apart from the bounded
     /// cache, which the wall's mounted cards churn, and recorded whatever
@@ -501,6 +502,7 @@ final class ClipboardHistoryPresentationModel {
     }
 
     func reload() async {
+        invalidateAllMaterializations()
         await loadFirstPage(preservingSelection: true)
     }
 
@@ -515,6 +517,10 @@ final class ClipboardHistoryPresentationModel {
     /// published in one step, keeping the selection by id. Changes that land
     /// while a refresh runs coalesce into one more pass.
     func refreshForStoreChange() async {
+        // A row contains only a bounded text preview. Even an identical row
+        // can now have different exact text, so file identity cannot validate
+        // decrypted payloads after an authoritative store change.
+        invalidateAllMaterializations()
         guard !isRefreshingForStoreChange else {
             storeChangePending = true
             return
@@ -837,7 +843,7 @@ final class ClipboardHistoryPresentationModel {
         do {
             _ = try await operations.associateFileLocation(request)
             invalidateMaterializations(for: request.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -850,12 +856,12 @@ final class ClipboardHistoryPresentationModel {
         do {
             _ = try await operations.reassociateFileLocation(request)
             invalidateMaterializations(for: request.selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             let failure = ClipboardHistoryActionFailure(error)
             invalidateMaterializations(for: request.selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             actionFailure = failure
             return false
         }
@@ -866,12 +872,12 @@ final class ClipboardHistoryPresentationModel {
         do {
             try await operations.setFileLocationPaused(selection, paused)
             invalidateMaterializations(for: selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             return true
         } catch {
             let failure = ClipboardHistoryActionFailure(error)
             invalidateMaterializations(for: selection.entryID)
-            await reload()
+            await refreshForStoreChange()
             actionFailure = failure
             return false
         }
@@ -1389,6 +1395,7 @@ final class ClipboardHistoryPresentationModel {
             return cached
         }
         let requestRevision = revision
+        let requestMaterializationGeneration = materializationGeneration
         if recordsFailure {
             actionFailure = nil
         }
@@ -1399,6 +1406,9 @@ final class ClipboardHistoryPresentationModel {
                     purpose: purpose
                 )
             )
+            guard !usesCache || requestMaterializationGeneration == materializationGeneration else {
+                return nil
+            }
             if usesCache, requestRevision == revision {
                 cacheMaterialization(value, for: key)
             }
@@ -1410,7 +1420,8 @@ final class ClipboardHistoryPresentationModel {
             }
             return value
         } catch {
-            if recordsFailure, requestRevision == revision {
+            if recordsFailure, requestRevision == revision,
+               (!usesCache || requestMaterializationGeneration == materializationGeneration) {
                 actionFailure = ClipboardHistoryActionFailure(error)
             }
             return nil
@@ -1617,9 +1628,15 @@ final class ClipboardHistoryPresentationModel {
         for entryID: ClipboardHistoryEntryID,
         payloadChanged: Bool = true
     ) {
+        if payloadChanged { materializationGeneration &+= 1 }
         pruneMaterializations(keepsEligibility: !payloadChanged) {
             $0 != entryID
         }
+    }
+
+    private func invalidateAllMaterializations() {
+        materializationGeneration &+= 1
+        pruneMaterializations { _ in false }
     }
 
     private func invalidateChangedFileMaterializations(in incoming: [ClipboardHistoryEntry]) {
