@@ -247,8 +247,9 @@ def verify(args: argparse.Namespace, *, now: datetime) -> None:
         f'and certificate leaf[subject.OU] = "{configuration.team}"'
     )
     for target in (args.app / "Contents/MacOS/AnyDoor", args.app):
+        # Without '=', codesign treats the requirement as a file path.
         checked = subprocess.run(
-            ["codesign", "--verify", "--strict", "--test-requirement", requirement, str(target)],
+            ["codesign", "--verify", "--strict", "--test-requirement", "=" + requirement, str(target)],
             capture_output=True,
         )
         if checked.returncode:

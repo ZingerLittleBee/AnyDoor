@@ -34,6 +34,13 @@ import json, os, pathlib, plistlib, sys
 if "--verify" in sys.argv:
     with open(os.environ["FAKE_CALLS"], "a") as handle:
         handle.write(json.dumps({"tool": "codesign", "argv": sys.argv[1:]}) + "\\n")
+    requirement = sys.argv[sys.argv.index("--test-requirement") + 1]
+    if not requirement.startswith("="):
+        try:
+            pathlib.Path(requirement).read_bytes()
+        except OSError:
+            print("invalid requirement specification", file=sys.stderr)
+            sys.exit(1)
     sys.exit(1 if os.environ.get("FAKE_INVALID_SIGNATURE") else 0)
 if "--extract-certificates" in sys.argv:
     prefix = sys.argv[sys.argv.index("--extract-certificates") + 1]
@@ -350,6 +357,7 @@ class ProvisioningTests(FakeToolTestCase):
         for argv in checks:
             self.assertIn("--strict", argv)
             requirement = argv[argv.index("--test-requirement") + 1]
+            self.assertTrue(requirement.startswith("="), "codesign must receive literal requirement text")
             for clause in (
                 f'identifier "{BUNDLE}"', 'anchor apple generic',
                 'certificate 1[field.1.2.840.113635.100.6.2.6] exists',
