@@ -15,6 +15,7 @@ final class ClipboardSyncSettingsModel {
 
     private(set) var status = ClipboardHistorySyncStatus()
     private(set) var preservedEdits: [ClipboardHistoryPreservedEdit] = []
+    private(set) var workingOutputRecoveries: [ClipboardHistoryWorkingOutputRecovery] = []
     private(set) var tags: [ClipboardHistorySyncTag] = []
     private(set) var operationFailed = false
     private(set) var isPerformingAction = false
@@ -148,6 +149,7 @@ final class ClipboardSyncSettingsModel {
         do {
             let currentTags = try await module.syncTags()
             let currentPreservedEdits = try await module.preservedSyncEdits()
+            let currentWorkingOutputRecoveries = try await module.workingOutputRecoveries()
             guard generation == refreshGeneration, !Task.isCancelled else {
                 return
             }
@@ -155,6 +157,7 @@ final class ClipboardSyncSettingsModel {
             if status.isEnabled { didRecoverMissingCollection = false }
             tags = currentTags
             preservedEdits = currentPreservedEdits
+            workingOutputRecoveries = currentWorkingOutputRecoveries
             operationFailed = false
         } catch {
             guard generation == refreshGeneration, !Task.isCancelled else {
@@ -169,6 +172,11 @@ final class ClipboardSyncSettingsModel {
         guard !isPerformingAction else { return }
         let ids = preservedEdits.map(\.id)
         await performAction { try await module.dismissPreservedSyncEdits(ids) }
+    }
+
+    func keepWorkingOutput(_ id: UUID) async {
+        guard !isPerformingAction else { return }
+        await performAction { try await module.keepWorkingOutput(id) }
     }
 
     private func performAction(_ action: () async throws -> Void) async {

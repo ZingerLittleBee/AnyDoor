@@ -1,3 +1,4 @@
+import AppKit
 import ClipboardHistory
 import SwiftUI
 
@@ -115,6 +116,38 @@ struct ClipboardSyncSettingsView: View {
             if model.status.withdrawnEntryCount > 0 {
                 Text(L(.settingsClipboardSyncWithdrawnStatus, model.status.withdrawnEntryCount))
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !model.workingOutputRecoveries.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    LocalizedText(.settingsClipboardSyncWorkingOutputTitle)
+                        .font(.headline)
+                    LocalizedText(.settingsClipboardSyncWorkingOutputExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(model.workingOutputRecoveries) { recovery in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(recovery.url.path)
+                                .font(.caption)
+                                .textSelection(.enabled)
+                            LocalizedText(workingOutputReasonKey(recovery.reason))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Button(L(.clipboardActionRevealInFinder)) {
+                                    NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+                                }
+                                .accessibilityValue(recovery.url.path)
+                                Button(L(.settingsClipboardSyncWorkingOutputKeep)) {
+                                    Task { await model.keepWorkingOutput(recovery.id) }
+                                }
+                                .accessibilityValue(recovery.url.path)
+                                .disabled(!isStoreReady || model.isPerformingAction)
+                            }
+                        }
+                        .accessibilityElement(children: .contain)
+                    }
+                }
             }
 
             if !model.preservedEdits.isEmpty {
@@ -259,6 +292,14 @@ struct ClipboardSyncSettingsView: View {
             true
         default:
             false
+        }
+    }
+
+    private func workingOutputReasonKey(_ reason: ClipboardHistoryWorkingOutputRecovery.Reason) -> L10n.Key {
+        switch reason {
+        case .incomplete: .settingsClipboardSyncWorkingOutputIncomplete
+        case .changed: .settingsClipboardSyncWorkingOutputChanged
+        case .unavailable: .settingsClipboardSyncWorkingOutputUnavailable
         }
     }
 
