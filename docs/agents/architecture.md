@@ -581,8 +581,9 @@ key remains waiting without discarding its recovery candidate. An affected
 unfinished clear becomes superseded, never reported as successfully cleared.
 
 A Mac that remained offline throughout deletion and recreation can still hold an
-established control for the previous key. An observed active replacement with a
-different, non-retired epoch exposes `canRecoverReplacedCloudCollection`. Its
+established control for the previous key. An observed active replacement with both
+a different key and a different, non-retired epoch exposes
+`canRecoverReplacedCloudCollection`. Its
 separate confirmation binds the account, previous local control, and observed
 replacement control; confirmation rechecks all three before retiring only local
 publication authority. The replacement's cloud records are not cleared or changed.
