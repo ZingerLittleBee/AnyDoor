@@ -51,6 +51,9 @@ extension ClipboardHistoryModule {
         try syncWrite { database in
             var state = try syncAccountState(confirmation.account, in: database)
             try retireLocalSyncCollection(accountID: confirmation.account.identifier, in: database)
+            var retiredEpochs = state.retiredEpochs ?? []
+            retiredEpochs.insert(confirmation.previousControl.epoch)
+            state.retiredEpochs = retiredEpochs
             state.control = nil
             state.candidate = ClipboardSyncControl(accountID: confirmation.account.identifier,
                 keyID: confirmation.previousControl.keyID, keyCheck: confirmation.previousControl.keyCheck,

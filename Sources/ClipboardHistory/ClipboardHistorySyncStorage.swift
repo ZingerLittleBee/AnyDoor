@@ -8,6 +8,7 @@ struct ClipboardSyncAccountState: Codable, Sendable {
     var cursor: Data?
     var lastCompletedAt: Date?
     var missingControl: Bool?
+    var retiredEpochs: Set<UUID>?
 }
 
 extension ClipboardHistoryModule {

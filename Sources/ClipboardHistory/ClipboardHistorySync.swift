@@ -329,7 +329,13 @@ extension ClipboardHistoryModule {
                 control = try await services.transport.createControl(candidate, for: account)
                 try await admitSync(generation, account: account, services: services)
             }
-            guard var control, control.accountID == account.identifier else { throw ClipboardSyncServiceError.missingRemoteState }
+            guard var control, control.accountID == account.identifier,
+                  state.retiredEpochs?.contains(control.epoch) != true else { throw ClipboardSyncServiceError.missingRemoteState }
+            if state.control == nil, state.retiredEpochs?.isEmpty == false, let candidate = state.candidate {
+                guard candidate.keyID == control.keyID, candidate.keyCheck == control.keyCheck else {
+                    throw ClipboardSyncServiceError.corruptData
+                }
+            }
             let activationAuthorized = try cloudActivationAuthorized()
             if let previous = state.control, previous.keyID != control.keyID || previous.keyCheck != control.keyCheck {
                 throw ClipboardSyncServiceError.corruptData
@@ -356,7 +362,9 @@ extension ClipboardHistoryModule {
                 control = try await services.transport.transition(control, to: "active", epoch: candidate.epoch, for: account)
                 try await admitSync(generation, account: account, services: services)
             }
-            guard control.phase == "active" else { throw ClipboardSyncServiceError.missingRemoteState }
+            guard control.phase == "active", state.retiredEpochs?.contains(control.epoch) != true else {
+                throw ClipboardSyncServiceError.missingRemoteState
+            }
             if let previous = state.control, previous.epoch != control.epoch {
                 try syncWrite { try retireLocalSyncCollection(accountID: account.identifier, in: $0) }
                 try await resumeSyncFilePreservations()

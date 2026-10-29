@@ -410,8 +410,10 @@ unpublished frozen versions and later saved files, then stores a fresh-epoch
 candidate with participation Off and all Sync Tags deselected. No unknown remote
 records are cleared. Only a later explicit On and fresh tag selection can create
 and publish the new collection. A returning control or changed account rejects
-stale confirmation; an affected unfinished clear becomes superseded, never
-reported as successfully cleared.
+stale confirmation. Recovered epochs remain durably retired even when an old
+control returns after recovery or races the next creation; another device's new
+epoch with the preserved key may still win. An affected unfinished clear becomes
+superseded, never reported as successfully cleared.
 
 Cloud reset uses account-scoped journals in `v20_clipboard_sync_reset`.
 An interrupted clear for account A does not prevent explicit participation or

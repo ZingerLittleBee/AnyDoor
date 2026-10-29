@@ -9,6 +9,66 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    func testMissingCollectionRecoveryRejectsRetiredEpochAfterRestartAndCreateRace() async throws {
+        for racesCreation in [false, true] {
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: nil)
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("retired-collection-\(UUID())")
+            let module = makeModule(services: services, keyByte: 0xEC, time: 1_000, root: root)
+            let entry = try await module.capture(.init(source: .unknown, content: .text("previously shared")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: entry.entryID).definition
+            try await module.setSyncTagSelected(tag.id, selected: true)
+            try await module.setSyncEnabled(true)
+            let account = try await cloud.account()
+            let initialControl = try await cloud.control(for: account)
+            let previous = try XCTUnwrap(initialControl)
+            try await module.setSyncEnabled(false)
+            _ = try await module.apply(.editText(entry.entryID, "local work survives retired authority"))
+            await cloud.removeControl()
+            try await module.setSyncEnabled(true)
+            let confirmation = try await module.prepareMissingCloudCollectionRecovery()
+            try await module.recoverMissingCloudCollection(confirmation)
+            try await module.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xEC, time: 1_001, root: root)
+            if racesCreation { await cloud.returnControlAtNextCreation(previous) }
+            else { _ = try await cloud.createControl(previous, for: account) }
+            await cloud.clearObservedChangeCursors()
+            let retained = await cloud.currentUploads()
+            try await reopened.setSyncEnabled(true)
+            await reopened.retrySync()
+            let blocked = await reopened.syncStatus()
+            XCTAssertEqual(blocked.phase, .failed(.recoveryRequired))
+            let cursors = await cloud.observedChangeCursors()
+            XCTAssertTrue(cursors.isEmpty, "Retired authority must be rejected before reading its old records")
+            let local = try await reopened.page(.init()).entries
+            XCTAssertEqual(local.map(\.previewText), ["local work survives retired authority"])
+            let after = await cloud.currentUploads()
+            XCTAssertEqual(after, retained, "Recovery must not clear or write the returned retired collection")
+            try await reopened.closeStoreForTesting()
+            let final = makeModule(services: services, keyByte: 0xEC, time: 1_002, root: root)
+            await final.resumeSync()
+            let afterRestart = await final.syncStatus()
+            XCTAssertEqual(afterRestart.phase, .failed(.recoveryRequired))
+            await cloud.removeControl()
+            let winner = ClipboardSyncControl(accountID: account.identifier, keyID: previous.keyID,
+                keyCheck: previous.keyCheck, epoch: UUID(), phase: "active", serverToken: nil)
+            _ = try await cloud.createControl(winner, for: account)
+            await final.retrySync()
+            let accepted = await final.syncStatus()
+            XCTAssertEqual(accepted.phase, .upToDate, "Another device's genuinely new collection remains admissible")
+            let choices = try await final.syncTags()
+            XCTAssertTrue(choices.allSatisfy { !$0.isSelected })
+            try await final.setSyncTagSelected(tag.id, selected: true)
+            let peer = makeModule(services: services, keyByte: 0xED, time: 2_000)
+            try await peer.setSyncEnabled(true)
+            let shared = try await peer.page(.init()).entries
+            XCTAssertEqual(shared.map(\.previewText), ["local work survives retired authority"])
+            let keyCount = await keys.count()
+            XCTAssertEqual(keyCount, 1)
+        }
+    }
+
     func testMissingCollectionRecoverySupersedesInterruptedClearWithoutClaimingCloudDeletion() async throws {
         let source = try await recoverySource()
         let clear = try await source.sender.prepareCloudReset()
@@ -4210,6 +4270,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var heldCancellation: CheckedContinuation<Void, Never>?
     private var cancellationObserver: CheckedContinuation<Void, Never>?
     private var failsControlCreation = false
+    private var nextCreationControl: ClipboardSyncControl?
     private var losesControlResponse = false
     private var controlAttempts: [UUID] = []
     private var accountFailureDelay: TimeInterval?
@@ -4270,6 +4331,10 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func createControl(_ candidate: ClipboardSyncControl, for account: ClipboardSyncAccount) throws -> ClipboardSyncControl {
         try checkAccount(account)
         controlAttempts.append(candidate.keyID)
+        if let nextCreationControl {
+            self.nextCreationControl = nil
+            descriptors[account.identifier] = nextCreationControl
+        }
         if failsControlCreation {
             failsControlCreation = false
             throw ClipboardSyncServiceError.network(retryAfter: nil)
@@ -4503,6 +4568,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     func controlCreationAttempts() -> [UUID] { controlAttempts }
     func rendezvousInitialControlReads() { rendezvous = true }
     func removeControl() { descriptors[currentAccount.identifier] = nil }
+    func returnControlAtNextCreation(_ control: ClipboardSyncControl) { nextCreationControl = control }
     func accountReadCount() -> Int { reads }
     private func checkAccount(_ account: ClipboardSyncAccount) throws {
         guard currentAccount == account else { throw ClipboardSyncServiceError.accountChanged }
