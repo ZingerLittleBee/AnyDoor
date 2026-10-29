@@ -390,20 +390,14 @@ extension ClipboardHistoryModule {
         }
         for descriptor in descriptors {
             try validateSyncFileDescriptor(descriptor, epoch: control.epoch, keyID: control.keyID)
-            guard try syncFileRead({ database in
-                let nodes = try Row.fetchAll(database, sql: """
-                    SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
-                    """, arguments: [account.identifier, control.epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
-                        guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
-                        return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
-                    }
-                return ClipboardSyncVersionGraph.isComplete(nodes)
-            }) else { continue }
+            let requirement = try syncFileDownloadRequirement(descriptor, account: account, epoch: control.epoch)
+            guard requirement.ancestryComplete else { continue }
             guard descriptor.state == .available, let size = descriptor.originalByteCount,
                   try syncFileDownloadAuthorized(descriptor, account: account, epoch: control.epoch),
                   let body = descriptor.body else { continue }
             guard try syncFileIsReferenced(descriptor, account: account, epoch: control.epoch),
-                  try !shouldDeferSyncFileWork(.download(descriptor.versionID), account: account, control: control) else { continue }
+                  try !shouldDeferSyncFileWork(.download(descriptor.versionID), account: account, control: control,
+                    reportMissingRecord: requirement.reportMissingRecord) else { continue }
             do {
             let output: ClipboardSyncPublishedFile
             if descriptor.bodyFormat != nil {
@@ -480,11 +474,42 @@ extension ClipboardHistoryModule {
                 try recordSyncFileFailure(error, descriptor: descriptor, account: account, epoch: control.epoch, generation: generation)
                 if Self.isIsolatedSyncFileFailure(error) {
                     try deferSyncFileWork(.download(descriptor.versionID), error: error,
-                        account: account, control: control, generation: generation)
+                        account: account, control: control, generation: generation,
+                        reportMissingRecord: syncFileDownloadRequirement(descriptor, account: account, epoch: control.epoch).reportMissingRecord)
                     continue
                 }
                 throw error
             }
+        }
+    }
+
+    private func syncFileDownloadRequirement(_ descriptor: ClipboardSyncFileDescriptor,
+        account: ClipboardSyncAccount, epoch: UUID) throws -> (ancestryComplete: Bool, reportMissingRecord: Bool) {
+        try syncFileRead { database in
+            let nodes = try Row.fetchAll(database, sql: """
+                SELECT version_id, parents FROM clipboard_sync_file_versions WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [account.identifier, epoch.uuidString, descriptor.objectID.uuidString]).map { row -> ClipboardSyncVersionNode in
+                    guard let id = UUID(uuidString: row["version_id"]) else { throw ClipboardSyncServiceError.corruptData }
+                    return .init(id: id, parents: Set(try JSONDecoder().decode([UUID].self, from: row["parents"])))
+                }
+            guard ClipboardSyncVersionGraph.isComplete(nodes) else { return (false, true) }
+            let heads = ClipboardSyncVersionGraph.heads(nodes)
+            guard heads.count > 1, !heads.contains(descriptor.versionID) else { return (true, true) }
+            // A complete conflict graph can retain a historical selection until
+            // the user chooses a head. Its retired bytes are optional unless the
+            // exact version was explicitly requested or pinned.
+            let optionalFallback = try Bool.fetchOne(database, sql: """
+                SELECT current_version_id = ?
+                  AND NOT EXISTS(SELECT 1 FROM clipboard_sync_file_downloads
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ? AND authorized = 1)
+                  AND NOT EXISTS(SELECT 1 FROM clipboard_sync_file_conflict_pins
+                    WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?)
+                FROM clipboard_sync_file_selections WHERE account_id = ? AND epoch = ? AND object_id = ?
+                """, arguments: [descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString, descriptor.versionID.uuidString,
+                    account.identifier, epoch.uuidString, descriptor.objectID.uuidString]) ?? false
+            return (true, !optionalFallback)
         }
     }
 
