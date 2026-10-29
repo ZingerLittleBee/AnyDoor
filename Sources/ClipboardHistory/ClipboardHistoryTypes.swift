@@ -22,6 +22,9 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let isFavorite: Bool
     public let tagIDs: Set<String>
     public let source: ClipboardHistoryCaptureSource
+    /// An opaque equality token for materialized representations in this store.
+    /// Store replacement still invalidates all materializations.
+    public let materializationRevision: Int64
     public let hasTextConflict: Bool
     public let syncFiles: [ClipboardHistorySyncFileSummary]
     public let linkedFileLocations: [ClipboardHistoryLinkedFileLocation]
@@ -34,6 +37,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         isFavorite: Bool,
         tagIDs: Set<String> = [],
         source: ClipboardHistoryCaptureSource,
+        materializationRevision: Int64 = 0,
         hasTextConflict: Bool = false,
         syncFiles: [ClipboardHistorySyncFileSummary] = [],
         linkedFileLocations: [ClipboardHistoryLinkedFileLocation] = []
@@ -45,6 +49,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         self.isFavorite = isFavorite
         self.tagIDs = tagIDs
         self.source = source
+        self.materializationRevision = materializationRevision
         self.hasTextConflict = hasTextConflict
         self.syncFiles = syncFiles
         self.linkedFileLocations = linkedFileLocations

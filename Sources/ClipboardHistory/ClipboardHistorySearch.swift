@@ -6,17 +6,29 @@ struct ClipboardHistoryPageSyncContext {
     let textConflicts: Set<String>
     let files: [String: [ClipboardHistorySyncFileSummary]]
     let locations: [String: [ClipboardHistoryLinkedFileLocation]]
+    let materializationRevisions: [String: Int64]
 }
 
 extension ClipboardHistoryModule {
     private static func pageSyncContext(entryIDs: [String], in database: Database) throws -> ClipboardHistoryPageSyncContext {
-        guard !entryIDs.isEmpty else { return .init(textConflicts: [], files: [:], locations: [:]) }
+        guard !entryIDs.isEmpty else { return .init(textConflicts: [], files: [:], locations: [:], materializationRevisions: [:]) }
+        // Representations have immutable AUTOINCREMENT identities. Replacing
+        // exact content deletes/inserts rows; any future in-place payload edit
+        // must also advance this materialization token.
+        let placeholders = Array(repeating: "?", count: entryIDs.count).joined(separator: ",")
+        let revisions = try Row.fetchAll(database, sql: """
+            SELECT entry_id, MAX(id) AS revision FROM clipboard_representations
+            WHERE entry_id IN (\(placeholders)) GROUP BY entry_id
+            """, arguments: StatementArguments(entryIDs))
+        let materializationRevisions = Dictionary(uniqueKeysWithValues: revisions.map { row in
+            (row["entry_id"] as String, row["revision"] as Int64)
+        })
         let accountID = try String.fetchOne(database, sql: "SELECT account_id FROM clipboard_sync_settings WHERE id = 1")
         let conflicts = try syncTextConflicts(entryIDs: entryIDs, accountID: accountID, in: database)
         var facts = ClipboardHistoryFileDisplayFacts()
         let files = try syncFileSummaries(entryIDs: entryIDs, facts: &facts, in: database)
         let locations = try linkedFileLocations(entryIDs: entryIDs, facts: &facts, in: database)
-        return .init(textConflicts: conflicts, files: files, locations: locations)
+        return .init(textConflicts: conflicts, files: files, locations: locations, materializationRevisions: materializationRevisions)
     }
 
     func indexedSourceSummaries() throws
@@ -716,6 +728,7 @@ extension ClipboardHistoryModule {
                     rawValue: row["source_provenance"]
                 ) ?? .unknown
             ),
+            materializationRevision: context.materializationRevisions[storedID] ?? 0,
             hasTextConflict: context.textConflicts.contains(storedID),
             syncFiles: context.files[storedID] ?? [],
             linkedFileLocations: context.locations[storedID] ?? []
