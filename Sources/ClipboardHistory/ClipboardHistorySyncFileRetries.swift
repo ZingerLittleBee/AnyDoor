@@ -3,10 +3,12 @@ import GRDB
 
 enum ClipboardSyncFileWork: Sendable {
     case download(UUID)
+    case linkedLocation(UUID)
 
     var identifier: String {
         switch self {
         case .download(let version): "download/\(version.uuidString)"
+        case .linkedLocation(let location): "location/\(location.uuidString)"
         }
     }
 }
@@ -64,5 +66,21 @@ extension ClipboardHistoryModule {
         control: ClipboardSyncControl, in database: Database) throws {
         try database.execute(sql: "DELETE FROM clipboard_sync_file_retries WHERE account_id = ? AND epoch = ? AND work_id = ?",
             arguments: [account.identifier, control.epoch.uuidString, work.identifier])
+    }
+
+    static func linkedSyncFileFailure(objectID: UUID, accountID: String, epoch: String,
+        in database: Database) throws -> ClipboardHistorySyncFileFailure? {
+        guard let data = try Data.fetchOne(database, sql: """
+            SELECT retry.phase FROM clipboard_sync_file_retries AS retry
+            JOIN clipboard_sync_linked_locations AS location
+              ON retry.account_id = location.account_id AND retry.epoch = location.epoch
+                AND retry.work_id = 'location/' || location.id
+            WHERE location.account_id = ? AND location.epoch = ? AND location.object_id = ?
+            ORDER BY location.id LIMIT 1
+            """, arguments: [accountID, epoch, objectID.uuidString]) else { return nil }
+        switch try JSONDecoder().decode(ClipboardHistorySyncPhase.self, from: data) {
+        case .failed(let failure): return ClipboardHistorySyncFileFailure(rawValue: failure.rawValue) ?? .unavailable
+        default: return .unavailable
+        }
     }
 }

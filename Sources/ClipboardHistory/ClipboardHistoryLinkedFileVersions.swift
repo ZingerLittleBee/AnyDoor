@@ -102,7 +102,16 @@ extension ClipboardHistoryModule {
             // Receiving a complete package does not authorize replacing an
             // application at a linked location. Only Apply Update can do that.
             guard !isApplication else { continue }
-            try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
+            let work = ClipboardSyncFileWork.linkedLocation(source.id)
+            guard try !shouldDeferSyncFileWork(work, account: account, control: control) else { continue }
+            do {
+                try await applyLinkedFileVersion(complete, to: source, account: account, control: control, generation: generation)
+                try syncWrite { try completeSyncFileWork(work, account: account, control: control, in: $0) }
+            } catch {
+                guard Self.isIsolatedSyncFileFailure(error) else { throw error }
+                try deferSyncFileWork(work, error: error, account: account, control: control, generation: generation)
+                publishMutation()
+            }
         }
     }
 

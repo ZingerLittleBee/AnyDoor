@@ -20,11 +20,12 @@ extension ClipboardHistoryModule {
 
     static func syncFileTransferSummary(_ descriptor: ClipboardSyncFileDescriptor, accountID: String, epoch: String,
         in database: Database) throws -> (bytes: Int64, failure: ClipboardHistorySyncFileFailure?, requested: Bool, uploadPending: Bool) {
+        let linkedFailure = try linkedSyncFileFailure(objectID: descriptor.objectID, accountID: accountID, epoch: epoch, in: database)
         if let epochID = UUID(uuidString: epoch),
            let restoring = try pendingSyncFileRestoration(descriptor, accountID: accountID, epoch: epochID, in: database) {
             let units = (restoring.completedBytes + Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes) - 1)
                 / Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes)
-            return (max(0, restoring.completedBytes - units * 28), nil, false, true)
+            return (max(0, restoring.completedBytes - units * 28), linkedFailure, false, true)
         }
         if let body = descriptor.body, let upload = try Row.fetchOne(database, sql: """
             SELECT transfer.completed_bytes, transfer.failure, outbox.acknowledged
@@ -35,14 +36,14 @@ extension ClipboardHistoryModule {
             // Progress callbacks count ciphertext; discard each completed unit's authentication overhead.
             let unit = Int64(ClipboardSyncFileTransfer.maximumEncryptedSegmentBytes)
             let units = min(Int64(body.chunkCount), encrypted / unit + (encrypted % unit == 0 ? 0 : 1))
-            return (max(0, encrypted - units * 28), (upload["failure"] as String?).flatMap(ClipboardHistorySyncFileFailure.init), false, true)
+            return (max(0, encrypted - units * 28), (upload["failure"] as String?).flatMap(ClipboardHistorySyncFileFailure.init) ?? linkedFailure, false, true)
         }
         let download = try Row.fetchOne(database, sql: """
             SELECT completed_bytes, authorized, failure FROM clipboard_sync_file_downloads
             WHERE account_id = ? AND epoch = ? AND object_id = ? AND version_id = ?
             """, arguments: [accountID, epoch, descriptor.objectID.uuidString, descriptor.versionID.uuidString])
         return (download?["completed_bytes"] ?? 0,
-            (download?["failure"] as String?).flatMap(ClipboardHistorySyncFileFailure.init), download?["authorized"] ?? false, false)
+            (download?["failure"] as String?).flatMap(ClipboardHistorySyncFileFailure.init) ?? linkedFailure, download?["authorized"] ?? false, false)
     }
 
     func recordSyncFileFailure(_ error: Error, descriptor: ClipboardSyncFileDescriptor,

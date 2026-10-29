@@ -81,6 +81,11 @@ extension ClipboardHistoryModule {
                 }
                 try database.execute(sql: "DELETE FROM clipboard_sync_file_retries WHERE account_id = ? AND epoch = ? AND work_id = ?",
                     arguments: [account, epoch, "download/\(version)"])
+                try database.execute(sql: """
+                    DELETE FROM clipboard_sync_file_retries WHERE account_id = ? AND epoch = ?
+                      AND work_id IN (SELECT 'location/' || id FROM clipboard_sync_linked_locations
+                        WHERE account_id = ? AND epoch = ? AND object_id = ?)
+                    """, arguments: [account, epoch, account, epoch, object])
                 try database.execute(sql: "DELETE FROM clipboard_sync_outbox WHERE account_id = ? AND epoch = ? AND subject_id = ?",
                     arguments: [account, epoch, object])
             }
