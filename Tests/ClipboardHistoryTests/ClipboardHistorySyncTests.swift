@@ -1,4 +1,5 @@
 import AppKit
+import CloudKit
 import Darwin
 import Foundation
 import GRDB
@@ -9,6 +10,255 @@ import os
 @testable import ClipboardHistory
 
 final class ClipboardHistorySyncTests: XCTestCase {
+    @MainActor
+    func testEstablishedFileWatcherObservesLocallyWithoutRetryingPermanentProviderFailure() async throws {
+        try await assertEstablishedWatcherHonorsProviderAdmission(withBackoff: false)
+    }
+
+    @MainActor
+    func testEstablishedFileWatcherHonorsProviderBackoffAndManualRetryDeadline() async throws {
+        try await assertEstablishedWatcherHonorsProviderAdmission(withBackoff: true)
+    }
+
+    @MainActor
+    private func assertEstablishedWatcherHonorsProviderAdmission(withBackoff: Bool) async throws {
+        let clock = OSAllocatedUnfairLock(initialState: Date(timeIntervalSince1970: 1_000))
+        let initial = Data("shared before provider rejection".utf8)
+        let fixture = try await fileFixture(names: ["Observed.txt"], contents: [initial], clock: { clock.withLock { $0 } })
+        try await fixture.receiver.setSyncEnabled(true)
+        await fixture.receiver.suspendSync()
+        try await Task.sleep(for: .milliseconds(400))
+        let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+            if withBackoff { throw CKError(.zoneBusy, userInfo: [CKErrorRetryAfterKey: 120.0]) }
+            throw CKError(.serverRejectedRequest)
+        })
+        let expected: ClipboardHistorySyncPhase = withBackoff ? .failed(.network) : .failed(.providerRejected)
+        await fixture.cloud.failNextAccountReadWithNative(native)
+        await fixture.sender.retrySync()
+        let failed = await fixture.sender.syncStatus()
+        XCTAssertEqual(failed.phase, expected)
+        let readsBefore = await fixture.cloud.accountReadCount()
+        let senderEntries = try await fixture.sender.page(.init()).entries
+        let entry = try XCTUnwrap(senderEntries.first)
+        let saved = Data("saved while automatic provider access is paused".utf8)
+        try saved.write(to: fixture.sourceURLs[0])
+        var observed = false
+        for _ in 0..<400 {
+            let locations = try await fixture.sender.linkedFileLocations(for: entry.id)
+            if locations.first?.state == .localChanges { observed = true; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(observed, "Permanent provider failure must retain local file observation")
+        let readsAfter = await fixture.cloud.accountReadCount()
+        XCTAssertEqual(readsAfter, readsBefore, "An established native watcher cannot consult the provider before automatic retry admission")
+        let paused = await fixture.sender.syncStatus()
+        XCTAssertEqual(paused.phase, expected)
+        let old = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let oldFile) = old.items.first?.representations.first else { return XCTFail("Expected previous complete file") }
+        XCTAssertEqual(try Data(contentsOf: oldFile.currentURL), initial)
+        if withBackoff {
+            await fixture.sender.retrySync()
+            let manualReads = await fixture.cloud.accountReadCount()
+            XCTAssertEqual(manualReads, readsAfter, "Manual Retry must also wait for the provider deadline")
+            clock.withLock { $0 = $0.addingTimeInterval(120) }
+        }
+        await fixture.sender.retrySync()
+        await fixture.receiver.resumeSync()
+        let content = try await fixture.receiver.materialize(.init(entryID: entry.id, purpose: .normalPaste))
+        guard case .file(let received) = content.items.first?.representations.first else { return XCTFail("Expected explicitly retried file") }
+        XCTAssertEqual(try Data(contentsOf: received.currentURL), saved)
+    }
+
+    func testMembershipSnapshotPreservesLocalTagsChangedDuringRemoteDownload() async throws {
+        let cloud = SyncTestCloud()
+        let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+        let sender = makeModule(services: services, keyByte: 0xF4, time: 1_000)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("membership-race-\(UUID())")
+        let receiver = makeModule(services: services, keyByte: 0xF5, time: 2_000, root: root)
+        let entry = try await sender.capture(.init(source: .unknown, content: .text("membership race")))
+        let work = try await sender.createTagDefinition(named: "Work", assigningTo: entry.entryID).definition
+        let retained = try await sender.createTagDefinition(named: "Retained", assigningTo: entry.entryID).definition
+        let later = try await sender.createTagDefinition(named: "Later", assigningTo: entry.entryID).definition
+        _ = try await sender.apply(.setTags(entry.entryID, [work.id, retained.id]))
+        for tag in [work, retained, later] { try await sender.setSyncTagSelected(tag.id, selected: true) }
+        try await sender.setSyncEnabled(true)
+        try await receiver.setSyncEnabled(true)
+        let personal = try await receiver.createTagDefinition(named: "Private", assigningTo: entry.entryID).definition
+        _ = try await sender.apply(.setTags(entry.entryID, [retained.id]))
+        await sender.retrySync()
+        let held = SyncTestProviderGate()
+        await cloud.holdNextDownload(held)
+        let receive = Task { await receiver.retrySync() }
+        addTeardownBlock { await held.release(); await receive.value }
+        await held.waitUntilEntered()
+        _ = try await receiver.apply(.setTags(entry.entryID, [work.id, retained.id, later.id, personal.id]))
+        await held.release()
+        await receive.value
+        let updated = try await receiver.page(.init()).entries
+        XCTAssertEqual(updated.first?.tagIDs, [retained.id, later.id, personal.id])
+        try await receiver.closeStoreForTesting()
+        let reopened = makeModule(services: services, keyByte: 0xF5, time: 2_001, root: root)
+        await reopened.resumeSync()
+        await sender.retrySync()
+        let remote = try await sender.page(.init()).entries
+        XCTAssertEqual(remote.first?.tagIDs, [retained.id, later.id])
+        let restored = try await reopened.page(.init()).entries
+        XCTAssertEqual(restored.first?.tagIDs, [retained.id, later.id, personal.id])
+    }
+
+    func testIncomingMembershipWorkScalesWithImportedSubjects() async throws {
+        var measurements: [Int64] = []
+        for count in [20, 40] {
+            let cloud = SyncTestCloud()
+            let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
+            let sender = makeModule(services: services, keyByte: 0xF2, time: 1_000)
+            let first = try await sender.capture(.init(source: .unknown, content: .text("membership work 0")))
+            let tag = try await sender.createTagDefinition(named: "Shared", assigningTo: first.entryID).definition
+            try await sender.setSyncTagSelected(tag.id, selected: true)
+            for index in 1..<count {
+                let entry = try await sender.capture(.init(source: .unknown, content: .text("membership work \(index)")))
+                _ = try await sender.apply(.setTags(entry.entryID, [tag.id]))
+            }
+            try await sender.setSyncEnabled(true)
+            let probe = ClipboardHistorySQLWorkProbe(table: "clipboard_sync_memberships")
+            let receiver = makeModule(services: services, keyByte: 0xF3, time: 2_000,
+                databasePreparation: { probe.install(on: $0) })
+            probe.start()
+            try await receiver.setSyncEnabled(true)
+            let steps = probe.stop()
+            measurements.append(steps)
+            let received = try await receiver.page(.init()).entries
+            XCTAssertEqual(received.count, count)
+            XCTAssertEqual(Set(received.compactMap(\.previewText)), Set((0..<count).map { "membership work \($0)" }))
+            XCTAssertTrue(received.allSatisfy { $0.tagIDs.contains(tag.id) })
+            XCTAssertGreaterThan(steps, 0, "The actual SQLCipher connections must be observed")
+        }
+        print("Membership import VM steps for 20/40 subjects: \(measurements)")
+        XCTAssertLessThan(Double(measurements[1]) / Double(measurements[0]), 2.7,
+            "Doubling imported subjects must not resnapshot all earlier subjects before every operation")
+    }
+
+    func testAutomaticResumeQueuedDuringPermanentFailureCannotAuthorizeRetry() async throws {
+        let held = SyncTestProviderGate()
+        let started = expectation(description: "Provider response is held for automatic resume")
+        let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+            started.fulfill()
+            await held.wait()
+            throw CKError(.serverRejectedRequest)
+        })
+        let cloud = SyncTestCloud()
+        let module = makeModule(services: .init(transport: cloud, keys: SyncTestKeys(), pollingInterval: .milliseconds(40)), keyByte: 0xF1, time: 1_000)
+        await cloud.failNextAccountReadWithNative(native)
+        let first = Task { try await module.setSyncEnabled(true) }
+        addTeardownBlock { await held.release(); _ = try? await first.value }
+        await fulfillment(of: [started], timeout: 2)
+        let release = Task {
+            try await Task.sleep(for: .milliseconds(50))
+            await held.release()
+        }
+        await module.resumeSync()
+        try await release.value
+        try await first.value
+        try await Task.sleep(for: .milliseconds(160))
+        let status = await module.syncStatus()
+        XCTAssertEqual(status.phase, .failed(.providerRejected))
+        let reads = await cloud.accountReadCount()
+        XCTAssertEqual(reads, 1, "An automatic queued rerun cannot acquire manual retry authority")
+    }
+
+    func testQueuedExplicitRetrySurvivesPermanentResponseButOffRevokesIt() async throws {
+        for disablesWhileHeld in [false, true] {
+            let held = SyncTestProviderGate()
+            let started = expectation(description: "Permanent provider response is held")
+            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in
+                started.fulfill()
+                await held.wait()
+                throw CKError(.serverRejectedRequest)
+            })
+            let cloud = SyncTestCloud()
+            let module = makeModule(services: .init(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil), keyByte: 0xF0, time: 1_000)
+            await cloud.failNextAccountReadWithNative(native)
+            let first = Task { try await module.setSyncEnabled(true) }
+            addTeardownBlock { await held.release(); _ = try? await first.value }
+            await fulfillment(of: [started], timeout: 2)
+            await module.retrySync(waitForSync: false)
+            if disablesWhileHeld {
+                let cancellation = await cloud.cancellationCount()
+                let off = Task { try await module.setSyncEnabled(false) }
+                await cloud.waitForCancellation(after: cancellation)
+                await held.release()
+                try await first.value
+                try await off.value
+                let status = await module.syncStatus()
+                XCTAssertFalse(status.isEnabled)
+                XCTAssertEqual(status.phase, .disabled)
+                let reads = await cloud.accountReadCount()
+                XCTAssertEqual(reads, 1, "Off must revoke the queued explicit attempt before draining the held response")
+            } else {
+                await held.release()
+                try await first.value
+                for _ in 0..<200 {
+                    if await module.syncStatus().phase == .upToDate { break }
+                    try await Task.sleep(for: .milliseconds(5))
+                }
+                let status = await module.syncStatus()
+                XCTAssertEqual(status.phase, .upToDate, "A queued manual retry must retain its intent after the failing pass commits")
+                let reads = await cloud.accountReadCount()
+                XCTAssertGreaterThan(reads, 1)
+            }
+        }
+    }
+
+    func testPermanentProviderFailureStopsAutomaticWorkAcrossRestartUntilExplicitRetry() async throws {
+        for waitsForTransfer in [true, false] {
+            let code: CKError.Code = waitsForTransfer ? .serverRejectedRequest : .incompatibleVersion
+            let expected: ClipboardHistorySyncPhase = waitsForTransfer ? .failed(.providerRejected) : .failed(.unsupportedVersion)
+            let native = ClipboardSyncCloudKit(recordReader: { _, _, _ in throw CKError(code) })
+            let cloud = SyncTestCloud()
+            let keys = SyncTestKeys()
+            let services = ClipboardSyncServices(transport: cloud, keys: keys, pollingInterval: .milliseconds(40))
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("permanent-provider-\(UUID())")
+            let module = makeModule(services: services, keyByte: 0xEE, time: 1_000, root: root)
+            let captured = try await module.capture(.init(source: .unknown, content: .text("retained before provider refusal")))
+            let tag = try await module.createTagDefinition(named: "Shared", assigningTo: captured.entryID).definition
+            try await module.setSyncTagSelected(tag.id, selected: true)
+            await cloud.failNextAccountReadWithNative(native)
+            try await module.setSyncEnabled(true)
+            let failed = await module.syncStatus()
+            XCTAssertEqual(failed.phase, expected)
+            let before = await cloud.accountReadCount()
+            let later = try await module.capture(.init(source: .unknown, content: .text("local work during provider refusal")))
+            _ = try await module.apply(.setTags(later.entryID, [tag.id]))
+            await module.resumeSync()
+            try await Task.sleep(for: .milliseconds(240))
+            let automaticReads = await cloud.accountReadCount()
+            XCTAssertEqual(automaticReads, before, "Polling, local mutation and resume cannot retry a permanent failure")
+            let stillFailed = await module.syncStatus()
+            XCTAssertEqual(stillFailed.phase, expected)
+            try await module.closeStoreForTesting()
+            let reopened = makeModule(services: services, keyByte: 0xEE, time: 1_001, root: root)
+            let beforeResume = await cloud.accountReadCount()
+            await reopened.resumeSync()
+            try await Task.sleep(for: .milliseconds(160))
+            let reopenedReads = await cloud.accountReadCount()
+            XCTAssertEqual(reopenedReads, beforeResume, "The automatic gate must survive a real store reopen")
+            let restored = await reopened.syncStatus()
+            XCTAssertEqual(restored.phase, expected)
+            await reopened.retrySync(waitForSync: waitsForTransfer)
+            for _ in 0..<400 {
+                if await reopened.syncStatus().phase == .upToDate { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let recovered = await reopened.syncStatus()
+            XCTAssertEqual(recovered.phase, .upToDate)
+            await reopened.suspendSync()
+            let peer = makeModule(services: .init(transport: cloud, keys: keys, pollingInterval: nil), keyByte: 0xEF, time: 2_000)
+            try await peer.setSyncEnabled(true)
+            let received = try await peer.page(.init()).entries
+            XCTAssertEqual(Set(received.compactMap(\.previewText)), ["retained before provider refusal", "local work during provider refusal"])
+        }
+    }
+
     func testMissingCollectionRecoveryRejectsRetiredEpochAfterRestartAndCreateRace() async throws {
         for racesCreation in [false, true] {
             let cloud = SyncTestCloud()
@@ -2469,6 +2719,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         receiverFaults: ClipboardHistoryFaultInjector = .init(),
         receiverWorkingRoot: URL? = nil,
         exactText: String? = nil,
+        clock: (@Sendable () -> Date)? = nil,
         beforeEnable: ([URL]) throws -> Void = { _ in }
     ) async throws -> (
         sender: ClipboardHistoryModule, receiver: ClipboardHistoryModule, cloud: SyncTestCloud,
@@ -2480,9 +2731,9 @@ final class ClipboardHistorySyncTests: XCTestCase {
         let cloud = SyncTestCloud()
         let services = ClipboardSyncServices(transport: cloud, keys: SyncTestKeys(), pollingInterval: nil)
         let senderRoot = root.appendingPathComponent("Sender")
-        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot)
+        let sender = makeModule(services: services, keyByte: 0x71, time: 1_000, root: senderRoot, clock: clock)
         let receiverRoot = root.appendingPathComponent("Receiver")
-        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot,
+        let receiver = makeModule(services: services, keyByte: 0x72, time: 2_000, root: receiverRoot, clock: clock,
             faults: receiverFaults, workingRoot: receiverWorkingRoot)
         let urls = try zip(names, contents).map { name, data in
             let url = root.appendingPathComponent(name)
@@ -4115,6 +4366,7 @@ final class ClipboardHistorySyncTests: XCTestCase {
         root: URL? = nil, clock: (@Sendable () -> Date)? = nil,
         faults: ClipboardHistoryFaultInjector = .init(),
         workingRoot: URL? = nil,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil,
         recognizer: any ClipboardHistoryVisionRecognizing = SyncTestRecognizer()
     ) -> ClipboardHistoryModule {
         let root = root ?? FileManager.default.temporaryDirectory
@@ -4127,7 +4379,8 @@ final class ClipboardHistorySyncTests: XCTestCase {
             now: clock ?? { Date(timeIntervalSince1970: time) },
             visionRecognizer: recognizer,
             syncServices: services,
-            testingSyncWorkingRoot: workingRoot
+            testingSyncWorkingRoot: workingRoot,
+            testingDatabasePreparation: databasePreparation
         ))
     }
 
@@ -4290,6 +4543,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var reversesDelivery = false
     func reverseDelivery() { reversesDelivery = true }
     private var accountFault: ClipboardSyncServiceError?
+    private var nativeAccountFault: ClipboardSyncCloudKit?
     private var holdsClear = false
     private var heldClear: CheckedContinuation<Void, Never>?
     private var clearObserver: CheckedContinuation<Void, Never>?
@@ -4297,8 +4551,12 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     private var cancellations = 0
     private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
 
-    func account() throws -> ClipboardSyncAccount {
+    func account() async throws -> ClipboardSyncAccount {
         reads += 1
+        if let native = nativeAccountFault {
+            nativeAccountFault = nil
+            _ = try await native.control(for: ClipboardHistorySyncCloudKitReadTests.account)
+        }
         if let fault = accountFault {
             accountFault = nil
             throw fault
@@ -4311,6 +4569,7 @@ private actor SyncTestCloud: ClipboardSyncTransport {
     }
     func failNextAccountRead(retryAfter: TimeInterval) { accountFailureDelay = retryAfter }
     func failNextAccountRead(with fault: ClipboardSyncServiceError) { accountFault = fault }
+    func failNextAccountReadWithNative(_ native: ClipboardSyncCloudKit) { nativeAccountFault = native }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
         try checkAccount(account)
         if corruptsNextControl {
@@ -4357,7 +4616,13 @@ private actor SyncTestCloud: ClipboardSyncTransport {
         return ClipboardSyncChanges(records: reversesDelivery ? Array(page.reversed()) : page,
             cursor: Data(String(uploads.count).utf8), hasMore: false)
     }
-    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) throws -> [Data] {
+    private var nextDownloadGate: SyncTestProviderGate?
+    func holdNextDownload(_ gate: SyncTestProviderGate) { nextDownloadGate = gate }
+    func download(_ record: ClipboardSyncRemoteRecord, for account: ClipboardSyncAccount) async throws -> [Data] {
+        if let gate = nextDownloadGate {
+            nextDownloadGate = nil
+            await gate.wait()
+        }
         try checkAccount(account)
         if record.kind == .fileBody { fileBodyDownloads += 1 }
         if record.kind == .fileBody, corruptsControlAfterBody {
@@ -4648,5 +4913,28 @@ private actor SyncTestFaultKeys: ClipboardSyncKeyStoring {
 
     func create(account: ClipboardSyncAccount, keyID: UUID, key: Data) async throws -> Data {
         try await backing.create(account: account, keyID: keyID, key: key)
+    }
+}
+
+private actor SyncTestProviderGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var enteredWaiter: CheckedContinuation<Void, Never>?
+    private var entered = false
+    private var released = false
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { enteredWaiter = $0 }
+    }
+    func wait() async {
+        entered = true
+        enteredWaiter?.resume()
+        enteredWaiter = nil
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }

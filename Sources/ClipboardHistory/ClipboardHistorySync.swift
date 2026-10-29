@@ -64,8 +64,8 @@ extension ClipboardHistoryModule {
         let pendingReset = (try? hasPendingCloudResets()) ?? false
         guard enabled || pendingReset else { return }
         syncSuspended = false
-        if waitForSync { await runSync(allowAccountBinding: enabled) }
-        else { scheduleImmediateSync(allowAccountBinding: enabled) }
+        if waitForSync { await runSync(allowAccountBinding: enabled, explicitRetry: true) }
+        else { scheduleImmediateSync(allowAccountBinding: enabled, explicitRetry: true) }
     }
 
     /// Passing false returns after the selection is durable, before transfer.
@@ -119,6 +119,7 @@ extension ClipboardHistoryModule {
         syncGeneration &+= 1
         syncAccountBindingGeneration = nil
         syncRerunRequested = false
+        syncExplicitRerunRequested = false
         let generation = syncGeneration
         syncPollTask?.cancel()
         syncPollTask = nil
@@ -145,22 +146,27 @@ extension ClipboardHistoryModule {
             setSyncPhase(.failed(.localStorage))
             return
         }
-        if waitForSync { await runSync(allowAccountBinding: false) }
-        else { scheduleImmediateSync(allowAccountBinding: false) }
+        if waitForSync { await runSync(allowAccountBinding: false, explicitRetry: true) }
+        else { scheduleImmediateSync(allowAccountBinding: false, explicitRetry: true) }
     }
 
     func retrySyncAutomatically() async { await runSync(allowAccountBinding: false) }
 
-    private func runSync(allowAccountBinding: Bool) async {
+    private func runSync(allowAccountBinding: Bool, explicitRetry: Bool = false) async {
         guard !syncSuspended else { return }
         if let syncTask {
             syncRerunRequested = true
+            syncExplicitRerunRequested = syncExplicitRerunRequested || explicitRetry
             await syncTask.value
             return
         }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         do {
             let recovery = try currentSyncRecovery()
+            if !explicitRetry, let phase = recovery.phase, phase.requiresExplicitRetry {
+                setSyncPhase(phase)
+                return
+            }
             if let deadline = recovery.retryNotBefore, deadline > now() {
                 setSyncPhase(.failed(.network))
                 scheduleSync()
@@ -182,25 +188,28 @@ extension ClipboardHistoryModule {
         guard generation == syncGeneration else { return }
         syncTask = nil
         if syncRerunRequested {
+            let explicitRerun = syncExplicitRerunRequested
             syncRerunRequested = false
-            scheduleImmediateSync(allowAccountBinding: false)
+            syncExplicitRerunRequested = false
+            scheduleImmediateSync(allowAccountBinding: false, explicitRetry: explicitRerun)
         } else { scheduleSync() }
     }
 
     /// Intent-only commands use the same owned task slots as polling. A mutation
     /// admitted during a pass requests another pass instead of losing its wakeup.
-    private func scheduleImmediateSync(allowAccountBinding: Bool) {
+    private func scheduleImmediateSync(allowAccountBinding: Bool, explicitRetry: Bool = false) {
         guard !syncSuspended else { return }
         if allowAccountBinding { syncAccountBindingGeneration = syncGeneration }
         syncPollTask?.cancel()
         syncPollTask = nil
         if syncTask != nil {
             syncRerunRequested = true
+            syncExplicitRerunRequested = syncExplicitRerunRequested || explicitRetry
             return
         }
         let generation = syncGeneration
         syncPollTask = Task { [weak self] in
-            await self?.syncPollingFired(generation: generation)
+            await self?.syncPollingFired(generation: generation, explicitRetry: explicitRetry)
         }
     }
 
@@ -208,7 +217,11 @@ extension ClipboardHistoryModule {
         guard !syncSuspended, syncTask == nil, syncPollTask == nil,
               let pollingInterval = syncServices?.pollingInterval else { return }
         let retryNotBefore: Date?
-        do { retryNotBefore = try requiredDatabase().read { try syncRecovery(in: $0).retryNotBefore } }
+        do {
+            let recovery = try currentSyncRecovery()
+            guard recovery.phase?.requiresExplicitRetry != true else { return }
+            retryNotBefore = recovery.retryNotBefore
+        }
         catch { setSyncPhase(.failed(.localStorage)); return }
         let remainingDelay = retryNotBefore.map { max(0, $0.timeIntervalSince(now())) } ?? 0
         let interval = max(pollingInterval, .seconds(remainingDelay))
@@ -220,10 +233,10 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func syncPollingFired(generation: UInt64) async {
+    private func syncPollingFired(generation: UInt64, explicitRetry: Bool = false) async {
         guard !Task.isCancelled, generation == syncGeneration, !syncSuspended else { return }
         syncPollTask = nil
-        await retrySyncAutomatically()
+        await runSync(allowAccountBinding: false, explicitRetry: explicitRetry)
     }
 
     func receiveSyncChanges(account: ClipboardSyncAccount, control: ClipboardSyncControl, key: Data,
@@ -607,6 +620,24 @@ extension ClipboardHistoryModule {
         try admitSync(generation)
     }
 
+    func admitSyncFileObservation(_ generation: UInt64, account: ClipboardSyncAccount, epoch: UUID,
+        services: ClipboardSyncServices, automatic: Bool) async throws {
+        let recovery = try currentSyncRecovery()
+        let waitsForProvider = recovery.retryNotBefore.map { $0 > now() } ?? false
+        guard automatic, recovery.phase?.requiresExplicitRetry == true || waitsForProvider else {
+            try await admitSync(generation, account: account, services: services)
+            return
+        }
+        // Local saved-byte observation does not authorize provider access. Keep
+        // its account/epoch and generation fences while automatic retries pause.
+        try await waitForWriteTurn()
+        try admitSync(generation)
+        guard let context = try syncFileRead({ try syncFileContext(in: $0) }),
+              context.account == account, context.control.epoch == epoch, context.control.phase == "active" else {
+            throw ClipboardSyncServiceError.accountChanged
+        }
+    }
+
     func syncFailurePhase(_ error: Error) -> ClipboardHistorySyncPhase {
         if ClipboardSyncFileErrors.isAccessDenied(error) { return .failed(.localFileAccessDenied) }
         if ClipboardSyncFileErrors.isSourceChanged(error) { return .failed(.sourceChanged) }
@@ -626,6 +657,7 @@ extension ClipboardHistoryModule {
         case .missingRemoteState: return .failed(.recoveryRequired)
         case .corruptData, .corruptAuthority: return .failed(.corruptData)
         case .unsupportedVersion: return .failed(.unsupportedVersion)
+        case .providerRejected: return .failed(.providerRejected)
         }
     }
 
@@ -636,5 +668,11 @@ extension ClipboardHistoryModule {
 
     func publishSyncStatus() {
         notificationCenter.post(name: .clipboardHistorySyncDidChange, object: nil)
+    }
+}
+
+private extension ClipboardHistorySyncPhase {
+    var requiresExplicitRetry: Bool {
+        self == .failed(.providerRejected) || self == .failed(.unsupportedVersion)
     }
 }

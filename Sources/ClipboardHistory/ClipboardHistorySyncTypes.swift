@@ -83,6 +83,7 @@ public enum ClipboardHistorySyncFailure: String, Codable, Error, Sendable {
     case recoveryRequired
     case accountChanged
     case unsupportedVersion
+    case providerRejected
 }
 
 public struct ClipboardHistorySyncTag: Equatable, Sendable, Identifiable {

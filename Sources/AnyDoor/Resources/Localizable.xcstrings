@@ -16447,6 +16447,23 @@
         }
       }
     },
+    "settings.clipboard.sync.failure.providerRejected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud rejected the sync request or configuration. Automatic retries are paused. After resolving the issue, choose Retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 拒绝了同步请求或配置，已暂停自动重试。解决问题后，可选择重试。"
+          }
+        }
+      }
+    },
     "settings.clipboard.sync.failure.unsupportedVersion": {
       "extractionState": "manual",
       "localizations": {

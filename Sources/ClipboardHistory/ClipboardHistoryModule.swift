@@ -107,6 +107,7 @@ public actor ClipboardHistoryModule {
     var syncTask: Task<Void, Never>?
     var syncPollTask: Task<Void, Never>?
     var syncRerunRequested = false
+    var syncExplicitRerunRequested = false
     var linkedFileObservers: [UUID: ClipboardLinkedFileObservation] = [:]
     var linkedFileReconciliationTask: Task<Void, Never>?
     let linkedFileMutationGate = ClipboardLinkedFileMutationGate()
@@ -284,7 +285,8 @@ public actor ClipboardHistoryModule {
         captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil,
         appBuild: String = unversionedAppBuild,
         syncServices: ClipboardSyncServices? = nil,
-        testingSyncWorkingRoot: URL? = nil
+        testingSyncWorkingRoot: URL? = nil,
+        testingDatabasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -305,7 +307,8 @@ public actor ClipboardHistoryModule {
             relocation: relocation,
             at: testingStoreRoot,
             keyStore: keyStore,
-            maintenanceDate: now()
+            maintenanceDate: now(),
+            databasePreparation: testingDatabasePreparation
         )
         storeRoot = testingStoreRoot
         syncWorkingRoot = testingSyncWorkingRoot
@@ -681,7 +684,8 @@ extension ClipboardHistoryModule {
     static func resolveStore(
         at root: URL,
         keyStore: any ClipboardHistoryMasterKeyStoring,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) -> StoreResolution {
         let databaseURL = databaseURL(in: root)
         let databaseExists = FileManager.default.fileExists(
@@ -724,7 +728,8 @@ extension ClipboardHistoryModule {
         return openStore(
             at: root,
             keys: ClipboardHistoryKeyDerivation.deriveV1(from: masterKey),
-            maintenanceDate: maintenanceDate
+            maintenanceDate: maintenanceDate,
+            databasePreparation: databasePreparation
         )
     }
 
@@ -732,14 +737,16 @@ extension ClipboardHistoryModule {
     static func openStore(
         at root: URL,
         keys: ClipboardHistoryDerivedKeys,
-        maintenanceDate: Date
+        maintenanceDate: Date,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) -> StoreResolution {
         do {
             try prepareStoreDirectories(at: root)
 
             let database = try openDatabase(
                 at: databaseURL(in: root),
-                databaseKey: keys.databaseKey
+                databaseKey: keys.databaseKey,
+                databasePreparation: databasePreparation
             )
             try database.write { database in
                 _ = try ensureMaintenanceDeadline(
@@ -791,7 +798,8 @@ extension ClipboardHistoryModule {
     static func openDatabase(
         at databaseURL: URL,
         databaseKey: Data,
-        migrationTarget: String? = nil
+        migrationTarget: String? = nil,
+        databasePreparation: (@Sendable (Database) throws -> Void)? = nil
     ) throws -> DatabasePool {
         let existed = FileManager.default.fileExists(atPath: databaseURL.path)
         var configuration = Configuration()
@@ -805,6 +813,7 @@ extension ClipboardHistoryModule {
             try database.execute(sql: "PRAGMA secure_delete = ON")
             // Reclaim a previously busy WAL when the next writer resets it.
             try database.execute(sql: "PRAGMA journal_size_limit = 0")
+            try databasePreparation?(database)
         }
 
         do {

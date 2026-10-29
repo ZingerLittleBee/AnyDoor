@@ -97,7 +97,11 @@ packages, and the shared content lifecycle implement the
 [Clipboard Sync specification](../prds/2026-10-28-clipboard-icloud-sync.md).
 
 Selected definitions and associations use independent encrypted operations;
-unselected names and memberships remain local. Initial content snapshots seed
+unselected names and memberships remain local. Before importing an entry operation,
+the same writer transaction snapshots local membership differences for that
+subject, including edits made during a provider await. Tag-state and merge
+operations retain their required global snapshot; file-body/version operations
+do not scan unrelated memberships. Initial content snapshots seed
 associations without overwriting later operations. Same-name tags remain distinct
 in Settings, history filters, and card menus. Explicit merge previews disclose the
 newly eligible local history and reject stale confirmation; persistent aliases
@@ -264,6 +268,10 @@ admits only the short name exchange. Its already-persisted replacement journal
 retains both visible roots during post-exchange checking or interrupted rollback.
 FSEvents subtree notifications request full reconciliation, including dropped
 event batches; vnode observation continues to own root identity and moves.
+Top-level vnode handles share a process-wide budget of 64, including handles
+awaiting cancellation cleanup. One module-owned five-second reconciliation task
+covers overflow locations even when provider polling is disabled, through the
+same automatic retry admission and deadlines.
 A frozen local version and its originating location's new base commit in one
 transaction after rechecking the location revision, identity, and prior base.
 Pausing or reassociating the location during freezing therefore cannot publish
@@ -384,8 +392,15 @@ or old-account queue to restart publication.
 The additive `v16_clipboard_sync_recovery` migration persists the last actionable
 account/key failure and the provider's retry deadline in the encrypted store.
 Relaunch preserves that deadline, and Retry cannot bypass it. Transient connecting
-and transfer phases are not treated as completed work after restart. Account
-changes persist disabled participation and its reason; an old enabled flag or
+and transfer phases are not treated as completed work after restart. Native
+nonrecoverable provider/request errors and incompatible versions retain distinct
+failures and stop automatic admission, including polling, file observations, and
+resume after restart. Explicit user commands may retry once, including commands
+queued during a failing pass; Off revokes that intent. Provider retry deadlines
+still take precedence. A permanent rejection outranks conflict/batch siblings
+inside a partial CloudKit failure; retryable wrappers retain the longest supplied
+delay.
+Account changes persist disabled participation and its reason; an old enabled flag or
 retained key cannot bind a new account. Unresolved manual activation is only
 retained within the current runtime generation, so a restart before account
 binding may require explicit activation again rather than authorizing an
