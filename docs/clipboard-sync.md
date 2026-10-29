@@ -110,7 +110,9 @@ sharing retained history with a different account requires explicit authorizatio
 
 If AnyDoor confirms that a previously used cloud collection is missing, Clipboard
 Sync settings offers **Start a New Sync Collection**, including while sync is off.
-Use Retry if the collection may return. Starting a new collection asks for
+If the collection may return, use Retry while sync is on or a cloud clear is
+pending. When sync is off without a pending clear, turn it on to check again.
+Starting a new collection asks for
 confirmation and rechecks the current account and missing collection before
 retiring this Mac's previous participation. It preserves local history, files,
 saved changes, and the encryption key. It does not create or clear cloud data at

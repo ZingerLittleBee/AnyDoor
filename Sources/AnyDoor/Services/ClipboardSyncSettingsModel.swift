@@ -89,6 +89,20 @@ final class ClipboardSyncSettingsModel {
         }
     }
 
+    var offersRetry: Bool {
+        if isResetPending { return operationFailed || status.cloudReset?.failure != nil }
+        guard status.isEnabled else { return false }
+        if operationFailed { return true }
+        switch status.phase {
+        case .disabled, .connecting, .transferring, .upToDate: return false
+        default: return true
+        }
+    }
+
+    var missingCollectionHelpKey: L10n.Key {
+        status.isEnabled || isResetPending ? .settingsClipboardSyncMissingCollection : .settingsClipboardSyncMissingCollectionOff
+    }
+
     var isResetPending: Bool {
         status.cloudReset?.isPending ?? false
     }

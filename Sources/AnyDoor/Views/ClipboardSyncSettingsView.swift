@@ -102,7 +102,7 @@ struct ClipboardSyncSettingsView: View {
                 LocalizedText(statusKey)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if offersRetry {
+                if model.offersRetry {
                     Button {
                         Task { await model.retry() }
                     } label: {
@@ -138,7 +138,7 @@ struct ClipboardSyncSettingsView: View {
             }
 
             if model.status.canRecoverMissingCloudCollection {
-                LocalizedText(.settingsClipboardSyncMissingCollection)
+                LocalizedText(model.missingCollectionHelpKey)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(L(.settingsClipboardSyncNewCollectionAction)) {
@@ -259,17 +259,6 @@ struct ClipboardSyncSettingsView: View {
             true
         default:
             false
-        }
-    }
-
-    private var offersRetry: Bool {
-        if model.operationFailed || model.status.cloudReset?.failure != nil || model.status.canRecoverMissingCloudCollection { return true }
-        guard model.status.isEnabled else { return false }
-        switch model.status.phase {
-        case .disabled, .connecting, .transferring, .upToDate:
-            return false
-        default:
-            return true
         }
     }
 

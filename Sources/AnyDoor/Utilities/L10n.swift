@@ -434,6 +434,7 @@ enum L10n {
         case settingsClipboardSyncResetProgress = "settings.clipboard.sync.reset.progress"
         case settingsClipboardSyncResetInterrupted = "settings.clipboard.sync.reset.interrupted"
         case settingsClipboardSyncMissingCollection = "settings.clipboard.sync.missingCollection"
+        case settingsClipboardSyncMissingCollectionOff = "settings.clipboard.sync.missingCollection.off"
         case settingsClipboardSyncNewCollectionAction = "settings.clipboard.sync.newCollection.action"
         case settingsClipboardSyncNewCollectionExplanation = "settings.clipboard.sync.newCollection.explanation"
         case settingsClipboardSyncNewCollectionPrepared = "settings.clipboard.sync.newCollection.prepared"

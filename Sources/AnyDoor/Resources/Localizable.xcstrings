@@ -16038,6 +16038,13 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "开始新的同步集合" } }
       }
     },
+    "settings.clipboard.sync.missingCollection.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The previous cloud collection is missing. Turn Clipboard Sync on to check again, or start a new collection while keeping local history." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "之前的云端同步集合缺失。请开启剪贴板同步以重新检查，或保留本地历史并开始新的同步集合。" } }
+      }
+    },
     "settings.clipboard.sync.newCollection.explanation": {
       "extractionState": "manual",
       "localizations": {

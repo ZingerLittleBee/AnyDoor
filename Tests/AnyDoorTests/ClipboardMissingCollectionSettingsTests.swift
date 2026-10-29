@@ -7,6 +7,44 @@ import XCTest
 
 @MainActor
 final class ClipboardMissingCollectionSettingsTests: XCTestCase {
+    func testOrdinaryOffRequiresExplicitEnableToRecheckAReturnedCollection() async throws {
+        let fixture = try await makeFixture()
+        let model = fixture.model
+        await fixture.cloud.setMissing(true)
+        await model.retry()
+        try await waitForMissingCollection(model)
+        await model.setEnabled(false)
+        XCTAssertFalse(model.status.isEnabled)
+        XCTAssertNil(model.status.cloudReset)
+        XCTAssertTrue(model.status.canRecoverMissingCloudCollection)
+        XCTAssertFalse(model.offersRetry, "Ordinary Off cannot run the core Retry operation")
+        XCTAssertEqual(model.missingCollectionHelpKey, .settingsClipboardSyncMissingCollectionOff)
+        await fixture.cloud.setMissing(false)
+        let readsBefore = await fixture.cloud.controlReadCount()
+        let writesBefore = await fixture.cloud.writeCount()
+
+        await model.setEnabled(true)
+        for _ in 0..<1_000 {
+            await model.refresh()
+            if model.status.phase == .upToDate && !model.status.canRecoverMissingCloudCollection { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        XCTAssertEqual(model.status.phase, .upToDate)
+        XCTAssertFalse(model.status.canRecoverMissingCloudCollection)
+        XCTAssertFalse(model.didRecoverMissingCollection)
+        XCTAssertFalse(model.operationFailed)
+        XCTAssertNil(model.status.cloudReset)
+        let readsAfter = await fixture.cloud.controlReadCount()
+        let writesAfter = await fixture.cloud.writeCount()
+        XCTAssertGreaterThan(readsAfter, readsBefore, "Explicit enable must read the returned provider descriptor")
+        XCTAssertEqual(writesAfter, writesBefore, "Rechecking the existing collection must not create or clear one")
+        XCTAssertEqual(model.tags.count, 1)
+        XCTAssertTrue(model.tags.allSatisfy(\.isSelected))
+        let local = try await fixture.module.page(.init()).entries
+        XCTAssertEqual(local.map(\.previewText), ["local history survives missing cloud data"])
+    }
+
     func testChangedAuthorityAndProviderFailureDoNotReportRecoveryOrClearLocalConsent() async throws {
         for change in [RecoveryChange.returnedCollection, .account, .providerFailure] {
             let fixture = try await makeFixture()
@@ -55,6 +93,8 @@ final class ClipboardMissingCollectionSettingsTests: XCTestCase {
         XCTAssertFalse(model.status.isEnabled)
         XCTAssertTrue(model.status.canRecoverMissingCloudCollection)
         XCTAssertTrue(model.isResetPending)
+        XCTAssertTrue(model.offersRetry, "Interrupted cloud clearing must retain Retry while Off")
+        XCTAssertEqual(model.missingCollectionHelpKey, .settingsClipboardSyncMissingCollection)
         let writesBefore = await fixture.cloud.writeCount()
 
         await model.prepareMissingCollectionRecovery()
@@ -128,16 +168,19 @@ private actor MissingCollectionSettingsCloud: ClipboardSyncTransport {
     private var replacementAccount: ClipboardSyncAccount?
     private var controlReadsFail = false
     private var writes = 0
+    private var controlReads = 0
 
     func setMissing(_ value: Bool) { missing = value }
     func switchAccount() { replacementAccount = .init(container: "test", environment: "test", owner: "another-account") }
     func failControlReads() { controlReadsFail = true }
     func writeCount() -> Int { writes }
+    func controlReadCount() -> Int { controlReads }
     func account() async throws -> ClipboardSyncAccount {
         if let replacementAccount { return replacementAccount }
         return try await backing.account()
     }
     func control(for account: ClipboardSyncAccount) async throws -> ClipboardSyncControl? {
+        controlReads += 1
         if controlReadsFail { throw ClipboardSyncServiceError.network(retryAfter: nil) }
         if missing { return nil }
         return try await backing.control(for: account)
