@@ -20,8 +20,8 @@ extension ClipboardHistoryModule {
     public func page(
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor? = nil
-    ) throws -> ClipboardHistoryPage {
-        try indexedPage(query, after: cursor)
+    ) async throws -> ClipboardHistoryPage {
+        try await indexedPage(query, after: cursor)
     }
 
     public func sourceSummaries() throws
