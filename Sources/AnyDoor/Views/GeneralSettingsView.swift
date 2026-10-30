@@ -217,7 +217,7 @@ struct GeneralSettingsView: View {
             Section {
                 @Bindable var updateService = updateService
 
-                LabeledContent { Text(Bundle.main.shortVersionString ?? "—")
+                LabeledContent { Text(Bundle.main.displayVersionString ?? "—")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 } label: { LocalizedText(.settingsAboutCurrentVersion) }

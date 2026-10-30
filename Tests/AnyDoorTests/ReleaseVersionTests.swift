@@ -1,6 +1,7 @@
 import Foundation
 import Sparkle
 import XCTest
+@testable import AnyDoor
 
 final class ReleaseVersionTests: XCTestCase {
     func testSparkleComparatorPreservesReleaseLineOrdering() {
@@ -22,6 +23,34 @@ final class ReleaseVersionTests: XCTestCase {
         let result = try resolve("4.2.0-beta.7")
 
         XCTAssertEqual(result, ["4.2.0-beta.7", "beta", "4.2.0", "4.2.7", "4.2.0 Beta 7"])
+    }
+
+    func testDisplayVersionDecodesTheResolverEncoding() throws {
+        for version in ["4.2.1", "4.3.0", "4.3.0-beta.5", "4.3.12-beta.1", "4.3.12-beta.98"] {
+            let resolved = try resolve(version)
+            XCTAssertEqual(
+                Bundle.displayVersion(shortVersion: resolved[2], buildVersion: resolved[3]),
+                resolved[4],
+                version
+            )
+        }
+    }
+
+    func testDisplayVersionIgnoresBuildsOutsideTheReleaseEncoding() {
+        let cases: [(short: String, build: String?)] = [
+            ("4.1.0", "4.1.0"),
+            ("4.0.3", "4.0.3"),
+            ("4.3.1", "4.3.5"),
+            ("4.3.0", "4.2.5"),
+            ("4.3.0", nil),
+        ]
+        for (short, build) in cases {
+            XCTAssertEqual(
+                Bundle.displayVersion(shortVersion: short, buildVersion: build),
+                short,
+                "\(short) / \(build ?? "nil")"
+            )
+        }
     }
 
     func testBetaSlotBoundsAreEnforced() throws {

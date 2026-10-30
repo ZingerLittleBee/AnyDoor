@@ -19,6 +19,8 @@ versioning.
   Sync. Keep local identities and memberships, and retain tags in explicit manual
   backups. Older clients and historical sync files may still contain previously
   shared plaintext tag names; upgrading does not erase those copies.
+- Settings shows the Beta number in the current version of a Beta build, such
+  as 4.3.0 Beta 5.
 
 ### Fixed
 
