@@ -13,19 +13,60 @@ final class AppIconCacheTests: XCTestCase {
         XCTAssertNil(AppIconCache.cached("/private/var/anydoor-tests/never-requested.app"))
     }
 
-    func testIconResolvesAndPopulatesCache() async throws {
+    func testIconResolvesAndPopulatesCache() async {
         let icon = await AppIconCache.icon(for: finderPath)
         XCTAssertGreaterThan(icon.size.width, 0, "A resolved icon should have a real size")
         XCTAssertTrue(
             AppIconCache.cached(finderPath) === icon,
             "After resolving, the synchronous cache must return the same instance"
         )
-        // NSWorkspace hands back a lazy image with one IconServices rep per
-        // size, rendered on first draw. Rows must get finished pixels instead,
-        // or that render runs on the main thread during the first scroll.
-        XCTAssertEqual(icon.representations.count, 1, "The cached icon should be a single bitmap")
+    }
+
+    /// NSWorkspace hands back a lazy image that renders through IconServices
+    /// at its first draw size. The cache must do that draw off the main
+    /// thread, under the app's appearance, and hand rows a Retina bitmap that
+    /// never calls back into the lazy source, or the render lands on the main
+    /// thread during the first scroll.
+    func testIconsAreDrawnOffTheMainThreadIntoRetinaBitmaps() async throws {
+        let app = NSApplication.shared
+        let originalAppearance = app.appearance
+        let originalResolve = AppIconCache.resolveIcon
+        let draws = DrawRecorder()
+        app.appearance = NSAppearance(named: .darkAqua)
+        AppIconCache.resolveIcon = { _ in
+            NSImage(size: NSSize(width: 512, height: 512), flipped: false) { rect in
+                draws.record(onMainThread: Thread.isMainThread, appearance: NSAppearance.currentDrawing().name)
+                NSColor.systemRed.setFill()
+                rect.fill()
+                return true
+            }
+        }
+        defer {
+            AppIconCache.resolveIcon = originalResolve
+            app.appearance = originalAppearance
+        }
+
+        let icon = await AppIconCache.icon(for: "/private/var/anydoor-tests/drawn-\(UUID().uuidString).app")
+        let resolveDraws = draws.all
+        XCTAssertFalse(resolveDraws.isEmpty, "The lazy icon should be drawn while resolving")
+        XCTAssertFalse(resolveDraws.contains { $0.onMainThread }, "The lazy icon must not be drawn on the main thread")
+        XCTAssertEqual(resolveDraws.map(\.appearance), resolveDraws.map { _ in .darkAqua }, "The icon should be drawn under the app's appearance")
+
         let rep = try XCTUnwrap(icon.representations.first)
+        XCTAssertEqual(icon.representations.count, 1, "The cached icon should be a single bitmap")
+        XCTAssertTrue(rep is NSBitmapImageRep, "Expected a bitmap rep, got \(type(of: rep))")
         XCTAssertEqual(rep.pixelsWide, Int(icon.size.width * 2), "The bitmap should be rendered for Retina")
+
+        // Drawing the cached icon, as a row does, must not reach the lazy source.
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 52, height: 52, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        icon.draw(in: NSRect(x: 0, y: 0, width: 26, height: 26))
+        NSGraphicsContext.restoreGraphicsState()
+        XCTAssertEqual(draws.all.count, resolveDraws.count, "Drawing the cached icon must not redraw the lazy source")
     }
 
     /// App icons have Dark Mode variants, so an icon rendered under one
@@ -127,6 +168,22 @@ private final class LookupGate: Sendable {
     }
 
     func open() { group.leave() }
+}
+
+/// Records each draw of a test icon, from whichever thread draws it.
+private final class DrawRecorder: Sendable {
+    struct Draw: Sendable {
+        let onMainThread: Bool
+        let appearance: NSAppearance.Name
+    }
+
+    private let draws = OSAllocatedUnfairLock<[Draw]>(initialState: [])
+
+    var all: [Draw] { draws.withLock { $0 } }
+
+    func record(onMainThread: Bool, appearance: NSAppearance.Name) {
+        draws.withLock { $0.append(Draw(onMainThread: onMainThread, appearance: appearance)) }
+    }
 }
 
 /// An actor unrelated to the icon cache; it runs only when the pool has a
