@@ -169,7 +169,13 @@ enum AppIconCache {
             draw()
         }
         guard let bitmap = context.makeImage() else { return icon }
-        return NSImage(cgImage: bitmap, size: NSSize(width: side, height: side))
+        // An explicit bitmap rep pins the image to these pixels, rather than
+        // leaving the rep type to `NSImage(cgImage:size:)`.
+        let rep = NSBitmapImageRep(cgImage: bitmap)
+        rep.size = NSSize(width: side, height: side)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
     }
 
     /// Synchronous, cache-only lookup by bundle identifier. Mirrors `cached(_:)`
