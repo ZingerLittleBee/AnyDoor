@@ -8,6 +8,8 @@ versioning.
 
 ### Added
 
+- Add temporary, content-free Keychain status diagnostics to investigate
+  Clipboard Sync remaining on "waiting for key" after iCloud Keychain is enabled.
 - Optional, end-to-end encrypted iCloud Clipboard Sync for selected tags, with
   separate activation on every Mac, complete files/folders/application packages,
   per-version downloads above 5,000,000 bytes, linked-file conflicts, and explicit

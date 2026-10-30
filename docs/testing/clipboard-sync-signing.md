@@ -152,6 +152,33 @@ Developer-profile and backend-schema validation remains configuration evidence
 only. Unlock and system recovery must not be reported as natively demonstrated
 merely because the injected fault adapter becomes available.
 
+### Temporary native Keychain diagnostics
+
+The diagnostic Beta logs the operation name and numeric `OSStatus` immediately
+after the existing `SecItemCopyMatching` and `SecItemAdd` calls. It does not add
+Keychain queries or change error mapping. Repeated identical read statuses are
+suppressed for the lifetime of the adapter. Logs contain no query dictionaries,
+account identifiers, key identifiers, key bytes, or clipboard content.
+
+After installing the diagnostic Beta, launch the signed app and retry Clipboard
+Sync. Read only its diagnostic category:
+
+```sh
+/usr/bin/log show --last 10m --style compact --predicate 'subsystem == "dev.bybee.AnyDoor" AND category == "ClipboardSyncKeychainDiagnostics"'
+```
+
+Record the app version, affected device, operation, and status. `load status=0`
+means the native query succeeded; `load status=-25300` means no matching local
+item was found, not that iCloud Keychain is disabled or that the cloud key is
+permanently lost. Other statuses must be investigated before attributing the
+failure to delivery. A status can be absent when the app has not reached the
+native call; it is not proof of success. Relaunch before collecting another
+session if the unchanged status has already been suppressed.
+
+The marker is `[DEBUG-anydoor-keychain]`. Remove this temporary instrumentation
+after the signed-device investigation has captured the failure and verified its
+fix. Isolated tests and signing validation do not establish actual key delivery.
+
 ## Cloud reset evidence
 
 The public-module reset cases in

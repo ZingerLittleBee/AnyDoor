@@ -1,5 +1,6 @@
 import Foundation
 import LocalAuthentication
+import os
 import Security
 
 /// Restricted services are never constructed before this process's signed
@@ -54,6 +55,10 @@ enum ClipboardSyncNativeConfiguration {
 /// operation: local participation never owns the shared key's lifetime.
 actor ClipboardSyncKeychain: ClipboardSyncKeyStoring {
     private static let service = "dev.bybee.AnyDoor.ClipboardSync.key.v1"
+    private static let diagnosticLogger = Logger(
+        subsystem: "dev.bybee.AnyDoor", category: "ClipboardSyncKeychainDiagnostics"
+    )
+    private var lastReadStatus: OSStatus?
 
     func load(account: ClipboardSyncAccount, keyID: UUID) throws -> Data? {
         try ClipboardSyncNativeConfiguration.requireCapabilities()
@@ -67,6 +72,10 @@ actor ClipboardSyncKeychain: ClipboardSyncKeyStoring {
         query[kSecUseAuthenticationContext as String] = context
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if lastReadStatus != status {
+            Self.diagnosticLogger.notice("[DEBUG-anydoor-keychain] operation=load status=\(status, privacy: .public)")
+            lastReadStatus = status
+        }
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw Self.failure(status) }
         guard let key = result as? Data, key.count == 32 else {
@@ -84,6 +93,7 @@ actor ClipboardSyncKeychain: ClipboardSyncKeyStoring {
         query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
         query[kSecValueData as String] = key
         let status = SecItemAdd(query as CFDictionary, nil)
+        Self.diagnosticLogger.notice("[DEBUG-anydoor-keychain] operation=create status=\(status, privacy: .public)")
         guard status == errSecSuccess || status == errSecDuplicateItem else {
             throw Self.failure(status)
         }
