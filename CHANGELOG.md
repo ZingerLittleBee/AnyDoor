@@ -20,6 +20,11 @@ versioning.
   backups. Older clients and historical sync files may still contain previously
   shared plaintext tag names; upgrading does not erase those copies.
 
+### Fixed
+
+- Fix a startup crash when opening local app data in builds with Clipboard Sync
+  support.
+
 ## [4.2.11] - 2026-10-29
 
 ### Changed

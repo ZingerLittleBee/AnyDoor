@@ -10,6 +10,7 @@ private let logger = Logger(
 /// Opens the production SwiftData store only after the legacy clipboard
 /// snapshot is safe. If snapshot preparation fails, the rest of the app uses
 /// an isolated in-memory container while Clipboard Settings offers Retry.
+/// Both stores stay local even when the app has Clipboard Sync capabilities.
 @MainActor
 struct AppPersistenceBootstrap {
     let modelContainer: ModelContainer
@@ -31,7 +32,8 @@ struct AppPersistenceBootstrap {
             let recoveryContainer = try ModelContainer(
                 for: schema,
                 configurations: ModelConfiguration(
-                    isStoredInMemoryOnly: true
+                    isStoredInMemoryOnly: true,
+                    cloudKitDatabase: .none
                 )
             )
             return AppPersistenceBootstrap(
@@ -47,7 +49,10 @@ struct AppPersistenceBootstrap {
 
         let productionContainer = try ModelContainer(
             for: schema,
-            configurations: ModelConfiguration(url: storeURL)
+            configurations: ModelConfiguration(
+                url: storeURL,
+                cloudKitDatabase: .none
+            )
         )
         return AppPersistenceBootstrap(
             modelContainer: productionContainer,

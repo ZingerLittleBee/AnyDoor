@@ -30,6 +30,11 @@ the descriptions here explain the behavior those declarations do not capture.
 Created in `AppDelegate.init()` and handed to all SwiftUI views via `.modelContainer()`. Do not
 create multiple ModelContainer instances.
 
+Both the persistent and in-memory recovery configurations explicitly use
+`cloudKitDatabase: .none`. Clipboard Sync owns its separate encrypted CloudKit
+protocol; its signing entitlements must not enable SwiftData's automatic sync.
+The local schema retains its unique constraints and required fields.
+
 ### Pinned store path
 
 ModelContainer is explicitly configured with `url: ~/Library/Application

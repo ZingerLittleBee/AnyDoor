@@ -70,6 +70,29 @@ explains why the Data Protection Keychain requires provisioning-authorized
 access groups, an app-like bundle, and a user login context. A disposable
 file-based Keychain used by local-history tests is not this Keychain.
 
+## Signed startup with sync disabled
+
+Check startup on one authorized Mac with a disposable macOS test user before
+enabling Clipboard Sync or testing cross-device delivery. Use the actual
+Developer ID artifact and record its digest. Verify a fresh installation starts
+with Clipboard Sync disabled, then save a synthetic app shortcut, quit, and
+relaunch to confirm the local record survives. Also exercise an upgrade with
+synthetic data created by the preceding stable release in that test user.
+Keep the test user's existing store; do not delete or rebuild it to make startup pass.
+
+The persistent and in-memory recovery SwiftData configurations must explicitly
+disable automatic CloudKit sync. The local schema intentionally has unique
+constraints and required fields that are incompatible with automatic sync.
+Confirm startup has no CloudKit schema validation error (`NSCocoaErrorDomain`
+code `134060`) or `ModelContainer` initialization crash. Code signing and
+notarization success alone do not establish this startup behavior.
+
+Ordinary CLI tests lack the release's CloudKit entitlements. A nil
+`cloudKitContainerIdentifier` in those tests does not distinguish `.automatic`
+from `.none`, and comparing whole `ModelConfiguration` values is also insufficient.
+The bootstrap tests cover local-data preservation and recovery isolation;
+record signed startup separately from those results and from two-Mac acceptance.
+
 ## Isolated signed run
 
 Use two authorized Macs with disposable macOS test users signed into the same
