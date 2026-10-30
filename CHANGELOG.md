@@ -24,6 +24,9 @@ versioning.
 
 - Fix a startup crash when opening local app data in builds with Clipboard Sync
   support.
+- Scrolling into Applications in the command palette no longer stutters the
+  first time after AnyDoor launches. App icons are now prepared in the
+  background instead of while the list scrolls.
 
 ## [4.2.11] - 2026-10-29
 
