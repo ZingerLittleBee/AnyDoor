@@ -792,8 +792,9 @@ private struct CommandPaletteRow: View {
         .task(id: entry.id) {
             // Resolve the Finder icon via the shared cache. A warm path
             // (prewarmed apps, recycled rows) seeds synchronously with no
-            // flash; a cold path resolves off the main thread, so the first
-            // scroll into the Applications section never blocks on disk I/O.
+            // flash; a cold path resolves and renders off the main thread, so
+            // the first scroll into the Applications section never blocks on
+            // disk I/O or IconServices.
             guard let path = iconPath else { return }
             if let cached = AppIconCache.cached(path) {
                 appIcon = cached

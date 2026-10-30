@@ -9,9 +9,17 @@ import AppKit
 /// memoizes the result by path, so recycled rows and both pickers reuse warm
 /// icons with no main-thread I/O.
 ///
+/// The image `icon(forFile:)` returns is lazy as well: it asks IconServices for
+/// pixels at whatever size it is first drawn, and a size IconServices has not
+/// rendered yet costs about 10 ms per icon. Drawn by SwiftUI, that cost lands on
+/// the main thread during the first scroll after launch, a few icons per frame.
+/// So the lookup queue also draws each icon into a bitmap at `renderedPointSize`
+/// under the app's appearance, and rows only upload finished pixels. Entries are
+/// keyed by appearance, since app icons have Dark Mode variants.
+///
 /// Mirrors `FileThumbnailCache`: a `@MainActor` cache whose dictionaries are
 /// only ever touched on the main actor (so they need no lock); only the disk
-/// read itself is offloaded.
+/// read and rendering are offloaded.
 ///
 /// The lookups must never run on Swift's cooperative thread pool.
 /// `icon(forFile:)` waits on a synchronous LaunchServices request, and
@@ -23,8 +31,20 @@ import AppKit
 /// them, would stop until relaunch.
 @MainActor
 enum AppIconCache {
-    private static var cache: [String: NSImage] = [:]
-    private static var inflight: [String: Task<SendableImage, Never>] = [:]
+    /// Side length, in points, of every path-keyed icon: the largest list icon
+    /// (the Spotlight picker's 28pt row) rounded up. Rows draw it resizable at
+    /// their own size.
+    private nonisolated static let renderedPointSize: CGFloat = 32
+    /// Rendered for Retina; 1x displays downsample.
+    private nonisolated static let renderedScale: CGFloat = 2
+
+    private struct Key: Hashable, Sendable {
+        let path: String
+        let appearance: NSAppearance.Name
+    }
+
+    private static var cache: [Key: NSImage] = [:]
+    private static var inflight: [Key: Task<SendableImage, Never>] = [:]
     // A second cache keyed by bundle identifier. Clipboard cards know only the
     // source app's bundle ID; resolving its on-disk URL via
     // `urlForApplication(withBundleIdentifier:)` is itself a (cheap) lookup that
@@ -66,33 +86,43 @@ enum AppIconCache {
         }
     }
 
+    /// The cache key for `path` under the app's current appearance.
+    private static func key(_ path: String) -> Key {
+        Key(path: path, appearance: NSApplication.shared.effectiveAppearance.name)
+    }
+
     /// Synchronous, cache-only lookup. Returns nil on a miss without touching
     /// disk, letting a row render an already-resolved icon with no async hop
     /// (and therefore no placeholder flash) on a warm path.
     static func cached(_ path: String) -> NSImage? {
-        cache[path]
+        cache[key(path)]
     }
 
-    /// Returns the icon for `path`, resolving it on `lookupQueue` on a cache
-    /// miss, so it never blocks scrolling. Concurrent requests for the same
-    /// path share one resolution via the in-flight task map.
+    /// Returns the rendered icon for `path`, resolving and rendering it on
+    /// `lookupQueue` on a cache miss, so it never blocks scrolling. Concurrent
+    /// requests for the same path share one resolution via the in-flight task
+    /// map.
     static func icon(for path: String) async -> NSImage {
-        if let hit = cache[path] { return hit }
+        let key = key(path)
+        if let hit = cache[key] { return hit }
 
         let task: Task<SendableImage, Never>
-        if let existing = inflight[path] {
+        if let existing = inflight[key] {
             task = existing
         } else {
             let resolve = resolveIcon
+            let appearance = key.appearance
             task = Task {
-                await onLookupQueue { SendableImage(image: resolve(path)) }
+                await onLookupQueue {
+                    SendableImage(image: rendered(resolve(path), appearance: appearance))
+                }
             }
-            inflight[path] = task
+            inflight[key] = task
         }
 
         let image = await task.value.image
-        cache[path] = image
-        inflight[path] = nil
+        cache[key] = image
+        inflight[key] = nil
         return image
     }
 
@@ -100,9 +130,46 @@ enum AppIconCache {
     /// list of app rows finds warm cache entries instead of cold-cache disk
     /// hits. Fire-and-forget; skips paths already cached or in flight.
     static func prewarm(_ paths: [String]) {
-        for path in paths where cache[path] == nil && inflight[path] == nil {
+        for path in paths {
+            let key = key(path)
+            guard cache[key] == nil, inflight[key] == nil else { continue }
             Task { _ = await icon(for: path) }
         }
+    }
+
+    /// Draws `icon` into a `renderedPointSize` bitmap under `appearance`, so
+    /// the main thread never waits on IconServices when a row first draws it.
+    /// Falls back to the lazy icon if no bitmap context can be made.
+    private nonisolated static func rendered(_ icon: NSImage, appearance: NSAppearance.Name) -> NSImage {
+        let side = renderedPointSize
+        let pixels = Int(side * renderedScale)
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.displayP3),
+              let context = CGContext(
+                  data: nil,
+                  width: pixels,
+                  height: pixels,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return icon }
+        // Scale the context rather than drawing at pixel size, so the icon
+        // picks its @2x representation.
+        context.scaleBy(x: renderedScale, y: renderedScale)
+        let draw = {
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            icon.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        if let drawingAppearance = NSAppearance(named: appearance) {
+            drawingAppearance.performAsCurrentDrawingAppearance(draw)
+        } else {
+            draw()
+        }
+        guard let bitmap = context.makeImage() else { return icon }
+        return NSImage(cgImage: bitmap, size: NSSize(width: side, height: side))
     }
 
     /// Synchronous, cache-only lookup by bundle identifier. Mirrors `cached(_:)`

@@ -13,13 +13,37 @@ final class AppIconCacheTests: XCTestCase {
         XCTAssertNil(AppIconCache.cached("/private/var/anydoor-tests/never-requested.app"))
     }
 
-    func testIconResolvesAndPopulatesCache() async {
+    func testIconResolvesAndPopulatesCache() async throws {
         let icon = await AppIconCache.icon(for: finderPath)
         XCTAssertGreaterThan(icon.size.width, 0, "A resolved icon should have a real size")
         XCTAssertTrue(
             AppIconCache.cached(finderPath) === icon,
             "After resolving, the synchronous cache must return the same instance"
         )
+        // NSWorkspace hands back a lazy image with one IconServices rep per
+        // size, rendered on first draw. Rows must get finished pixels instead,
+        // or that render runs on the main thread during the first scroll.
+        XCTAssertEqual(icon.representations.count, 1, "The cached icon should be a single bitmap")
+        let rep = try XCTUnwrap(icon.representations.first)
+        XCTAssertEqual(rep.pixelsWide, Int(icon.size.width * 2), "The bitmap should be rendered for Retina")
+    }
+
+    /// App icons have Dark Mode variants, so an icon rendered under one
+    /// appearance must never be served under another.
+    func testIconsAreCachedPerAppearance() async {
+        let app = NSApplication.shared
+        let originalAppearance = app.appearance
+        defer { app.appearance = originalAppearance }
+
+        app.appearance = NSAppearance(named: .aqua)
+        let light = await AppIconCache.icon(for: finderPath)
+        app.appearance = NSAppearance(named: .darkAqua)
+        XCTAssertFalse(AppIconCache.cached(finderPath) === light, "A light icon must not be served in Dark Mode")
+        let dark = await AppIconCache.icon(for: finderPath)
+        XCTAssertFalse(light === dark)
+
+        app.appearance = NSAppearance(named: .aqua)
+        XCTAssertTrue(AppIconCache.cached(finderPath) === light, "Switching back should reuse the light icon")
     }
 
     func testRepeatResolutionReusesCachedInstance() async {
