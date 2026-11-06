@@ -5,6 +5,7 @@ enum HostsWriterError: Error, Equatable {
     case writeFailed(String)
     case liveChanged
     case helperOutdated
+    case helperApprovalRequired
 }
 
 /// Abstraction over the privileged write to `/etc/hosts`. Implementations:
@@ -27,6 +28,7 @@ struct PrivilegedHostsWriter: HostsWriter {
         } catch let error as PrivilegedHelperCallError {
             if error.message == "hosts_changed" { throw HostsWriterError.liveChanged }
             if error.message == "helper_outdated" { throw HostsWriterError.helperOutdated }
+            if error.message == "helper_approval_required" { throw HostsWriterError.helperApprovalRequired }
             throw HostsWriterError.writeFailed(error.message)
         }
     }
