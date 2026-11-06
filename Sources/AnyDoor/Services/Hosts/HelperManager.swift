@@ -35,9 +35,17 @@ final class HelperManager {
             },
             register: {
                 let service = SMAppService.daemon(plistName: HelperManager.plistName)
+                guard service.status != .requiresApproval else {
+                    throw PrivilegedHelperCallError(message: "helper_approval_required")
+                }
                 do {
                     try service.register()
                 } catch {
+                    let serviceError = error as NSError
+                    if serviceError.domain == "SMAppServiceErrorDomain",
+                       serviceError.code == kSMErrorAlreadyRegistered, service.status == .enabled {
+                        return
+                    }
                     if service.status == .requiresApproval {
                         throw PrivilegedHelperCallError(message: "helper_approval_required")
                     }
@@ -94,8 +102,10 @@ final class HelperManager {
         switch service.status {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
-        case .notRegistered: return .unavailable
-        case .notFound: return .unavailable
+        case .notRegistered, .notFound:
+            // A failed replacement is still owned by the helper path, so the
+            // next write repairs registration rather than silently falling back.
+            return recovery.needsRegistration ? .enabled : .unavailable
         @unknown default: return .unavailable
         }
     }
@@ -113,10 +123,11 @@ final class HelperManager {
         }
         switch service.status {
         case .notRegistered, .notFound:
-            return
+            break
         default:
             try service.unregister()
         }
+        recovery.registrationWasRemoved()
     }
 }
 

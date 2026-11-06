@@ -1,5 +1,6 @@
 import XCTest
 import PluginInterface
+import ServiceManagement
 @testable import AnyDoor
 
 @MainActor
@@ -172,6 +173,154 @@ final class PrivilegedHelperRecoveryTests: XCTestCase {
             XCTAssertEqual((error as? PrivilegedHelperCallError)?.message, "unregister failed")
         }
         XCTAssertFalse(recovery.isRecovering)
+    }
+
+    func testTransientRegistrationFailureRestoresSharedDaemon() async throws {
+        var registered = true
+        var attempts = 0
+        var unregisterCount = 0
+        let recovery = PrivilegedHelperRecovery(
+            validateVersion: { throw PrivilegedHelperCallError(message: "helper_outdated") },
+            unregister: {
+                registered = false
+                unregisterCount += 1
+            },
+            register: {
+                attempts += 1
+                if attempts == 1 {
+                    throw NSError(domain: "SMAppServiceErrorDomain", code: 1)
+                }
+                registered = true
+            },
+            sleep: { _ in }
+        )
+        try await recovery.recover()
+        XCTAssertTrue(registered)
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(unregisterCount, 1)
+    }
+
+    func testLaterConsumerRestoresRegistrationAfterRetryExhaustion() async throws {
+        var registered = true
+        let failure = RegistrationFailure()
+        var unregisterCount = 0
+        var attempts = 0
+        var delays: [Duration] = []
+        let recovery = PrivilegedHelperRecovery(
+            validateVersion: { throw PrivilegedHelperCallError(message: "helper_outdated") },
+            unregister: {
+                registered = false
+                unregisterCount += 1
+            },
+            register: {
+                attempts += 1
+                if failure.isActive {
+                    throw NSError(domain: "SMAppServiceErrorDomain", code: 1)
+                }
+                registered = true
+            },
+            sleep: { delays.append($0) }
+        )
+        do {
+            try await recovery.recover()
+            XCTFail("Expected registration failure")
+        } catch {
+            XCTAssertFalse(registered)
+        }
+        XCTAssertEqual(attempts, 4)
+        XCTAssertEqual(delays, [.milliseconds(500), .seconds(1), .seconds(2)])
+        XCTAssertTrue(recovery.needsRegistration)
+        XCTAssertFalse(recovery.isRecovering)
+        failure.isActive = false
+        // This is the entry point used before forced Scheduled Shutdown.
+        try await recovery.waitForRecovery()
+        XCTAssertTrue(registered, "The later consumer must not continue without the shared daemon")
+        XCTAssertEqual(attempts, 5)
+        XCTAssertFalse(recovery.needsRegistration)
+        XCTAssertEqual(unregisterCount, 1, "Retry registration without unregistering an absent daemon")
+    }
+
+    func testConcurrentConsumersShareRegistrationRetryDespiteCallerCancellation() async throws {
+        let entered = expectation(description: "registration retry started")
+        let joined = expectation(description: "another consumer joined recovery")
+        let gate = AsyncStream<Void>.makeStream()
+        defer { gate.continuation.finish() }
+        var attempts = 0
+        var unregisterCount = 0
+        let recovery = PrivilegedHelperRecovery(
+            validateVersion: { throw PrivilegedHelperCallError(message: "helper_outdated") },
+            unregister: { unregisterCount += 1 },
+            register: {
+                attempts += 1
+                if attempts == 1 { throw NSError(domain: "SMAppServiceErrorDomain", code: 1) }
+            },
+            sleep: { _ in
+                entered.fulfill()
+                for await _ in gate.stream { break }
+            }
+        )
+        let first = Task { try await recovery.recover() }
+        await fulfillment(of: [entered], timeout: 2)
+        let second = Task {
+            joined.fulfill()
+            try await recovery.waitForRecovery()
+        }
+        await fulfillment(of: [joined], timeout: 2)
+        first.cancel()
+        XCTAssertTrue(recovery.needsRegistration)
+        XCTAssertEqual(attempts, 1)
+        gate.continuation.yield(())
+        try await first.value
+        try await second.value
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(unregisterCount, 1)
+        XCTAssertFalse(recovery.needsRegistration)
+    }
+
+    func testExplicitReleasePreventsLaterConsumerFromRestoringRegistration() async throws {
+        var attempts = 0
+        let recovery = PrivilegedHelperRecovery(
+            validateVersion: { throw PrivilegedHelperCallError(message: "helper_outdated") },
+            unregister: {},
+            register: {
+                attempts += 1
+                throw PrivilegedHelperCallError(message: "helper_approval_required")
+            },
+            sleep: { _ in XCTFail("Approval errors must not be retried") }
+        )
+        do {
+            try await recovery.recover()
+            XCTFail("Expected approval failure")
+        } catch {
+            XCTAssertEqual((error as? PrivilegedHelperCallError)?.message, "helper_approval_required")
+        }
+        XCTAssertTrue(recovery.needsRegistration)
+        recovery.registrationWasRemoved()
+        try await recovery.waitForRecovery()
+        XCTAssertEqual(attempts, 1)
+        XCTAssertFalse(recovery.needsRegistration)
+    }
+
+    func testRegistrationRetryPolicyRejectsPermanentAndUnrelatedErrors() {
+        for code in [Int(EPERM), kSMErrorInternalFailure, kSMErrorServiceUnavailable] {
+            XCTAssertTrue(PrivilegedHelperRecovery.canRetryRegistration(
+                NSError(domain: "SMAppServiceErrorDomain", code: code)
+            ))
+        }
+        for code in [kSMErrorInvalidSignature, kSMErrorAuthorizationFailure,
+                     kSMErrorToolNotValid, kSMErrorLaunchDeniedByUser, kSMErrorAlreadyRegistered] {
+            XCTAssertFalse(PrivilegedHelperRecovery.canRetryRegistration(
+                NSError(domain: "SMAppServiceErrorDomain", code: code)
+            ))
+        }
+        XCTAssertFalse(PrivilegedHelperRecovery.canRetryRegistration(NSError(domain: NSPOSIXErrorDomain, code: 1)))
+        XCTAssertFalse(PrivilegedHelperRecovery.canRetryRegistration(
+            PrivilegedHelperCallError(message: "helper_approval_required")
+        ))
+    }
+
+    private final class RegistrationFailure {
+        var isActive = true
     }
 
     private func assertFailure(_ helper: Helper, message: String, events: [String]) async {

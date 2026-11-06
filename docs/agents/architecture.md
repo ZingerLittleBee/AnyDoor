@@ -777,6 +777,11 @@ bundled helper, then validate its protocol again before sending the original con
 Concurrent recovery requests share one operation; registration and plugin release cannot race
 that operation. A failed recovery or a still-incompatible helper leaves hosts untouched, and an
 actual write failure is never retried. There is no unconditional-write fallback.
+After successful unregistration, transient Service Management registration failures receive up to
+three retries (500 ms, 1 s, 2 s). Approval, signature, and unrelated errors fail immediately.
+Failed registration remains pending: a later Hosts operation or forced Scheduled Shutdown repairs
+registration before opening XPC, without unregistering the already-removed daemon again. Explicit
+helper release clears that pending state so a later consumer cannot undo an intentional uninstall.
 `HostsManager.makeWriter` re-resolves the writer on every write from the capability's `readiness()`
 (`PrivilegedHostsWriter` when `.enabled`, else `AppleScriptWriter`), so helper approval takes effect
 without a relaunch (`MockHostsWriter`, defined in the `AnyDoorTests` target, is the sanctioned test
