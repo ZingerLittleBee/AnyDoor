@@ -19,7 +19,6 @@ on:
       - 'docs/**'
       - 'landing/**'
       - 'feed/**'
-      - 'video/**'
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
       - '.github/dependabot.yml'
