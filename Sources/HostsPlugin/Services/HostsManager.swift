@@ -10,6 +10,8 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hosts")
 enum HostsManagerError: Error {
     /// Reading the live `/etc/hosts` failed, so we cannot safely compose or write.
     case liveReadFailed
+    case liveChanged
+    case unsafeManagedBlock
 }
 
 /// Single source of truth for host profiles. SwiftData-backed, @MainActor.
@@ -50,6 +52,9 @@ final class HostsManager {
     private let readLiveHosts: () throws -> String
     private let host: PluginHostContext?
     private var modelContainer: ModelContainer?
+    /// The exact file reconciled with the displayed profiles, never a fresh
+    /// baseline silently substituted while an edit or authorization is pending.
+    private var liveSnapshot: String?
 
     // MARK: - Debounce / serialization state
     private let debounceInterval: Duration
@@ -124,17 +129,74 @@ final class HostsManager {
 
     func reload() {
         guard let context = modelContainer?.mainContext else { return }
-        profiles = (try? context.fetch(
-            FetchDescriptor<HostProfile>(sortBy: [SortDescriptor(\.displayOrder)])
-        )) ?? []
-        // Display-only: if the live read fails, keep the previously shown system
-        // content rather than blanking it. The apply path handles read failures
-        // via `HostsManagerError.liveReadFailed`.
-        guard let live = try? readLiveHosts() else { return }
-        let parsed = HostsFile.parse(live)
-        systemHosts = [parsed.prefix, parsed.suffix]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        do {
+            profiles = try context.fetch(
+                FetchDescriptor<HostProfile>(sortBy: [SortDescriptor(\.displayOrder)])
+            )
+            // A palette refresh during authorization must not undo pending toggles.
+            guard applyTask == nil, activeDirectOperations == 0 else { return }
+            let live = try readLive()
+            let parsed = HostsFile.parse(live)
+            let recovered: [(name: String?, content: String)]
+            do {
+                recovered = try HostsFile.managedProfiles(in: live)
+            } catch {
+                // Keep every line visible, but refuse to guess which block to own.
+                systemHosts = live
+                throw HostsManagerError.unsafeManagedBlock
+            }
+            systemHosts = [parsed.prefix, parsed.suffix].filter { !$0.isEmpty }.joined(separator: "\n")
+            guard live != liveSnapshot else { return }
+
+            var matched = Set<UUID>()
+            var liveOrder: [HostProfile] = []
+            for entry in recovered {
+                let name = entry.name ?? L(host, .hostsProfileRecoveredName)
+                let content = entry.content.trimmingCharacters(in: .newlines)
+                let profile: HostProfile
+                if let existing = profiles.first(where: {
+                    !matched.contains($0.id) && ($0.name == name || entry.name == nil)
+                        && $0.content.trimmingCharacters(in: .newlines) == content
+                }) {
+                    profile = existing
+                } else {
+                    // Never overwrite a saved profile with different content,
+                    // even when an external tool reused its name.
+                    profile = HostProfile(
+                        name: name, content: content,
+                        displayOrder: (profiles.map(\.displayOrder).max() ?? 0) + 100
+                    )
+                    context.insert(profile)
+                    profiles.append(profile)
+                }
+                matched.insert(profile.id)
+                liveOrder.append(profile)
+            }
+            // Preserve live ordering: duplicate hostnames can depend on which
+            // mapping appears first, even if the saved display order differs.
+            profiles = liveOrder + profiles.filter { !matched.contains($0.id) }
+            for (index, profile) in profiles.enumerated() {
+                profile.displayOrder = Double(index + 1) * 100
+            }
+            for profile in profiles where !profile.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                profile.isActive = matched.contains(profile.id)
+            }
+            if context.hasChanges {
+                do {
+                    try context.save()
+                } catch {
+                    context.rollback()
+                    profiles = try context.fetch(
+                        FetchDescriptor<HostProfile>(sortBy: [SortDescriptor(\.displayOrder)])
+                    )
+                    throw error
+                }
+            }
+            liveSnapshot = live
+        } catch {
+            liveSnapshot = nil
+            lastError = message(for: error)
+        }
     }
 
     func refresh() { reload() }
@@ -222,15 +284,17 @@ final class HostsManager {
         guard acceptsMutations else { return }
         profile.isActive = active
         await scheduleApply()
+        if let lastError { host?.showToast(.failure(lastError)) }
     }
 
     /// Edit the system portion of `/etc/hosts` in place. The edited content
     /// becomes the new prefix; AnyDoor's managed block (active profiles) is
     /// re-appended so user profiles survive a system-hosts edit.
-    func updateSystemHosts(_ newContent: String) async {
+    func updateSystemHosts(_ newContent: String, replacing expectedSystemContent: String) async {
         guard acceptsMutations else { return }
         // Serialize against any in-flight composed apply.
         await applyTask?.value
+        await waitForDirectOperationsToDrain()
         guard beginDirectOperation() else { return }
         defer { endDirectOperation() }
 
@@ -242,6 +306,7 @@ final class HostsManager {
             logger.warning("Backup creation failed: \(error)")
         }
         do {
+            guard systemHosts == expectedSystemContent else { throw HostsManagerError.liveChanged }
             try await applyContent(composedContent(systemPrefix: newContent))
             lastError = backupError != nil ? L(host, .hostsErrorBackupFailed) : nil
             reload()
@@ -257,6 +322,7 @@ final class HostsManager {
         guard acceptsMutations else { return }
         // Wait for any in-flight composed apply to finish before overwriting.
         await applyTask?.value
+        await waitForDirectOperationsToDrain()
         guard beginDirectOperation() else { return }
         defer { endDirectOperation() }
 
@@ -266,7 +332,9 @@ final class HostsManager {
         }
         do {
             let writer = makeWriter()
-            try await writer.write(original)
+            let expected = try readLive()
+            try await writer.write(original, replacing: expected)
+            liveSnapshot = nil
             for p in profiles { p.isActive = false }
             try? modelContainer?.mainContext.save()
             reload()
@@ -285,7 +353,10 @@ final class HostsManager {
         applyPending = true
         if applyTask == nil {
             applyTask = Task { @MainActor in
-                defer { self.applyTask = nil }
+                defer {
+                    self.applyTask = nil
+                    self.reload()
+                }
                 do {
                     try await Task.sleep(for: self.debounceInterval)
                     try Task.checkCancellation()
@@ -296,6 +367,8 @@ final class HostsManager {
                 }
                 // Serial retry loop: pick up any toggle that arrived during the write.
                 while self.applyPending && self.acceptsMutations && !Task.isCancelled {
+                    await self.waitForDirectOperationsToDrain()
+                    guard self.acceptsMutations, !Task.isCancelled else { break }
                     self.applyPending = false
                     self.lastApplySucceeded = await self.applyAndPersist()
                 }
@@ -314,6 +387,7 @@ final class HostsManager {
     private func endDirectOperation() {
         activeDirectOperations -= 1
         guard activeDirectOperations == 0 else { return }
+        reload()
         let waiters = operationDrainWaiters
         operationDrainWaiters.removeAll()
         for waiter in waiters {
@@ -322,9 +396,10 @@ final class HostsManager {
     }
 
     private func waitForDirectOperationsToDrain() async {
-        guard activeDirectOperations > 0 else { return }
-        await withCheckedContinuation { continuation in
-            operationDrainWaiters.append(continuation)
+        while activeDirectOperations > 0 {
+            await withCheckedContinuation { continuation in
+                operationDrainWaiters.append(continuation)
+            }
         }
     }
 
@@ -368,11 +443,14 @@ final class HostsManager {
     /// (used by `updateSystemHosts`). The managed block is always rebuilt from
     /// the currently active profiles.
     private func composedContent(systemPrefix: String?) throws -> String {
+        let live = try readLive()
+        guard let liveSnapshot else { throw HostsManagerError.unsafeManagedBlock }
+        guard live == liveSnapshot else { throw HostsManagerError.liveChanged }
         let parsed: HostsFile.Parsed
         if let systemPrefix {
             parsed = HostsFile.Parsed(prefix: systemPrefix, managed: nil, suffix: "")
         } else {
-            parsed = HostsFile.parse(try readLive())
+            parsed = HostsFile.parse(live)
         }
         let active = profiles
             .filter(\.isActive)
@@ -385,9 +463,12 @@ final class HostsManager {
     /// entirely when it would not change the file (e.g. toggling or deleting a
     /// blank profile) so the user is never prompted for a no-op.
     private func applyContent(_ content: String) async throws {
-        guard content != (try readLive()) else { return }
+        let live = try readLive()
+        guard live == liveSnapshot else { throw HostsManagerError.liveChanged }
+        guard content != live else { return }
         let writer = makeWriter()
-        try await writer.write(content)
+        try await writer.write(content, replacing: live)
+        liveSnapshot = content
     }
 
     /// Read the live `/etc/hosts`, mapping any failure to `liveReadFailed` so
@@ -409,7 +490,17 @@ final class HostsManager {
             switch error {
             case .liveReadFailed:
                 return L(host, .hostsErrorLiveReadFailed)
+            case .liveChanged:
+                return L(host, .hostsErrorLiveChanged)
+            case .unsafeManagedBlock:
+                return L(host, .hostsErrorUnsafeManagedBlock)
             }
+        }
+        if error as? HostsWriterError == .liveChanged {
+            return L(host, .hostsErrorLiveChanged)
+        }
+        if error as? HostsWriterError == .helperOutdated {
+            return L(host, .hostsErrorHelperOutdated)
         }
         return String(describing: error)
     }

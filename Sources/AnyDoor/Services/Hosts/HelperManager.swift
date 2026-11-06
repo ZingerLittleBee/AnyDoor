@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import ServiceManagement
 import OSLog
@@ -22,6 +23,7 @@ final class HelperManager {
     /// True only when the daemon is registered and enabled. Used to pick the
     /// production writer; false routes to the AppleScript fallback.
     func ensureRegistered() -> Bool {
+        guard AppIdentity.current == .production else { return false }
         switch readiness() {
         case .enabled:
             return true
@@ -39,6 +41,7 @@ final class HelperManager {
     }
 
     func readiness() -> Readiness {
+        guard AppIdentity.current == .production else { return .unavailable }
         switch service.status {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
@@ -55,6 +58,7 @@ final class HelperManager {
     /// Unregister the daemon (Hosts uninstall, once no other consumer needs
     /// it — see `PrivilegedHelperRelease`). No-op when it isn't registered.
     func unregister() throws {
+        guard AppIdentity.current == .production else { return }
         switch service.status {
         case .notRegistered, .notFound:
             return

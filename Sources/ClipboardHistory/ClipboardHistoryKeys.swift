@@ -1,3 +1,4 @@
+import AppIdentity
 import CryptoKit
 import Darwin
 import Foundation
@@ -56,7 +57,7 @@ protocol ClipboardHistoryMasterKeyStoring: Sendable {
 }
 
 struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
-    static let service = "dev.bybee.AnyDoor.ClipboardHistory"
+    static let service = AppIdentity.current.bundleIdentifier + ".ClipboardHistory"
     static let account = "device-master-key-v1"
 
     private let testingKeychainPath: String?

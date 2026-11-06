@@ -83,8 +83,8 @@ private final class CorePrivilegedHelper: PrivilegedHelperAccess {
         HelperManager.shared.openApprovalSettings()
     }
 
-    func writeHostsFile(_ content: String) async throws {
-        try await PrivilegedHelperCall.writeHosts(content)
+    func writeHostsFile(_ content: String, replacing expectedContent: String) async throws {
+        try await PrivilegedHelperCall.writeHosts(content, replacing: expectedContent)
     }
 
     func releaseIfUnneeded() throws {

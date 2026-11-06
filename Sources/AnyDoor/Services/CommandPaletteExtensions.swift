@@ -117,6 +117,8 @@ final class CommandPaletteExtensions {
                             subtitle: descriptor.subtitle,
                             symbol: descriptor.symbol,
                             isChecked: descriptor.isChecked,
+                            actionLabel: descriptor.actionLabel,
+                            staysOpen: descriptor.commit == .stayOpen,
                             perform: { await plugin.performPaletteOption(parent: parent, id: descriptor.id) }
                         )
                     }

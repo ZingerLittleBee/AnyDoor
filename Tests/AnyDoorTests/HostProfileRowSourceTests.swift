@@ -27,8 +27,8 @@ final class HostProfileRowSourceTests: XCTestCase {
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previous }
 
-        let dev = HostProfile(name: "Dev", isActive: true, displayOrder: 200)
-        let prod = HostProfile(name: "Prod", isActive: false, displayOrder: 100)
+        let dev = HostProfile(name: "Dev", content: "127.0.0.2 dev.test", isActive: true, displayOrder: 200)
+        let prod = HostProfile(name: "Prod", content: "192.0.2.10 prod.test", isActive: false, displayOrder: 100)
         let source = HostProfileRowSource(
             host: host,
             profiles: { [dev, prod] },
@@ -39,10 +39,11 @@ final class HostProfileRowSourceTests: XCTestCase {
         let rows = source.rows()
         XCTAssertEqual(rows.map(\.title), ["Prod", "Dev"])
         XCTAssertEqual(rows.map(\.id), [prod.id.uuidString, dev.id.uuidString])
-        XCTAssertEqual(rows.map(\.subtitle), [nil, "Active"])
+        XCTAssertEqual(rows.map(\.subtitle), ["192.0.2.10 prod.test", "127.0.0.2 dev.test"])
         XCTAssertEqual(rows.map(\.symbol), ["circle", "checkmark.circle.fill"])
         XCTAssertEqual(rows.map(\.actionLabel), ["Toggle", "Toggle"])
-        XCTAssertEqual(rows.map(\.commit), [.closeThenAct, .closeThenAct])
+        XCTAssertEqual(rows.map(\.isChecked), [false, true])
+        XCTAssertEqual(rows.map(\.commit), [.stayOpen, .stayOpen])
     }
 
     @MainActor

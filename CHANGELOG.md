@@ -6,6 +6,23 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The command palette reopens on the last options page, including Hosts and
+  Port Manager, preserving search and selection while refreshing its actions.
+- Hosts profiles in the command palette show IP/domain summaries and an
+  accent-filled icon while active. Return toggles a profile without closing
+  the palette, preserving the current filter and selection for repeated use.
+
+### Fixed
+
+- Hosts management recovers existing profiles from the local managed block,
+  shows system mappings, and preserves saved profiles with different content.
+  Ambiguous blocks and external file changes now block stale writes, including
+  changes made while an administrator authorization prompt is open.
+- Command palette search input stays aligned when entering and leaving a
+  submenu. Submenu rows have space below the search divider.
+
 ## [4.2.11] - 2026-10-29
 
 ### Changed

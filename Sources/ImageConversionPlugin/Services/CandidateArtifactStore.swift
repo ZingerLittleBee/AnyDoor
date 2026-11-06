@@ -1,3 +1,4 @@
+import AppIdentity
 import CryptoKit
 import Darwin
 import Foundation
@@ -16,7 +17,7 @@ final class CandidateArtifactStore {
     /// per session.
     static func baseDirectory(fileManager: FileManager = .default) -> URL {
         fileManager.temporaryDirectory
-            .appendingPathComponent("dev.bybee.AnyDoor-imageconversion", isDirectory: true)
+            .appendingPathComponent(AppIdentity.current.bundleIdentifier + "-imageconversion", isDirectory: true)
     }
 
     let sessionDirectory: URL

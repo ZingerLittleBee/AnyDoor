@@ -33,8 +33,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// rows the palette builds itself (a loading/error status row, and the row
     /// materialized after Argument input), never decoded from a plugin package.
     public enum CommitSemantics: Hashable, Sendable {
-        /// The palette dismisses first, then the row's plugin action runs
-        /// (e.g. toggling a hosts profile).
+        /// The palette dismisses first, then the row's plugin action runs.
         case closeThenAct
         /// The palette stays open while the row's plugin action runs.
         case stayOpen
@@ -72,8 +71,8 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// Localized label for the row's primary action, shown in the palette's
     /// footer (e.g. "Toggle"). Nil falls back to the host's generic label.
     public let actionLabel: String?
-    /// Whether the row shows a leading checkmark (second-level option lists
-    /// only — e.g. the active hosts profile, the current color format).
+    /// Whether the row is active/selected. Option lists show a trailing
+    /// checkmark; root rows and stay-open options also accent-fill the icon.
     public let isChecked: Bool
     /// Short status text rendered as a chip at the row's trailing edge
     /// (e.g. "开启" / "关闭" on a toggle-style row). Nil or empty shows none.

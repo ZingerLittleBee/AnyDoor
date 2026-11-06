@@ -29,10 +29,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// False only when focus already moved elsewhere on its own (a click in
     /// another app), where reactivating would snatch it back.
     private var restoresFocusOnClose = true
-    /// State retained across a close while the user sat on a plugin surface (a
-    /// pushed list or Detail), so the next plain open resumes there — hiding
-    /// the palette mid-read must not reset a v2ex post back to the root.
-    /// Validated against the live row-source registrations before reuse.
+    /// Browsing state retained across dismissal: option pages, pushed lists,
+    /// and Details resume on the next plain open. Their owners are validated
+    /// against live registrations, and option actions are rebuilt before reuse.
     private var retainedState: CommandPaletteState?
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
     /// the Applications section instantly so summoning the palette never blocks on
@@ -98,7 +97,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         fatalError("init(coder:) is not supported")
     }
 
-    /// Toggle visibility: hide if already showing, otherwise show fresh.
+    /// Toggle visibility: hide if showing, otherwise resume the last page.
     func toggle() {
         if window?.isVisible == true || activationGate.isWaiting {
             close()
@@ -168,9 +167,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let pickerState: CommandPaletteState
         var resumeRepair: CommandPaletteState.ResumeRepair?
         if case .root = initialMode, let resumed = takeRetainedState() {
-            // Resume the plugin surface the user was on when the palette closed.
-            // Root sections and row-source registrations are refreshed in place;
-            // the drill-in stack (list rows, Detail content) is kept as-is.
+            // Restore navigation and search, refresh root registrations, and
+            // rebuild transient options rather than reusing their old actions.
             pickerState = resumed
             pickerState.updateSections(
                 sections,
@@ -233,15 +231,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onDetailActiveChange: { [weak self] inDetail in
                 self?.setSearchFieldActive(!inDetail)
             },
-            onLevelChange: { [weak self] in
-                self?.relayoutSearchFieldSoon()
-            },
             registerSearchAnchor: { [weak self] anchor, text, placeholder in
                 self?.registerSearchAnchor(anchor, text: text, placeholder: placeholder)
             }
         )
 
-        let host = NSHostingView(rootView: view)
+        let host = CommandPaletteHostingView(rootView: view)
+        host.onLayout = { [weak self] in self?.layoutSearchField() }
         let contentView = Self.makeContentContainer(
             for: window,
             hostingView: host,
@@ -280,23 +276,29 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    /// The retained navigation to resume, if it is still presentable — every
-    /// row source it references must remain registered (a plugin uninstalled
-    /// while the palette was hidden invalidates it). Consumes the slot either
-    /// way, so a discarded navigation cannot resurface on a later open.
+    /// Every owner must remain registered. Consume the slot either way, so
+    /// an invalidated page cannot resurface on a later open.
     private func takeRetainedState() -> CommandPaletteState? {
         defer { retainedState = nil }
         guard let retained = retainedState,
-              retained.canResume(sourceExists: { CommandPaletteExtensions.shared.rowSource(for: $0) != nil })
+              retained.canResume(
+                sourceExists: { CommandPaletteExtensions.shared.rowSource(for: $0) != nil },
+                optionParentExists: { CommandPaletteExtensions.shared.isOptionParent($0) }
+              )
         else { return nil }
         return retained
     }
 
-    /// Re-kick the fetch a resumed level lost to the close (its pre-close task
-    /// dropped the result behind the visibility guard, so the level would show
-    /// its loading placeholder forever).
+    /// Rebuild options from live state or restart an interrupted plugin load.
     private func performResumeRepair(_ repair: CommandPaletteState.ResumeRepair) {
         switch repair {
+        case .reloadOptions(let parent, let selectedID, let generation):
+            guard let state else { return }
+            Task { [weak self, weak state] in
+                let options = await CommandPaletteExtensions.shared.options(for: parent)
+                guard let self, let state, self.state === state, self.window?.isVisible == true else { return }
+                state.updateOptions(options, selectedID: selectedID, generation: generation)
+            }
         case .reloadDetail(let sourceKey, let rowID, let title, let generation):
             resolveDetail(sourceKey: sourceKey, rowID: rowID, title: title, generation: generation)
         case .reloadList(let sourceKey, let listID, let generation):
@@ -386,20 +388,6 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         guard frame.width > 0, frame.height > 0 else { return }
         guard searchField.frame != frame else { return }
         searchField.frame = frame
-    }
-
-    /// Re-anchor the overlaid AppKit search field one runloop after a navigation
-    /// transition. A second level inserts a back-header row that shifts the
-    /// field's SwiftUI slot down; returning to the root removes it. The SwiftUI
-    /// anchor's own `layout()` fires only when its own size changes, not when an
-    /// ancestor moves it, so `registerSearchAnchor` alone leaves the field one
-    /// transition behind. Deferring a runloop lets SwiftUI finish its layout pass
-    /// so the anchor reports its new frame, mirroring `setSearchFieldActive`.
-    /// A hidden field (Detail) is repositioned harmlessly and stays hidden.
-    private func relayoutSearchFieldSoon() {
-        DispatchQueue.main.async { [weak self] in
-            self?.layoutSearchField()
-        }
     }
 
     private func focusSearchField() {
@@ -712,15 +700,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 if let options {
                     // Drill in even when empty (e.g. no listening ports) so the
                     // palette shows its empty state instead of silently closing.
-                    state.enterOptions(parentTitle: L(item.titleKey), options)
+                    state.enterOptions(parentTitle: L(item.titleKey), options, parent: item)
                 } else {
                     self.close() // not an option parent right now (brightness lost its display)
                 }
             }
         case .runOrConfirmOption(let id):
-            guard let option = state?.option(id: id) else { close(); return }
+            guard let state, let option = state.option(id: id) else { close(); return }
             if let confirmation = option.confirmation {
-                state?.requestConfirmation(confirmation, perform: option.perform)
+                state.requestConfirmation(confirmation, perform: option.perform)
+            } else if option.staysOpen {
+                Task { await state.performOptionKeepingOpen(id: id) }
             } else {
                 close()
                 Task { await option.perform() }
@@ -768,7 +758,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             }
         case .pluginRowStayOpen(let sourceKey, let rowID):
             guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
-            Task { await source.performRow(id: rowID) }
+            Task { [weak self] in
+                await source.performRow(id: rowID)
+                self?.refreshVisibleRows()
+            }
         case .pluginRowCloseThenAct(let sourceKey, let rowID):
             close()
             guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
@@ -1166,12 +1159,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func resetPresentation() {
-        // Retain the state when the user was on a plugin surface so the next
-        // open resumes there; any other level (root, options, argument input)
-        // resets as before. A nil state (already-reset re-entry from
-        // `windowWillClose`) leaves the retained slot untouched.
+        // Keep browsing pages, but reset root searches and argument inputs.
+        // A nil state on windowWillClose re-entry leaves the slot untouched.
         if let state {
-            retainedState = state.isResumablePluginSurface ? state : nil
+            retainedState = state.isResumablePage ? state : nil
         }
         activationGate.cancel()
         removeKeyMonitor()

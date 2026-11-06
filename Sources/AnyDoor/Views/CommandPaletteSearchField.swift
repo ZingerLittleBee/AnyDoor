@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+/// Synchronizes the native search overlay after SwiftUI has positioned its
+/// entire hierarchy, including ancestors of the search anchor.
+final class CommandPaletteHostingView<Content: View>: NSHostingView<Content> {
+    var onLayout: (() -> Void)?
+
+    override func layout() {
+        super.layout()
+        onLayout?()
+    }
+}
+
 /// Reserves the search field's SwiftUI layout slot. The real NSTextField is an
 /// AppKit sibling of the NSHostingView and is positioned over this anchor, so
 /// SwiftUI never owns its field editor or cursor rects.

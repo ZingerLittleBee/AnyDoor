@@ -40,6 +40,10 @@ let package = Package(
             capability: .buildTool(),
             path: "Plugins/XCStringsCompiler"
         ),
+        .target(
+            name: "AppIdentity",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         // Shared plugin interface (ADR-0005/0006/0007): the closed command
         // catalog, the Native Plugin protocol surface, and the palette row
         // descriptors. Lean by design — it must never depend on Core
@@ -76,6 +80,7 @@ let package = Package(
         .target(
             name: "ClipboardHistory",
             dependencies: [
+                "AppIdentity",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             swiftSettings: [
@@ -90,6 +95,7 @@ let package = Package(
         .target(
             name: "ImageConversionPlugin",
             dependencies: [
+                "AppIdentity",
                 .product(name: "libwebp", package: "libwebp-Xcode"),
                 "ImageCodec",
                 "PluginInterface",
@@ -137,6 +143,7 @@ let package = Package(
         .target(
             name: "HostsPlugin",
             dependencies: [
+                "AppIdentity",
                 "PluginInterface",
                 "PluginSupport",
             ],
@@ -147,6 +154,7 @@ let package = Package(
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
+                "AppIdentity",
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 "ClipboardHistory",
@@ -194,6 +202,7 @@ let package = Package(
         .testTarget(
             name: "AnyDoorTests",
             dependencies: [
+                "AppIdentity",
                 .product(name: "Clocks", package: "swift-clocks"),
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),

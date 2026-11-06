@@ -92,17 +92,29 @@ final class CommandPaletteOptionsTests: XCTestCase {
     func testHostsPluginOptionsCheckmarkAndEditAlwaysPresent() {
         // The hosts option builder lives in the plugin module now; ids stay
         // "hosts.<uuid>" / "hosts.edit" exactly as before the extraction.
-        let active = HostProfile(name: "Dev", isActive: true)
-        let inactive = HostProfile(name: "Prod", isActive: false)
-        let options = HostsPaletteOptions.options(profiles: [active, inactive])
+        let active = HostProfile(name: "Dev", content: """
+            # Development mappings
+
+            127.0.0.2\tapi.example.test alias.example.test # API
+            ::1 ipv6.example.test
+            # 192.0.2.9 disabled.example.test
+            """, isActive: true)
+        let inactive = HostProfile(name: "Prod", content: "# No mappings yet\n  ", isActive: false)
+        let options = HostsPaletteOptions.options(
+            profiles: [active, inactive], systemHosts: "# System\n127.0.0.1 localhost\n::1 localhost\n"
+        )
 
         XCTAssertEqual(options.count, 3)
         XCTAssertEqual(options[0].title, "Dev")
         XCTAssertEqual(options[0].id, "hosts.\(active.id.uuidString)")
         XCTAssertTrue(options[0].isChecked)
+        XCTAssertEqual(options[0].subtitle, "127.0.0.2 api.example.test alias.example.test · ::1 ipv6.example.test")
         XCTAssertEqual(options[1].title, "Prod")
         XCTAssertFalse(options[1].isChecked)
+        XCTAssertNil(options[1].subtitle)
+        XCTAssertEqual(options.map(\.commit), [.stayOpen, .stayOpen, .closeThenAct])
         XCTAssertEqual(options.last?.id, "hosts.edit")
+        XCTAssertEqual(options.last?.subtitle, "127.0.0.1 localhost · ::1 localhost")
 
         XCTAssertEqual(HostsPaletteOptions.options(profiles: []).map(\.id),
                        ["hosts.edit"])
@@ -298,6 +310,102 @@ final class CommandPaletteOptionsTests: XCTestCase {
         ])
         state.query = "3000"
         XCTAssertEqual(state.flatEntries.map(\.id), ["option:port.42.3000"])
+    }
+
+    @MainActor
+    func testOptionsResumeRefreshesActionsAndPreservesSearchAndSelection() async throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        var performed = ""
+        state.query = "hosts"
+        state.enterOptions(parentTitle: "Hosts", [
+            CommandPaletteOption(id: "a", title: "Host Alpha", symbol: "circle", perform: {}),
+            CommandPaletteOption(id: "b", title: "Host Beta", symbol: "circle", perform: { performed = "old" }),
+        ], parent: .hostsManager)
+        state.query = "host"
+        state.select(entryID: "option:b")
+
+        guard case .reloadOptions(let parent, let selectedID, let generation)? = state.prepareForResume() else {
+            return XCTFail("resuming an option page must rebuild its live options")
+        }
+        XCTAssertEqual(parent, .hostsManager)
+        XCTAssertFalse(state.isAtRoot)
+        XCTAssertNil(state.option(id: "b"), "old actions must not run while refreshing")
+
+        state.updateOptions([
+            CommandPaletteOption(id: "new", title: "Host New", symbol: "circle", perform: {}),
+            CommandPaletteOption(id: "a", title: "Host Alpha", symbol: "circle", perform: {}),
+            CommandPaletteOption(id: "b", title: "Host Beta", symbol: "circle", isChecked: true,
+                                 perform: { performed = "fresh" }),
+        ], selectedID: selectedID, generation: generation)
+
+        XCTAssertEqual(state.query, "host")
+        XCTAssertEqual(state.commitSelection()?.id, "option:b")
+        let option = try XCTUnwrap(state.option(id: "b"))
+        XCTAssertTrue(option.isChecked)
+        await option.perform()
+        XCTAssertEqual(performed, "fresh")
+        state.popLevel()
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertEqual(state.query, "hosts", "the back stack survives reopening")
+    }
+
+    @MainActor
+    func testOptionsResumeRequiresAnAvailableParent() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let registry = CommandPaletteExtensions()
+        state.enterOptions(parentTitle: "Hosts", sampleOptions(), parent: .hostsManager)
+        registry.registerOptionParent(for: .hostsManager, CommandPaletteOptionParent(buildOptions: { [] }))
+        XCTAssertTrue(state.canResume(sourceExists: { _ in false }, optionParentExists: registry.isOptionParent))
+
+        registry.unregisterOptionParent(for: .hostsManager)
+        XCTAssertFalse(state.canResume(sourceExists: { _ in true }, optionParentExists: registry.isOptionParent))
+
+        guard case .reloadOptions(_, let selectedID, let generation)? = state.prepareForResume() else {
+            return XCTFail("expected an options rebuild")
+        }
+        state.updateOptions(nil, selectedID: selectedID, generation: generation)
+        XCTAssertTrue(state.isAtRoot, "a capability lost during rebuilding cannot leave stale options")
+        XCTAssertNil(state.option(id: "a"))
+    }
+
+    @MainActor
+    func testOptionsResumeRejectsResultsFromAnEarlierPresentation() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Hosts", sampleOptions(), parent: .hostsManager)
+        guard case .reloadOptions(_, _, let oldGeneration)? = state.prepareForResume(),
+              case .reloadOptions(_, let selectedID, let generation)? = state.prepareForResume() else {
+            return XCTFail("both presentations must request fresh options")
+        }
+        state.updateOptions(sampleOptions(), selectedID: selectedID, generation: generation)
+        state.updateOptions(nil, selectedID: nil, generation: oldGeneration)
+        XCTAssertFalse(state.isAtRoot, "an earlier failed rebuild cannot dismiss the current page")
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:a", "option:b"])
+
+        state.popToRoot()
+        state.enterOptions(parentTitle: "Another page", [])
+        state.updateOptions(sampleOptions(), selectedID: nil, generation: generation)
+        XCTAssertTrue(state.flatEntries.isEmpty, "a late rebuild cannot replace a different page")
+    }
+
+    @MainActor
+    func testLateOptionActionDoesNotReplaceANewDrillIn() async {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let registry = CommandPaletteExtensions()
+        registry.registerOptionParent(for: .hostsManager, CommandPaletteOptionParent(buildOptions: {
+            [CommandPaletteOption(id: "stale", title: "Stale", symbol: "circle", perform: {})]
+        }))
+        state.enterOptions(parentTitle: "Hosts", [
+            CommandPaletteOption(id: "toggle", title: "Toggle", symbol: "circle", staysOpen: true, perform: {
+                state.popLevel()
+                state.enterOptions(parentTitle: "Hosts", self.sampleOptions(), parent: .hostsManager)
+                state.query = "bet"
+            }),
+        ], parent: .hostsManager)
+
+        await state.performOptionKeepingOpen(id: "toggle", extensions: registry)
+
+        XCTAssertEqual(state.query, "bet")
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:b"])
     }
 
     @MainActor
