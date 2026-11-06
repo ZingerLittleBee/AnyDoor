@@ -15,6 +15,44 @@ enum HostsFile {
         var suffix: String
     }
 
+    enum RecoveryError: Error { case ambiguousMarkers }
+
+    /// Recover every managed line, including comments and unnamed legacy data.
+    /// Ambiguous boundaries must never be used as a basis for a rewrite.
+    static func managedProfiles(in raw: String) throws -> [(name: String?, content: String)] {
+        let markers = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0 == beginMarker || $0 == endMarker }
+        guard !markers.isEmpty else { return [] }
+        guard markers == [beginMarker, endMarker], let managed = parse(raw).managed else {
+            throw RecoveryError.ambiguousMarkers
+        }
+        var profiles: [(name: String?, content: String)] = []
+        var name: String?
+        var lines: [String] = []
+        for line in managed.components(separatedBy: "\n") {
+            if line.hasPrefix("# --- "), line.hasSuffix(" ---"), line.count > 10 {
+                let content = lines.joined(separator: "\n")
+                if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    profiles.append((name, content))
+                } else if name != nil {
+                    throw RecoveryError.ambiguousMarkers
+                }
+                name = String(line.dropFirst(6).dropLast(4))
+                lines = []
+            } else {
+                lines.append(line)
+            }
+        }
+        let content = lines.joined(separator: "\n")
+        if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            profiles.append((name, content))
+        } else if name != nil {
+            throw RecoveryError.ambiguousMarkers
+        }
+        return profiles
+    }
+
     /// Split raw hosts text. When the markers are absent or malformed (begin
     /// without a following end), the whole file is treated as system prefix.
     static func parse(_ raw: String) -> Parsed {

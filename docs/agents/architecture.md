@@ -87,6 +87,14 @@ store. A failed move reports `.storeRelocationFailed` (Retry only, never Reset) 
 the pre-v2 sweeps as a contract. **Keep the AnyDoor.store path when changing ModelConfiguration**,
 otherwise unrelated user data appears "lost".
 
+The separately installed `AnyDoor Dev.app` is the sole exception to the production
+namespace: `AppIdentity.current` selects `dev.bybee.AnyDoor.Dev` for its exact
+bundle ID. Its SwiftData store, clipboard store and master key, plugin files,
+Hosts backup, sync state and credentials, and favicon cache are independent.
+Bare SwiftPM processes retain the production paths. The development app cannot
+use or change registration of the production privileged helper. See
+[isolated development installation](../development.md#isolated-development-installation).
+
 ### Clipboard Sync
 
 `ClipboardHistoryModule` owns local participation, selected tags, encrypted outbox,
@@ -1030,10 +1038,11 @@ replaces the document wholesale (content, cursor, and next actions) through the 
 and generation guard; appended pagination chunks' actions are ignored. A slow Detail/list result is
 keyed to the exact drill-in that requested it by a **generation token**, so A→back→B can never
 cross-populate — appended Detail chunks ride the same token. **Invariant:** each drill-in level
-shifts the SwiftUI slot of the overlaid AppKit search field, so any new navigation level **must bump
-`CommandPaletteState.navigationRevision`** — the controller re-anchors the field
-(`relayoutSearchFieldSoon`) and shows/hides it off that revision; without the bump the field lands
-one transition behind.
+**must bump `CommandPaletteState.navigationRevision`** to invalidate stale asynchronous work.
+The overlaid AppKit search field follows its SwiftUI slot after every
+`CommandPaletteHostingView.layout()` pass, including ancestor-only movements when a back header
+appears or disappears. A deferred navigation callback is not a layout-completion guarantee.
+Detail entry/exit separately hides or restores the native search field and its focus.
 
 ### Script Plugin Dev Plugin mode (ticket 023)
 
@@ -1136,7 +1145,12 @@ without singletons; the commit-intent classifier takes the registry as an inject
 second-level search matches title **and** subtitle (so a port number filters the port list).
 `CommandPaletteWindowController` lists Brightness (only with an external DDC display), Port Manager,
 and Hosts (while its plugin is installed), drills in on commit (entering even an empty options array
-so it shows the empty state rather than closing), runs an option then closes. `Esc` runs
+so it shows the empty state rather than closing), and normally runs an option then closes.
+Plugin options declaring `stayOpen` run in place and rebuild their current level after completion,
+preserving the query and selected row; a navigation-generation guard rejects stale refreshes.
+Hosts profile rows use this behavior at both levels, show IP/domain summaries, and fill their icon
+tile with the accent color while active (the drill-in also retains a checkmark). Edit Hosts still
+closes the palette before opening its editor. `Esc` runs
 `CommandPaletteState.handleEscape()` (a testable policy returning `.clearedQuery` / `.poppedToRoot`
 / `.dismiss`): a non-empty query clears first at either level, then an empty query pops to root from
 the second level or dismisses at the root (empty-query `Backspace` also pops). Navigation frames
@@ -1185,19 +1199,23 @@ command and row-source registrations. Preserve the root query, but discard drill
 may retain option closures owned by the plugin that just disappeared. Do not limit lifecycle
 publication to PanelStore and hotkeys.
 
-### Command Palette plugin-surface resume
+### Command Palette page resume
 
-Closing the palette while the user sits on a plugin surface (a pushed list or markdown Detail)
-retains the `CommandPaletteState`, and the next plain root open resumes that navigation instead of
-resetting — hiding the palette mid-read must not lose a v2ex post. Only these two levels qualify
-(value-only payloads); options/argument levels still reset, and a hotkey-summoned argument-input
-open never resumes. Before reuse the controller validates every row source the retained stack
-references against the live registrations (`canResume` — a plugin uninstalled while hidden discards
-the navigation), refreshes root sections/row sources in place, and `prepareForResume()` drops any
-pending confirmation, bumps `navigationRevision` (so pre-close in-flight results are
-generation-rejected), clears `isFetchingMore`, and reports a mid-load level for the controller to
-re-fetch (`resolveDetail`/`resolveList`). A resume landing directly in a Detail must hide the
-overlaid AppKit search field explicitly — `onDetailActiveChange` only fires on a change.
+Closing the palette on a registered options page (such as Hosts or Port Manager), pushed plugin
+list, or markdown Detail retains `CommandPaletteState` for the next plain open. The page, search,
+selection, and back stack survive within the running process; restarting AnyDoor clears this cache.
+Root searches and argument-input levels still reset, and a hotkey-summoned argument-input open never
+resumes. Before reuse, `canResume` validates every referenced row source and option parent against
+the live registrations; uninstalling an owner while hidden discards its navigation.
+
+Root sections and row-source registrations refresh in place. `prepareForResume()` drops pending
+confirmations, bumps `navigationRevision` to reject pre-close async results, and clears
+`isFetchingMore`. Options always rebuild from live state, preserving search and selection by row ID;
+old action closures are removed before the rebuild starts, and a now-unavailable capability returns
+to the root. Loaded plugin lists and Details keep their content; interrupted initial loads restart
+through `resolveDetail`/`resolveList`. A resume landing directly in a Detail must hide the overlaid
+AppKit search field explicitly because `onDetailActiveChange` only fires on a change. Escape/back
+navigation remains unchanged: leaving a page before dismissal means that page is no longer cached.
 
 ## Windows and localization
 
@@ -1271,13 +1289,29 @@ editor needs the overlay style.
 
 ### Privileged hosts writes
 
+`HostsManager.reload()` reconciles the live AnyDoor managed block with SwiftData, recovering
+missing named profiles and unnamed legacy content without writing `/etc/hosts`. Matching profiles
+keep their IDs; saved bodies with different content remain available but inactive. Live mapping
+order is retained. Entries outside the block remain in System Hosts, whose palette row shows their
+IP/domain summary and opens the editor. Missing, repeated, or ambiguous block boundaries expose
+the complete file in System Hosts and block composed writes rather than guessing ownership.
+
+Every write carries the exact file snapshot used to compose it. The manager rejects stale snapshots,
+and both privileged writers compare again immediately before replacement, after authorization.
+System editor drafts also retain their original system content so a refresh cannot silently make an
+old draft overwrite external edits. A failed comparison leaves the file untouched and refreshes the
+list. These checks do not provide filesystem-wide locking against arbitrary external editors racing
+the final comparison and replacement; avoid simultaneous edits in another hosts tool.
+
 When the XPC helper is enabled, `/etc/hosts` is written by `AnyDoorHostsHelper` (a privileged
 LaunchDaemon installed via `SMAppService.daemon`); `HostsManager` (in the `HostsPlugin` target)
 coordinates, and the plugin reaches the helper only through the `PrivilegedHelperAccess` host
 capability (`PluginHostServices.privilegedHelper`, implemented by `CorePluginHost` over
 `HelperManager` + the `PrivilegedHelperCall.writeHosts` XPC call). When the helper is **not**
 enabled (ad-hoc/dev builds, or before approval), the plugin falls back to `AppleScriptWriter`, which
-copies a temp file over `/etc/hosts` via an administrator-authorized `do shell script`.
+compares a baseline and copies a temp file over `/etc/hosts` via an administrator-authorized
+`do shell script`. Helper protocol v3 adds the expected content to the write request; a stale daemon
+is rejected, never retried through an unconditional-write path.
 `HostsManager.makeWriter` re-resolves the writer on every write from the capability's `readiness()`
 (`PrivilegedHostsWriter` when `.enabled`, else `AppleScriptWriter`), so helper approval takes effect
 without a relaunch (`MockHostsWriter`, defined in the `AnyDoorTests` target, is the sanctioned test

@@ -13,6 +13,7 @@ settings. This table supplies entry paths rather than duplicating dependency ver
 | Target | Entry path and role |
 | --- | --- |
 | `AnyDoor` | [AppDelegate.swift](../../Sources/AnyDoor/AppDelegate.swift), host composition and startup |
+| `AppIdentity` | [AppIdentity.swift](../../Sources/AppIdentity/AppIdentity.swift), production/development storage and credential namespaces |
 | `ClipboardHistory` | [ClipboardHistoryModule.swift](../../Sources/ClipboardHistory/ClipboardHistoryModule.swift), the encrypted history module's public boundary |
 | `PluginInterface` | [NativePlugin.swift](../../Sources/PluginInterface/NativePlugin.swift), [PluginHostServices.swift](../../Sources/PluginInterface/PluginHostServices.swift), shared contracts |
 | `PluginSupport` | [Sources/PluginSupport/](../../Sources/PluginSupport/), shared implementations and UI helpers |

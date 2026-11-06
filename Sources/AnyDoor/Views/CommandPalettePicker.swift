@@ -33,10 +33,6 @@ struct CommandPalettePicker: View {
     /// hide the overlaid AppKit search field (no text input in Detail) and
     /// restore focus on return.
     let onDetailActiveChange: (Bool) -> Void
-    /// Notifies the controller after any navigation-position change (drill-in or
-    /// pop) so it can re-anchor the overlaid AppKit search field below the new
-    /// back header — or back at the top when returning to the root.
-    let onLevelChange: () -> Void
     let registerSearchAnchor: (CommandPaletteSearchAnchorView, String, String) -> Void
 
     var body: some View {
@@ -104,9 +100,6 @@ struct CommandPalettePicker: View {
         }
         .onChange(of: state.isInDetail) { _, inDetail in
             onDetailActiveChange(inDetail)
-        }
-        .onChange(of: state.navigationRevision) { _, _ in
-            onLevelChange()
         }
         .focusEffectDisabled()
     }
@@ -322,6 +315,7 @@ struct CommandPalettePicker: View {
         case .pluginRow(_, let descriptor):
             return descriptor.actionLabel ?? L(.commandPaletteActionSelect)
         case .paletteOption(let id):
+            if let label = state.option(id: id)?.actionLabel { return label }
             if state.option(id: id)?.role == .destructive { return L(.commandPaletteActionQuit) }
             return L(.commandPaletteActionSelect)
         case .builtin(let item):
@@ -506,6 +500,7 @@ struct CommandPalettePicker: View {
                 }
                 .overlayScrollers()
             }
+            .padding(.top, 8)
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in
@@ -816,6 +811,7 @@ private struct CommandPaletteRow: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .help(subtitle)
             }
         }
     }
@@ -877,10 +873,11 @@ private struct CommandPaletteRow: View {
     private static let iconSize: CGFloat = 26
     private static let quicklinkIconSize: CGFloat = 22
 
-    /// True when this row is a toggle that is currently on. Drives the
-    /// accent-filled tile behind the icon.
+    /// Active toggles, including stay-open options, share the accent-filled tile.
     private var isToggleOn: Bool {
-        entry.kind == .toggle && entry.toggleState == true
+        if let option { return option.staysOpen && option.isChecked }
+        if case .pluginRow(_, let descriptor) = entry.source { return descriptor.isChecked }
+        return entry.kind == .toggle && entry.toggleState == true
     }
 
     /// Rows step down a level until hovered or selected, so the selected row

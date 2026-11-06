@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import HostsHelperShared
 import PluginInterface
@@ -22,17 +23,28 @@ enum PrivilegedHelperCall {
     /// the root helper over XPC. Core infrastructure (amended ADR-0005) — the
     /// Hosts plugin reaches it through `PluginHostServices.privilegedHelper`.
     /// Throws `PrivilegedHelperCallError`.
-    static func writeHosts(_ content: String) async throws {
+    static func writeHosts(_ content: String, replacing expectedContent: String) async throws {
+        // Old daemons do not implement conditional writes. Refuse the operation
+        // rather than ever falling back to their unconditional selector.
         try await run(
             makeError: { PrivilegedHelperCallError(message: $0) },
             request: { proxy, finish in
-                proxy.writeHosts(content) { errorMessage in finish(errorMessage) }
+                proxy.helperVersion { version in
+                    finish(version == PrivilegedHelperConstants.helperVersion
+                        ? nil : "helper_outdated")
+                }
+            }
+        )
+        try await run(
+            makeError: { PrivilegedHelperCallError(message: $0) },
+            request: { proxy, finish in
+                proxy.writeHosts(content, replacing: expectedContent) { errorMessage in finish(errorMessage) }
             }
         )
     }
 
     /// Sends a forced-shutdown request to the root helper over XPC. Reused
-    /// approval: requires the same enabled LaunchDaemon as `writeHosts(_:)`.
+    /// approval: requires the same enabled LaunchDaemon as `writeHosts`.
     static func shutDown() async throws {
         try await run(
             makeError: { ShutdownError.failed($0) },
@@ -51,6 +63,9 @@ enum PrivilegedHelperCall {
         makeError: @escaping @Sendable (String) -> Error,
         request: (_ proxy: PrivilegedHelperProtocol, _ finish: @escaping @Sendable (String?) -> Void) -> Void
     ) async throws {
+        guard AppIdentity.current == .production else {
+            throw makeError("the production helper is unavailable to AnyDoor Dev")
+        }
         // NSXPCConnection's resume/invalidate/proxy calls are thread-safe, so it
         // is safe to touch from the timeout task and the connection's own
         // handler queues; the language can't prove that, hence the opt-out.

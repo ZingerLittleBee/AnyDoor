@@ -6107,6 +6107,27 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法读取系统 hosts 文件" } }
       }
     },
+    "hosts.error.liveChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The hosts file changed outside AnyDoor. Nothing was overwritten. Refresh and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "hosts 文件已被其他程序修改，本次未覆盖。请刷新后重试。" } }
+      }
+    },
+    "hosts.error.helperOutdated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The background helper is outdated. Nothing was written. Restart macOS and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "后台帮助程序版本过旧，本次未写入。请重启 macOS 后重试。" } }
+      }
+    },
+    "hosts.error.unsafeManagedBlock": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The managed block could not be safely recovered. The complete file is shown in System Hosts; writes are blocked to protect existing entries." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法安全恢复托管块。完整文件已显示在系统 Hosts 中，已阻止写入以保护现有条目。" } }
+      }
+    },
     "hosts.error.noBackup": {
       "extractionState": "manual",
       "localizations": {
@@ -6215,6 +6236,13 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "New Profile" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "新配置" } }
+      }
+    },
+    "hosts.profile.recoveredName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Recovered Hosts" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "恢复的 Hosts" } }
       }
     },
     "hosts.system.openHelp": {

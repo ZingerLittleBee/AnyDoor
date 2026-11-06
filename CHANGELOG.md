@@ -17,6 +17,11 @@ versioning.
 
 ### Changed
 
+- The command palette reopens on the last options page, including Hosts and
+  Port Manager, preserving search and selection while refreshing its actions.
+- Hosts profiles in the command palette show IP/domain summaries and an
+  accent-filled icon while active. Return toggles a profile without closing
+  the palette, preserving the current filter and selection for repeated use.
 - Move automatic clipboard-tag sharing from Config Sync to selected-tag Clipboard
   Sync. Keep local identities and memberships, and retain tags in explicit manual
   backups. Older clients and historical sync files may still contain previously
@@ -24,6 +29,12 @@ versioning.
 
 ### Fixed
 
+- Hosts management recovers existing profiles from the local managed block,
+  shows system mappings, and preserves saved profiles with different content.
+  Ambiguous blocks and external file changes now block stale writes, including
+  changes made while an administrator authorization prompt is open.
+- Command palette search input stays aligned when entering and leaving a
+  submenu. Submenu rows have space below the search divider.
 - Fix a startup crash when opening local app data in builds with Clipboard Sync
   support.
 - Scrolling into Applications in the command palette no longer stutters the

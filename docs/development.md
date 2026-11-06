@@ -13,6 +13,7 @@ Use those files rather than a copied toolchain-version list.
 | --- | --- |
 | Compile the app with the installed SDK appearance stamp | `make build` |
 | Hot-reload development (requires `watchexec`) | `make` |
+| Install the isolated local test app | `make install-dev` |
 | Build the signed/ad-hoc installed identity | `make install` |
 | Build and test with the first-party warning gate | `make check` |
 | Validate documentation and navigation | `make docs-check` |
@@ -91,3 +92,43 @@ the tooling behavior tests. The lightweight [documentation workflow](../.github/
 runs even when the Swift workflow skips a docs-only change. It checks links and
 paths, not semantic agreement between a PRD, an ADR amendment, and the source;
 review those together when changing behavior.
+
+## Isolated development installation
+
+Use `make install-dev` for daily-account feature testing. Set
+`DEV_SIGNING_IDENTITY` in the ignored `.env` file to a valid local signing
+identity from `security find-identity -v -p codesigning`. An Apple Development
+identity is suitable for this separate app. The installer requires a real
+identity, verifies the staged signature, and refuses a later build that does
+not satisfy the installed development app's designated requirement. Quit
+AnyDoor Dev before rebuilding; the daily AnyDoor can stay running.
+
+| Boundary | Daily app | Development app |
+| --- | --- | --- |
+| Installation | `/Applications/AnyDoor.app` | `/Applications/AnyDoor Dev.app` |
+| Bundle ID and Application Support directory name | `dev.bybee.AnyDoor` | `dev.bybee.AnyDoor.Dev` |
+| Preferences and Keychain service prefix | Production identity | Development identity |
+| Menu-bar item | Icon | Icon with `Dev` label |
+| Sparkle and `anydoor://` registration | Enabled | Disabled |
+| Privileged helper | Production daemon | Not packaged, registered, used, or unregistered |
+
+`AppIdentity` selects the development namespace only for the exact installed
+development bundle ID. Both the daily app and bare SwiftPM processes keep the
+existing pinned production paths. The development app starts with empty
+settings, profiles, plugins, and clipboard history; it never imports the daily
+app's data or credentials automatically. Grant its Accessibility, Screen
+Recording, and Automation permissions separately as needed.
+
+This isolates app-owned state, not the operating system. Clipboard contents,
+global hotkeys, and `/etc/hosts` remain shared. Hosts writes use the existing
+administrator-prompt fallback; toggling a development profile still changes
+the machine's real hosts file. Do not test the two apps' Hosts configurations
+concurrently or enable Config Sync against the daily app's sync destination.
+Destructive recovery and historical-version tests still require the disposable
+account in [native UI testing](testing/native-ui.md).
+
+`make install` still replaces the daily app. Matching a bundle ID or Team ID
+alone does not preserve its permissions: the candidate must satisfy the old
+designated requirement, keep the appropriate entitlements, and not downgrade
+the user's data schema. Do not replace a Developer ID release with an Apple
+Development or ad-hoc build. Public releases remain CI-only.

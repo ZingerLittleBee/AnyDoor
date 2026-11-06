@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 
 /// One-time snapshot of the user's original `/etc/hosts`, stored in App Support.
@@ -17,7 +18,7 @@ struct HostsBackupStore {
         let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport
-            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent(AppIdentity.current.bundleIdentifier, isDirectory: true)
             .appendingPathComponent("hosts-backup", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return HostsBackupStore(backupDirectory: dir, readLiveHosts: {

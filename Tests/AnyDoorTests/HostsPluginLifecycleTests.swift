@@ -26,7 +26,7 @@ private final class RecordingPluginHost: PluginHostServices {
 
         func openApprovalSettings() {}
 
-        func writeHostsFile(_ content: String) async throws {}
+        func writeHostsFile(_ content: String, replacing expectedContent: String) async throws {}
 
         func releaseIfUnneeded() throws {
             if let releaseError { throw releaseError }
@@ -310,11 +310,40 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
         XCTAssertEqual(Array(options.map(\.title).dropLast()), ["Dev", "Prod"])
         XCTAssertEqual(options.map(\.isChecked), [true, false, false])
+        XCTAssertEqual(options.map(\.subtitle), ["1.2.3.4 dev", "5.6.7.8 prod", "127.0.0.1 localhost"])
+        XCTAssertEqual(options.map(\.staysOpen), [true, true, false])
+        XCTAssertNotNil(options[1].actionLabel)
         XCTAssertEqual(options.last?.id, HostsPaletteOptions.editOptionID)
 
-        // Committing a profile option toggles it through the plugin hook.
-        await options[0].perform()
-        XCTAssertFalse(f.manager.profiles[0].isActive)
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Hosts", options, parent: .hostsManager)
+        // Match both rows by their mapping contents, not their names. Toggling
+        // the second row must preserve both the filter and the selection.
+        state.query = "."
+        state.selectedIndex = 1
+        let originalLevel = state.level
+        let generation = state.navigationRevision
+        for active in [true, false, true] {
+            await state.performOptionKeepingOpen(id: options[1].id, extensions: f.palette)
+            XCTAssertEqual(f.manager.profiles[1].isActive, active)
+            XCTAssertEqual(state.option(id: options[1].id)?.isChecked, active)
+            XCTAssertTrue(f.manager.profiles[0].isActive)
+            XCTAssertEqual(state.query, ".")
+            XCTAssertEqual(state.selectedIndex, 1)
+            XCTAssertEqual(state.navigationRevision, generation)
+            XCTAssertFalse(state.isAtRoot)
+            XCTAssertEqual(f.writer.lastWritten?.contains("5.6.7.8 prod"), active)
+        }
+        XCTAssertNotEqual(state.level, originalLevel, "state changes must invalidate the rendered options")
+
+        // A rejected system write must refresh the rolled-back state, not
+        // leave the palette claiming that the profile was disabled.
+        f.writer.errorToThrow = CocoaError(.fileWriteNoPermission)
+        await state.performOptionKeepingOpen(id: options[1].id, extensions: f.palette)
+        XCTAssertTrue(f.manager.profiles[1].isActive)
+        XCTAssertEqual(state.option(id: options[1].id)?.isChecked, true)
+        XCTAssertEqual(state.selectedIndex, 1)
+        XCTAssertEqual(state.query, ".")
     }
 
     // MARK: - Backup import

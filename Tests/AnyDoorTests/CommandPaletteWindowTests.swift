@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 
 @testable import AnyDoor
@@ -244,5 +245,58 @@ final class CommandPaletteWindowTests: XCTestCase {
         anchor.layout()
 
         XCTAssertTrue(observedAnchor === anchor)
+    }
+
+    func testSearchFieldTracksNavigationWhileEditing() async throws {
+        let panel = CommandPaletteWindowController.makePanel()
+        let coordinator = CommandPaletteSearchField.Coordinator()
+        let field = CommandPaletteSearchField.make(coordinator: coordinator)
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        weak var anchor: CommandPaletteSearchAnchorView?
+        let positionField = { [weak panel] in
+            guard let anchor, let container = panel?.contentView else { return }
+            field.frame = anchor.convert(anchor.bounds, to: container)
+        }
+        let view = CommandPalettePicker(
+            state: state, onSelect: { _ in }, appMenu: { _ in nil },
+            onCancel: {}, onConfirm: {}, onRefreshRates: {},
+            onOpenDetailLink: { _ in }, onLoadDetailMore: {}, onLoadListMore: {},
+            onDetailAction: { _ in }, onRetryDetail: {}, onRetryList: {},
+            onDetailActiveChange: { _ in },
+            registerSearchAnchor: { newAnchor, _, _ in
+                anchor = newAnchor
+                positionField()
+            }
+        )
+        let host = CommandPaletteHostingView(rootView: view)
+        host.onLayout = positionField
+        panel.contentView = CommandPaletteWindowController.makeContentContainer(
+            for: panel, hostingView: host, searchField: field
+        )
+        defer { panel.close() }
+        host.layoutSubtreeIfNeeded()
+        positionField()
+        let rootFrame = field.frame
+        panel.makeFirstResponder(field)
+        _ = try XCTUnwrap(field.currentEditor())
+
+        for _ in 0..<3 {
+            state.enterOptions(parentTitle: "Hosts", [
+                CommandPaletteOption(id: "edit", title: "Edit hosts", symbol: "pencil", perform: {})
+            ])
+            host.layoutSubtreeIfNeeded()
+            let slot = try XCTUnwrap(anchor)
+            let container = try XCTUnwrap(panel.contentView)
+            let expected = slot.convert(slot.bounds, to: container)
+            XCTAssertNotEqual(expected.minY, rootFrame.minY)
+            XCTAssertEqual(field.frame, expected, "The input must follow the slot below the back header")
+            let editor = try XCTUnwrap(field.currentEditor())
+            XCTAssertTrue(field.frame.contains(editor.convert(editor.bounds, to: container)))
+
+            state.popLevel()
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(field.frame, rootFrame, "Returning to root must restore the input position")
+            try await Task.sleep(for: .milliseconds(20))
+        }
     }
 }

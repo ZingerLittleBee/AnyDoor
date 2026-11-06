@@ -52,7 +52,7 @@ enum CommandPaletteCommitIntent: Equatable {
     case runBuiltin(BuiltinItem)
     case copyToClipboard(text: String, toast: CopyToast)
     /// A plugin row that declared `.closeThenAct`: dismiss, then run it
-    /// through its owning `PluginRowSource` (e.g. toggle a hosts profile).
+    /// through its owning `PluginRowSource`.
     case pluginRowCloseThenAct(sourceKey: PluginRowSourceKey, rowID: String)
     /// A plugin row materialized after Argument input: dismiss, then run its
     /// plugin action with the captured argument text.
