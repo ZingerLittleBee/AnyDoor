@@ -1,4 +1,5 @@
 import Cocoa
+import AppIdentity
 import PluginInterface
 import PluginSupport
 import SwiftData
@@ -34,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             in: .userDomainMask
         ).first!
         let storeDirectory = appSupport.appendingPathComponent(
-            "dev.bybee.AnyDoor",
+            AppIdentity.current.bundleIdentifier,
             isDirectory: true
         )
         return ClipboardHistoryLifecycle.production(
@@ -77,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.clipboardHistoryModule = clipboardHistoryModule
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            let storeDir = appSupport.appendingPathComponent(AppIdentity.current.bundleIdentifier, isDirectory: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives
@@ -116,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        AskForPermission.configure(appName: "AnyDoor")
+        AskForPermission.configure(appName: AppIdentity.current.displayName)
         ClipboardPreferences.mergeDefaultExclusionsIfNeeded()
         ClipboardSelfWrites.configure(
             clipboardHistoryModule.pasteboardSelfWrites

@@ -1053,23 +1053,27 @@ final class CommandPalettePluginStateTests: XCTestCase {
     // MARK: - Resume across palette close/reopen
 
     @MainActor
-    func testOnlyPluginSurfacesAreResumable() {
+    func testPagesAreResumableButTransientInputsAreNot() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        XCTAssertFalse(state.isResumablePluginSurface, "the root resets as before")
+        XCTAssertFalse(state.isResumablePage, "the root resets as before")
 
         state.enterOptions(parentTitle: "Keep Awake", [])
-        XCTAssertFalse(state.isResumablePluginSurface, "options carry presentation closures")
+        XCTAssertFalse(state.isResumablePage, "anonymous options cannot be rebuilt")
+        state.popToRoot()
+
+        state.enterOptions(parentTitle: "Hosts", [], parent: .hostsManager)
+        XCTAssertTrue(state.isResumablePage, "registered option pages must survive dismissal")
         state.popToRoot()
 
         state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "set", title: "Set")
-        XCTAssertFalse(state.isResumablePluginSurface)
+        XCTAssertFalse(state.isResumablePage)
         state.popToRoot()
 
         state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
-        XCTAssertTrue(state.isResumablePluginSurface)
+        XCTAssertTrue(state.isResumablePage)
 
         state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
-        XCTAssertTrue(state.isResumablePluginSurface)
+        XCTAssertTrue(state.isResumablePage)
     }
 
     @MainActor

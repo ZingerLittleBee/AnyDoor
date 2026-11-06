@@ -42,14 +42,16 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
 
     // MARK: PrivilegedHelperProtocol
 
-    func writeHosts(_ content: String, withReply reply: @escaping @Sendable (String?) -> Void) {
-        guard content.utf8.count <= PrivilegedHelperConstants.maxPayloadBytes else {
+    func writeHosts(_ content: String, replacing expectedContent: String,
+                    withReply reply: @escaping @Sendable (String?) -> Void) {
+        guard content.utf8.count <= PrivilegedHelperConstants.maxPayloadBytes,
+              expectedContent.utf8.count <= PrivilegedHelperConstants.maxPayloadBytes else {
             reply("payload too large"); return
         }
         writeQueue.async {
             do {
-                try Self.atomicWrite(content)
-                reply(nil)
+                let written = try Self.atomicWrite(content, replacing: expectedContent)
+                reply(written ? nil : "hosts_changed")
             } catch {
                 reply(String(describing: error))
             }
@@ -77,8 +79,8 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
     }
 
     /// Write to a temp file in /etc (same filesystem so rename is atomic), then
-    /// fsync, set root:wheel 0644, and rename over /etc/hosts.
-    private static func atomicWrite(_ content: String) throws {
+    /// fsync, set root:wheel 0644, compare the baseline, and rename over /etc/hosts.
+    private static func atomicWrite(_ content: String, replacing expectedContent: String) throws -> Bool {
         let dir = "/etc"
         let template = "\(dir)/.hosts.anydoor.XXXXXX"
         var bytes = Array(template.utf8) + [0]
@@ -100,8 +102,12 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
         fchown(fd, 0, 0)            // root:wheel
         fchmod(fd, 0o644)
         close(fd)
+        guard try Data(contentsOf: URL(fileURLWithPath: "\(dir)/hosts")) == Data(expectedContent.utf8) else {
+            return false
+        }
         guard rename(tmpPath, "\(dir)/hosts") == 0 else {
             throw NSError(domain: "hosts", code: Int(errno))
         }
+        return true
     }
 }

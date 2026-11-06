@@ -12,7 +12,7 @@ private final class StubLocalizationHost: PluginHostServices {
         func readiness() -> PrivilegedHelperReadiness { .unavailable }
         func ensureRegistered() -> Bool { false }
         func openApprovalSettings() {}
-        func writeHostsFile(_ content: String) async throws {}
+        func writeHostsFile(_ content: String, replacing expectedContent: String) async throws {}
         func releaseIfUnneeded() throws {}
     }
 

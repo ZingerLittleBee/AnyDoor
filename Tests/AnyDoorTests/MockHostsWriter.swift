@@ -12,7 +12,7 @@ final class MockHostsWriter: HostsWriter, @unchecked Sendable {
     var lastWritten: String? { lock.withLock { _lastWritten } }
     var writeCount: Int { lock.withLock { _writeCount } }
 
-    func write(_ content: String) async throws {
+    func write(_ content: String, replacing expectedContent: String) async throws {
         if let errorToThrow { throw errorToThrow }
         lock.withLock {
             _lastWritten = content

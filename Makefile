@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := dev
-.PHONY: dev build check docs-check release-tools-check swift-release install uninstall sparkle-tools release release-dryrun
+.PHONY: dev build check docs-check release-tools-check swift-release install install-dev uninstall sparkle-tools release release-dryrun
 
 # The `swiftbuild` backend (the default since Swift 6.4) stamps the deployment
 # target into LC_BUILD_VERSION's `sdk` field instead of the real SDK version,
@@ -38,6 +38,10 @@ BINARY := .build/release/$(APP_NAME)
 RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
 
 LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
+
+# Isolated identity and storage; never replaces /Applications/AnyDoor.app.
+install-dev:
+	@bash scripts/install-dev.sh
 
 # Signs with SIGNING_IDENTITY (.env) when the certificate is present. An ad-hoc
 # signature has no team, so the app's designated requirement collapses to its

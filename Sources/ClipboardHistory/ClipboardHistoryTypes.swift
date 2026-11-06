@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 
 public extension Notification.Name {
@@ -190,8 +191,8 @@ public struct ClipboardHistoryCaptureSource: Equatable, Sendable {
     )
 
     public static let anyDoor = Self(
-        bundleIdentifier: "dev.bybee.AnyDoor",
-        displayName: "AnyDoor",
+        bundleIdentifier: AppIdentity.current.bundleIdentifier,
+        displayName: AppIdentity.current.displayName,
         provenance: .declared
     )
 

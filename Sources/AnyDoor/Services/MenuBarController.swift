@@ -1,3 +1,4 @@
+import AppIdentity
 import AppKit
 import ClipboardHistory
 import SwiftData
@@ -40,6 +41,12 @@ final class MenuBarController {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.image = Self.iconImage(named: MenuBarIcon.currentName)
+            button.toolTip = AppIdentity.current.displayName
+            button.setAccessibilityLabel(AppIdentity.current.displayName)
+            if AppIdentity.current == .development {
+                button.title = "Dev"
+                button.imagePosition = .imageLeading
+            }
             button.target = self
             button.action = #selector(statusItemClicked)
             // Receive both left- and right-clicks; we dispatch in the handler.

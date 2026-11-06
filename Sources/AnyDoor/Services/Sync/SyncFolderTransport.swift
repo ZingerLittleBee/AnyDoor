@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import os
 import OSLog
@@ -292,7 +293,7 @@ struct SyncLocalStateStore: Sendable {
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
         return support
-            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent(AppIdentity.current.bundleIdentifier, isDirectory: true)
             .appendingPathComponent("Sync", isDirectory: true)
             .appendingPathComponent("local-state.json")
     }

@@ -26,6 +26,7 @@ struct HostsEditorView: View {
     @State private var mode: Mode = .view
     @State private var draftContent: String = ""
     @State private var draftSystemContent: String = ""
+    @State private var originalSystemContent: String = ""
     @State private var renamingID: UUID?
     @State private var renameText: String = ""
     @FocusState private var renameFieldFocused: Bool
@@ -85,6 +86,19 @@ struct HostsEditorView: View {
             detail
         }
         .safeAreaInset(edge: .top) { HelperApprovalBanner() }
+        .safeAreaInset(edge: .bottom) {
+            if let error = manager.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+        }
+        .onAppear { loadDraft() }
+        .onChange(of: manager.systemHosts) { _, _ in
+            if mode == .view { loadDraft() }
+        }
         // Switching files always returns to the safe read-only view mode.
         .onChange(of: selection) { _, _ in
             mode = .view
@@ -197,8 +211,9 @@ struct HostsEditorView: View {
                 editorArea(text: $draftSystemContent)
                 HStack {
                     modeButton {
-                        await manager.updateSystemHosts(draftSystemContent)
+                        await manager.updateSystemHosts(draftSystemContent, replacing: originalSystemContent)
                         draftSystemContent = manager.systemHosts
+                        originalSystemContent = manager.systemHosts
                     }
                     Spacer()
                     Button(L(host, .hostsActionOpenDefaultEditor)) { HostsFileOpener.open() }
@@ -211,7 +226,6 @@ struct HostsEditorView: View {
                 Button(L(host, .hostsActionRestore), role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
                 Button(L(host, .hostsActionCancel), role: .cancel) {}
             }
-            .onAppear { draftSystemContent = manager.systemHosts }
         }
     }
 
@@ -256,7 +270,10 @@ struct HostsEditorView: View {
 
     private func loadDraft() {
         draftContent = selectedProfile?.content ?? ""
-        if case .system = selection { draftSystemContent = manager.systemHosts }
+        if case .system = selection {
+            draftSystemContent = manager.systemHosts
+            originalSystemContent = manager.systemHosts
+        }
     }
 
     private func addProfile() {

@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import OSLog
 import Security
@@ -39,7 +40,7 @@ private final class KeychainValueCache: @unchecked Sendable {
 struct TranslationKeychainStore {
     private let service: String
 
-    init(service: String = "dev.bybee.AnyDoor.translation") {
+    init(service: String = AppIdentity.current.bundleIdentifier + ".translation") {
         self.service = service
     }
 

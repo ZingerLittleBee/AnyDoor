@@ -1,3 +1,4 @@
+import AppIdentity
 import AppKit
 import Foundation
 
@@ -179,7 +180,7 @@ actor QuicklinkFaviconCache {
     private nonisolated static func defaultCacheDirectory() -> URL {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent(AppIdentity.current.bundleIdentifier, isDirectory: true)
             .appendingPathComponent("Favicons", isDirectory: true)
     }
 

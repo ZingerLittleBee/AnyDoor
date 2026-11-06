@@ -43,10 +43,12 @@ final class HostProfileRowSource: PluginRowSource {
                 PluginRowDescriptor(
                     id: profile.id.uuidString,
                     title: profile.name,
-                    subtitle: profile.isActive ? L(host, .commandPaletteHostsActive) : nil,
+                    subtitle: HostsPaletteOptions.contentSummary(for: profile.content)
+                        ?? (profile.isActive ? L(host, .commandPaletteHostsActive) : nil),
                     symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
                     actionLabel: L(host, .commandPaletteActionToggle),
-                    commit: .closeThenAct
+                    isChecked: profile.isActive,
+                    commit: .stayOpen
                 )
             }
     }

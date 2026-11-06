@@ -29,8 +29,8 @@ public final class PluginHostContext {
 
     public var helper: any PrivilegedHelperAccess { services.privilegedHelper }
 
-    public func writeHostsFileViaHelper(_ content: String) async throws {
-        try await services.privilegedHelper.writeHostsFile(content)
+    public func writeHostsFileViaHelper(_ content: String, replacing expectedContent: String) async throws {
+        try await services.privilegedHelper.writeHostsFile(content, replacing: expectedContent)
     }
 
     public func runAppleScript(_ source: String) async throws -> String {

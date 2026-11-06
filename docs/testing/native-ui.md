@@ -10,8 +10,10 @@ and the user's task boundaries when operating the UI.
    the exact app bundle or executable being tested. Quit another AnyDoor
    instance only when the task authorizes it; otherwise mark launch-dependent
    cases blocked. A single running instance prevents ambiguous UI ownership.
-2. Use the requested artifact. For local installed-app testing, build with
-   `make install` when installation is authorized. For local window appearance
+2. Use the requested artifact. For isolated local feature testing, use
+   `make install-dev` when installation is authorized; grant the separate
+   development identity its own permissions. `make install` replaces the daily
+   app and must not be used as a shortcut. For local window appearance
    work, `make build` records the real SDK version. See
    [Development](../development.md) for the build and toolchain lanes.
 3. Inspect `otool -l <executable>` and record the `LC_BUILD_VERSION` `minos` and
