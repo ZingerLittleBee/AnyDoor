@@ -5155,6 +5155,13 @@
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "hosts 文件已被其他程序修改，本次未覆盖。请刷新后重试。" } }
       }
     },
+    "hosts.error.helperApprovalRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Allow AnyDoor in System Settings > General > Login Items & Extensions, then try again. Nothing was written." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请在系统设置 > 通用 > 登录项与扩展中允许 AnyDoor 后重试。本次未写入。" } }
+      }
+    },
     "hosts.error.helperOutdated": {
       "extractionState": "manual",
       "localizations": {

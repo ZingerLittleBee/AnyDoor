@@ -16,6 +16,8 @@ versioning.
 
 ### Fixed
 
+- Hosts writes recover an outdated background helper after an app update by
+  re-registering the bundled helper and checking its protocol before writing.
 - Hosts management recovers existing profiles from the local managed block,
   shows system mappings, and preserves saved profiles with different content.
   Ambiguous blocks and external file changes now block stale writes, including
