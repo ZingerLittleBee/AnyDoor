@@ -16,6 +16,9 @@ versioning.
 
 ### Fixed
 
+- Scrolling into Applications in the command palette no longer stutters the
+  first time after AnyDoor launches. App icons are now prepared in the
+  background instead of while the list scrolls.
 - Hosts writes recover an outdated background helper after an app update by
   re-registering the bundled helper and checking its protocol before writing.
   Transient registration failures are retried, and pending registration is
