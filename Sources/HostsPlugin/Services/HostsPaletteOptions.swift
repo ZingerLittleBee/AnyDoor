@@ -3,7 +3,7 @@ import PluginInterface
 
 /// Pure builder for the Hosts drill-in options in the command palette: one
 /// checkable row per profile (checkmark = active, committing toggles), plus
-/// an always-present "Edit hosts…" row that opens the editor window. Takes
+/// an always-present System Hosts row that opens the editor window. Takes
 /// already-fetched profiles so it unit tests without singletons.
 @MainActor
 enum HostsPaletteOptions {
@@ -15,24 +15,41 @@ enum HostsPaletteOptions {
 
     static func options(
         profiles: [HostProfile],
+        systemHosts: String = "",
         host: PluginHostContext? = nil
     ) -> [PluginRowDescriptor] {
         var options: [PluginRowDescriptor] = profiles.map { profile in
             PluginRowDescriptor(
                 id: optionID(for: profile),
                 title: profile.name,
+                subtitle: contentSummary(for: profile.content),
                 symbol: "list.bullet.rectangle",
+                actionLabel: L(host, .commandPaletteActionToggle),
                 isChecked: profile.isActive,
-                commit: .closeThenAct
+                commit: .stayOpen
             )
         }
         options.append(PluginRowDescriptor(
             id: editOptionID,
-            title: L(host, .commandPaletteHostsEdit),
-            symbol: "pencil",
+            title: L(host, .hostsSystemTitle),
+            subtitle: contentSummary(for: systemHosts),
+            symbol: "cpu",
+            actionLabel: L(host, .hostsActionEdit),
             commit: .closeThenAct
         ))
         return options
+    }
+
+    /// Show mappings rather than comment headers, keeping aliases and IPv6
+    /// intact. The row truncates visually; its tooltip retains the full summary.
+    static func contentSummary(for content: String) -> String? {
+        let mappings = content.components(separatedBy: .newlines).compactMap { line -> String? in
+            let mapping = line.prefix { $0 != "#" }
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+            return mapping.isEmpty ? nil : mapping
+        }
+        return mappings.isEmpty ? nil : mappings.joined(separator: " · ")
     }
 
     /// The profile behind a committed option id, or nil for non-profile ids.

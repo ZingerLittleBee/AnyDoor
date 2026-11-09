@@ -1,3 +1,4 @@
+import AppIdentity
 import AppKit
 import Foundation
 import Observation
@@ -92,7 +93,7 @@ final class ScriptPluginRegistry {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return appSupport
-            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent(AppIdentity.current.bundleIdentifier, isDirectory: true)
             .appendingPathComponent("ScriptPlugins", isDirectory: true)
     }
 

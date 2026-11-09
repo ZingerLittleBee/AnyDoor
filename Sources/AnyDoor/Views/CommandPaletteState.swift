@@ -99,13 +99,35 @@ final class CommandPaletteState {
     /// state behind in a side slot.
     struct OptionsLevel: Equatable {
         let parentTitle: String
+        let parent: BuiltinItem?
         let optionsByID: [String: CommandPaletteOption]
         let entries: [PanelEntry]
 
+        init(parentTitle: String, parent: BuiltinItem?, options: [CommandPaletteOption]) {
+            self.parentTitle = parentTitle
+            self.parent = parent
+            self.optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
+            self.entries = options.enumerated().map { index, option in
+                PanelEntry.paletteRow(
+                    source: .paletteOption(id: option.id),
+                    displayOrder: Double(index),
+                    title: option.title,
+                    subtitle: option.subtitle,
+                    symbol: option.symbol
+                )
+            }
+        }
+
         /// Options carry `@MainActor` perform closures, so equality compares
-        /// the visible identity: same parent and same option rows.
+        /// their presentation, including state changes on otherwise identical rows.
         static func == (lhs: OptionsLevel, rhs: OptionsLevel) -> Bool {
-            lhs.parentTitle == rhs.parentTitle && lhs.entries.map(\.id) == rhs.entries.map(\.id)
+            lhs.parentTitle == rhs.parentTitle && lhs.parent == rhs.parent && lhs.entries == rhs.entries
+                && lhs.optionsByID.allSatisfy { id, option in
+                    guard let other = rhs.optionsByID[id] else { return false }
+                    return option.isChecked == other.isChecked && option.role == other.role
+                        && option.actionLabel == other.actionLabel && option.staysOpen == other.staysOpen
+                        && option.confirmation == other.confirmation
+                }
         }
     }
 
@@ -189,21 +211,40 @@ final class CommandPaletteState {
     }
 
     /// Push a second level built from `options`; resets the search + selection.
-    func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
-        let entries = options.enumerated().map { index, option in
-            PanelEntry.paletteRow(
-                source: .paletteOption(id: option.id),
-                displayOrder: Double(index),
-                title: option.title,
-                subtitle: option.subtitle,
-                symbol: option.symbol
-            )
-        }
+    func enterOptions(parentTitle: String, _ options: [CommandPaletteOption], parent: BuiltinItem? = nil) {
         push(.options(OptionsLevel(
             parentTitle: parentTitle,
-            optionsByID: Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) }),
-            entries: entries
+            parent: parent,
+            options: options
         )))
+    }
+
+    /// Refresh from the action's resulting state, including a failed toggle's
+    /// rollback. Never replace a level the user navigated to while it was running.
+    func performOptionKeepingOpen(id: String, extensions: CommandPaletteExtensions = .shared) async {
+        guard case .options(let current) = level,
+              let option = current.optionsByID[id], option.staysOpen else { return }
+        let generation = navigationRevision
+        await option.perform()
+        guard navigationRevision == generation, let parent = current.parent,
+              let options = await extensions.options(for: parent),
+              navigationRevision == generation else { return }
+        updateOptions(options, selectedID: commitSelection()?.id, generation: generation)
+    }
+
+    /// Replace options with fresh actions without losing the current search or
+    /// selection. A missing parent capability returns to the root instead of
+    /// leaving obsolete actions available. Late results cannot replace a new page.
+    func updateOptions(_ options: [CommandPaletteOption]?, selectedID: String?, generation: Int) {
+        guard generation == navigationRevision, case .options(let current) = level else { return }
+        guard let options else {
+            popToRoot()
+            return
+        }
+        let parent = current.parent
+        level = .options(OptionsLevel(parentTitle: current.parentTitle, parent: parent, options: options))
+        selectedIndex = selectedID.flatMap { id in flatEntries.firstIndex { $0.id == id } }
+            ?? min(selectedIndex, max(0, flatEntries.count - 1))
     }
 
     /// Push argument-input mode for a Search Template Quicklink. `keyword`, when
@@ -531,41 +572,37 @@ final class CommandPaletteState {
 
     // MARK: - Resume across palette close/reopen
 
-    /// Whether the current navigation position is a plugin surface (a pushed
-    /// list or markdown Detail) worth retaining when the palette closes, so
-    /// the next open resumes there instead of resetting to the root. Only
-    /// these two levels qualify: they hold value-only payloads, whereas the
-    /// options and argument levels carry closures tied to the dismissed
-    /// presentation and reset as before.
-    var isResumablePluginSurface: Bool {
+    /// Browsing pages survive dismissal within this process. Options require a
+    /// parent that can rebuild their actions; transient argument inputs reset.
+    var isResumablePage: Bool {
         switch level {
         case .detail, .list: return true
-        case .root, .options, .argumentInput, .pluginArgumentInput: return false
+        case .options(let options): return options.parent != nil
+        case .root, .argumentInput, .pluginArgumentInput: return false
         }
     }
 
-    /// Whether a retained navigation can actually be presented again: it must
-    /// sit on a plugin surface, and every row source it references — the
-    /// current level and the list frames stacked under it — must still be
-    /// registered. A plugin uninstalled while the palette was hidden therefore
-    /// discards the retained navigation instead of resuming into levels that
-    /// can no longer answer.
-    func canResume(sourceExists: (PluginRowSourceKey) -> Bool) -> Bool {
-        guard isResumablePluginSurface else { return false }
+    /// Every source and option parent in the retained navigation must still be
+    /// registered. Uninstalling an owner while hidden invalidates its pages.
+    func canResume(
+        sourceExists: (PluginRowSourceKey) -> Bool,
+        optionParentExists: (BuiltinItem) -> Bool = { _ in false }
+    ) -> Bool {
+        guard isResumablePage else { return false }
         return (navigationStack.map(\.level) + [level]).allSatisfy { frame in
             switch frame {
             case .detail(let detailLevel): return sourceExists(detailLevel.sourceKey)
             case .list(let listLevel): return sourceExists(listLevel.sourceKey)
-            case .root, .options, .argumentInput, .pluginArgumentInput: return true
+            case .options(let options): return options.parent.map(optionParentExists) ?? false
+            case .root, .argumentInput, .pluginArgumentInput: return true
             }
         }
     }
 
-    /// A level the controller must re-request after resuming: its async build
-    /// never resolved while the palette was hidden (the resolve task's
-    /// visibility guard dropped the result), so the level would show its
-    /// loading placeholder forever without a fresh fetch.
+    /// A level the controller must rebuild after resuming: options always need
+    /// fresh state/actions, while lists and Details only retry interrupted loads.
     enum ResumeRepair: Equatable {
+        case reloadOptions(parent: BuiltinItem, selectedID: String?, generation: Int)
         case reloadDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String, generation: Int)
         case reloadList(sourceKey: PluginRowSourceKey, listID: String, generation: Int)
     }
@@ -574,12 +611,17 @@ final class CommandPaletteState {
     /// confirmation (its perform closure belongs to the dismissed presentation),
     /// bump the navigation revision so every pre-close in-flight result is
     /// rejected by its generation token, and clear the Detail fetching flag so
-    /// the bottom sentinel can re-arm. Returns the reload the controller must
-    /// kick when the palette closed while the current level was still loading.
+    /// the bottom sentinel can re-arm. Old options are removed before rebuilding
+    /// so a stale toggle or destructive action cannot run during the refresh.
     func prepareForResume() -> ResumeRepair? {
         pendingConfirmation = nil
         navigationRevision += 1
         switch level {
+        case .options(let options):
+            guard let parent = options.parent else { return nil }
+            let selectedID = commitSelection()?.id
+            level = .options(OptionsLevel(parentTitle: options.parentTitle, parent: parent, options: []))
+            return .reloadOptions(parent: parent, selectedID: selectedID, generation: navigationRevision)
         case .detail(var detailLevel):
             detailLevel.isFetchingMore = false
             level = .detail(detailLevel)
@@ -600,7 +642,7 @@ final class CommandPaletteState {
                 )
             }
             return nil
-        case .root, .options, .argumentInput, .pluginArgumentInput:
+        case .root, .argumentInput, .pluginArgumentInput:
             return nil
         }
     }

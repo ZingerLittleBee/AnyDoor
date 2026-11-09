@@ -6,11 +6,29 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The command palette reopens on the last options page, including Hosts and
+  Port Manager, preserving search and selection while refreshing its actions.
+- Hosts profiles in the command palette show IP/domain summaries and an
+  accent-filled icon while active. Return toggles a profile without closing
+  the palette, preserving the current filter and selection for repeated use.
+
 ### Fixed
 
 - Scrolling into Applications in the command palette no longer stutters the
   first time after AnyDoor launches. App icons are now prepared in the
   background instead of while the list scrolls.
+- Hosts writes recover an outdated background helper after an app update by
+  re-registering the bundled helper and checking its protocol before writing.
+  Transient registration failures are retried, and pending registration is
+  restored before later Hosts writes or forced Scheduled Shutdown requests.
+- Hosts management recovers existing profiles from the local managed block,
+  shows system mappings, and preserves saved profiles with different content.
+  Ambiguous blocks and external file changes now block stale writes, including
+  changes made while an administrator authorization prompt is open.
+- Command palette search input stays aligned when entering and leaving a
+  submenu. Submenu rows have space below the search divider.
 
 ## [4.2.11] - 2026-10-29
 

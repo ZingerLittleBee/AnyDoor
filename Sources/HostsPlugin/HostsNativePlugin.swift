@@ -82,7 +82,9 @@ public final class HostsNativePlugin: NativePlugin {
     public func paletteOptions(for parent: BuiltinItem) async -> [PluginRowDescriptor] {
         guard parent == .hostsManager else { return [] }
         manager.reload()
-        return HostsPaletteOptions.options(profiles: manager.profiles, host: hostContext)
+        return HostsPaletteOptions.options(
+            profiles: manager.profiles, systemHosts: manager.systemHosts, host: hostContext
+        )
     }
 
     public func performPaletteOption(parent: BuiltinItem, id: String) async {

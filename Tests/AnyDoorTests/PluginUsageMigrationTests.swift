@@ -22,7 +22,7 @@ private final class MigrationPluginHost: PluginHostServices {
         }
 
         func openApprovalSettings() {}
-        func writeHostsFile(_ content: String) async throws {}
+        func writeHostsFile(_ content: String, replacing expectedContent: String) async throws {}
         func releaseIfUnneeded() throws {}
     }
 

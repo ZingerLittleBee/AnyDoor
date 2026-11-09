@@ -23,6 +23,9 @@ struct CommandPaletteOption: Identifiable {
     let symbol: String
     let role: Role
     let isChecked: Bool
+    let actionLabel: String?
+    /// Run in place and rebuild the current options instead of dismissing.
+    let staysOpen: Bool
     /// When non-nil, committing this option asks for confirmation (showing this
     /// descriptor) before running `perform`.
     let confirmation: CommandPaletteConfirmation?
@@ -35,6 +38,8 @@ struct CommandPaletteOption: Identifiable {
         symbol: String,
         role: Role = .normal,
         isChecked: Bool = false,
+        actionLabel: String? = nil,
+        staysOpen: Bool = false,
         confirmation: CommandPaletteConfirmation? = nil,
         perform: @escaping @MainActor () async -> Void
     ) {
@@ -44,6 +49,8 @@ struct CommandPaletteOption: Identifiable {
         self.symbol = symbol
         self.role = role
         self.isChecked = isChecked
+        self.actionLabel = actionLabel
+        self.staysOpen = staysOpen
         self.confirmation = confirmation
         self.perform = perform
     }

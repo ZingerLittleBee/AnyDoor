@@ -17,6 +17,7 @@ private final class GatedHostsWriter: HostsWriter, @unchecked Sendable {
     var isSuspended: Bool { lock.withLock { _isSuspended } }
 
     func gateNextWrite() { lock.withLock { _gateNext = true } }
+    func replaceLiveContents(_ content: String) { lock.withLock { _lastWritten = content } }
 
     /// Resume the suspended write, optionally failing it.
     func release(throwing error: Error? = nil) {
@@ -29,7 +30,7 @@ private final class GatedHostsWriter: HostsWriter, @unchecked Sendable {
         if let error { cont?.resume(throwing: error) } else { cont?.resume() }
     }
 
-    func write(_ content: String) async throws {
+    func write(_ content: String, replacing expectedContent: String) async throws {
         let gated = lock.withLock {
             let g = _gateNext
             _gateNext = false
@@ -43,7 +44,10 @@ private final class GatedHostsWriter: HostsWriter, @unchecked Sendable {
                 }
             }
         }
-        lock.withLock { _lastWritten = content }
+        try lock.withLock {
+            if let live = _lastWritten, live != expectedContent { throw HostsWriterError.liveChanged }
+            _lastWritten = content
+        }
     }
 }
 
@@ -68,6 +72,168 @@ final class HostsManagerTests: XCTestCase {
                                host: host)
         mgr.bootstrap(modelContainer: container)
         return (mgr, container)
+    }
+
+    func test_recoversLiveProfilesWithoutWritingAndPreservesOtherEntriesOnToggle() async throws {
+        let original = """
+        127.0.0.1 localhost
+        # Keep this system comment
+        192.0.2.10 local.example alias.example
+
+        \(HostsFile.beginMarker)
+        # --- Work ---
+        # Keep this profile comment
+        198.51.100.7 work.example
+        # --- IPv6 ---
+        2001:db8::4 ipv6.example another.example # Keep this inline comment
+        \(HostsFile.endMarker)
+
+        203.0.113.9 tail.example
+
+        """
+        let writer = MockHostsWriter()
+        let (manager, container) = try makeManager(
+            writer: writer, live: { writer.lastWritten ?? original }
+        )
+
+        XCTAssertEqual(manager.profiles.map(\.name), ["Work", "IPv6"])
+        XCTAssertTrue(manager.profiles.allSatisfy(\.isActive))
+        XCTAssertTrue(manager.systemHosts.contains("192.0.2.10 local.example alias.example"))
+        XCTAssertTrue(manager.systemHosts.contains("203.0.113.9 tail.example"))
+        XCTAssertEqual(writer.writeCount, 0, "Reading must not rewrite the live file")
+        let ids = manager.profiles.map(\.id)
+        manager.reload()
+        manager.bootstrap(modelContainer: container)
+        XCTAssertEqual(manager.profiles.map(\.id), ids, "Refresh and relaunch must not duplicate recovery")
+
+        let work = try XCTUnwrap(manager.profiles.first { $0.name == "Work" })
+        await manager.setActive(work, false)
+        let written = try XCTUnwrap(writer.lastWritten)
+        XCTAssertFalse(written.contains("198.51.100.7 work.example"))
+        XCTAssertTrue(written.contains("2001:db8::4 ipv6.example another.example # Keep this inline comment"))
+        XCTAssertTrue(written.contains("# Keep this system comment\n192.0.2.10 local.example alias.example"))
+        XCTAssertTrue(written.contains("203.0.113.9 tail.example"))
+        XCTAssertEqual(manager.profiles.count, 2)
+        XCTAssertFalse(work.isActive)
+    }
+
+    func test_externalChangeAfterRefreshAbortsWriteAndRecoversNewEntries() async throws {
+        let writer = MockHostsWriter()
+        var live = "127.0.0.1 localhost\n"
+        let (manager, _) = try makeManager(writer: writer, live: { live })
+        manager.createProfile(name: "Local", content: "192.0.2.1 local.example")
+        let local = try XCTUnwrap(manager.profiles.first)
+        live += "\(HostsFile.beginMarker)\n# --- Other app ---\n198.51.100.8 external.example\n\(HostsFile.endMarker)\n"
+
+        await manager.setActive(local, true)
+
+        XCTAssertEqual(writer.writeCount, 0, "A stale list must never replace a newer hosts file")
+        XCTAssertFalse(local.isActive)
+        XCTAssertNotNil(manager.lastError)
+        XCTAssertTrue(manager.profiles.contains { $0.content.contains("198.51.100.8 external.example") && $0.isActive })
+    }
+
+    func test_recoveryRetainsSavedContentAndLiveOrderIncludingUnnamedEntries() async throws {
+        let writer = MockHostsWriter()
+        var live = "127.0.0.1 localhost\n"
+        let (manager, _) = try makeManager(writer: writer, live: { writer.lastWritten ?? live })
+        manager.createProfile(name: "First", content: "192.0.2.1 shared.example")
+        manager.createProfile(name: "Second", content: "192.0.2.2 shared.example")
+        manager.createProfile(name: "Changed", content: "192.0.2.3 old.example")
+        let savedIDs = manager.profiles.map(\.id)
+        live += """
+        \(HostsFile.beginMarker)
+        # An unnamed legacy entry
+        2001:db8::9 legacy.example
+        # --- Second ---
+        192.0.2.2 shared.example
+        # --- First ---
+        192.0.2.1 shared.example
+        # --- Changed ---
+        198.51.100.5 new.example
+        # --- Changed ---
+        198.51.100.6 another.example
+        \(HostsFile.endMarker)
+
+        """
+        manager.reload()
+        let old = try XCTUnwrap(manager.profiles.first { $0.id == savedIDs[2] })
+        XCTAssertFalse(old.isActive)
+        XCTAssertEqual(old.content, "192.0.2.3 old.example", "Recovery must never replace a saved body")
+        XCTAssertEqual(manager.profiles.count, 6)
+        XCTAssertEqual(manager.profiles.first { $0.name == "First" }?.id, savedIDs[0])
+        XCTAssertEqual(manager.profiles.first { $0.name == "Second" }?.id, savedIDs[1])
+        manager.reload()
+        XCTAssertEqual(manager.profiles.count, 6)
+        XCTAssertEqual(writer.writeCount, 0)
+
+        await manager.setActive(old, true)
+        let written = try XCTUnwrap(writer.lastWritten)
+        XCTAssertTrue(written.contains("# An unnamed legacy entry\n2001:db8::9 legacy.example"))
+        XCTAssertTrue(written.contains("198.51.100.5 new.example"))
+        XCTAssertTrue(written.contains("198.51.100.6 another.example"))
+        XCTAssertTrue(written.contains("192.0.2.3 old.example"))
+        let second = try XCTUnwrap(written.range(of: "192.0.2.2 shared.example"))
+        let first = try XCTUnwrap(written.range(of: "192.0.2.1 shared.example"))
+        XCTAssertLessThan(second.lowerBound, first.lowerBound, "Live mapping precedence must be preserved")
+    }
+
+    func test_ambiguousManagedBlocksRemainVisibleAndCannotBeOverwritten() async throws {
+        let block = "\(HostsFile.beginMarker)\n# --- Live ---\n192.0.2.7 live.example\n\(HostsFile.endMarker)\n"
+        for live in [block + block, "\(HostsFile.beginMarker)\n192.0.2.7 live.example\n", "\(HostsFile.endMarker)\n"] {
+            let writer = MockHostsWriter()
+            let (manager, _) = try makeManager(writer: writer, live: { live }, debounceInterval: .milliseconds(1))
+            XCTAssertEqual(manager.systemHosts, live)
+            manager.createProfile(name: "New", content: "198.51.100.1 new.example")
+            await manager.setActive(try XCTUnwrap(manager.profiles.first), true)
+            await manager.updateSystemHosts("127.0.0.1 localhost\n", replacing: live)
+            XCTAssertEqual(writer.writeCount, 0)
+            XCTAssertEqual(manager.systemHosts, live)
+            XCTAssertNotNil(manager.lastError)
+        }
+    }
+
+    func test_systemDraftCannotOverwriteExternalChangesEvenAfterARefresh() async throws {
+        let writer = MockHostsWriter()
+        var live = "127.0.0.1 localhost\n"
+        let (manager, _) = try makeManager(writer: writer, live: { live })
+        let original = manager.systemHosts
+        live += "198.51.100.99 external.example\n"
+        manager.reload()
+        await manager.updateSystemHosts(original + "192.0.2.9 draft.example\n", replacing: original)
+        XCTAssertEqual(writer.writeCount, 0)
+        XCTAssertEqual(manager.systemHosts, live)
+        XCTAssertNotNil(manager.lastError)
+    }
+
+    func test_externalChangeDuringAuthorizationAbortsAndRefreshDoesNotUndoPendingToggle() async throws {
+        let writer = GatedHostsWriter()
+        let (manager, _) = try makeManager(
+            writer: writer, live: { writer.lastWritten ?? "127.0.0.1 localhost\n" },
+            debounceInterval: .milliseconds(1)
+        )
+        manager.createProfile(name: "New", content: "192.0.2.9 new.example")
+        let profile = try XCTUnwrap(manager.profiles.first)
+        writer.gateNextWrite()
+        let activation = Task { @MainActor in await manager.setActive(profile, true) }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !writer.isSuspended, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        guard writer.isSuspended else {
+            await activation.value
+            return XCTFail("Writer did not reach authorization")
+        }
+        manager.reload()
+        XCTAssertTrue(profile.isActive)
+        let external = "127.0.0.1 localhost\n198.51.100.99 external.example\n"
+        writer.replaceLiveContents(external)
+        writer.release()
+        await activation.value
+        XCTAssertEqual(writer.lastWritten, external)
+        XCTAssertEqual(manager.systemHosts, external)
+        XCTAssertFalse(profile.isActive)
+        XCTAssertEqual(manager.lastError, HostsPlugin.L10n.Key.hostsErrorLiveChanged.rawValue)
     }
 
     func test_createProfile_persists_noSystemWrite() throws {
@@ -102,7 +268,7 @@ final class HostsManagerTests: XCTestCase {
 
     func test_activateProfile_composesAndWritesActiveContent() async throws {
         let mock = MockHostsWriter()
-        let (mgr, _) = try makeManager(writer: mock)
+        let (mgr, _) = try makeManager(writer: mock, live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
         mgr.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         let profile = mgr.profiles[0]
         await mgr.setActive(profile, true)
@@ -171,7 +337,7 @@ final class HostsManagerTests: XCTestCase {
                                        live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
         mgr.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         await mgr.setActive(mgr.profiles[0], true)
-        await mgr.updateSystemHosts("10.0.0.1 newsystem")
+        await mgr.updateSystemHosts("10.0.0.1 newsystem", replacing: mgr.systemHosts)
         let written = try XCTUnwrap(mock.lastWritten)
         XCTAssertTrue(written.contains("10.0.0.1 newsystem"))       // edited system content
         XCTAssertTrue(written.contains("1.2.3.4 dev.example.com"))  // managed block preserved
@@ -213,7 +379,10 @@ final class HostsManagerTests: XCTestCase {
 
     func test_prepareForDeactivationDrainsAStartedWrite() async throws {
         let writer = GatedHostsWriter()
-        let (manager, _) = try makeManager(writer: writer, debounceInterval: .milliseconds(1))
+        let (manager, _) = try makeManager(
+            writer: writer, live: { writer.lastWritten ?? "127.0.0.1 localhost\n" },
+            debounceInterval: .milliseconds(1)
+        )
         manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
         writer.gateNextWrite()
 

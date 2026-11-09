@@ -432,7 +432,7 @@ final class CommandPaletteTests: XCTestCase {
             return XCTFail("Expected a plugin row entry")
         }
         XCTAssertEqual(descriptor.id, dev.id.uuidString)
-        XCTAssertEqual(descriptor.commit, .closeThenAct)
+        XCTAssertEqual(descriptor.commit, .stayOpen)
     }
 
     @MainActor

@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import GRDB
 import SQLCipher
@@ -35,7 +36,7 @@ public actor ClipboardHistoryModule {
             ).first
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support")
-        return applicationSupport.appendingPathComponent("dev.bybee.AnyDoor")
+        return applicationSupport.appendingPathComponent(AppIdentity.current.bundleIdentifier)
     }
 
     var database: DatabasePool?

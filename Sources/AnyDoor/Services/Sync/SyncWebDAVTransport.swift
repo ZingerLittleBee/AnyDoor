@@ -1,3 +1,4 @@
+import AppIdentity
 import Foundation
 import OSLog
 import Security
@@ -192,7 +193,7 @@ struct SyncWebDAVCredentialStore: Sendable {
     private let service: String
     private static let account = "webdav"
 
-    init(service: String = "dev.bybee.AnyDoor.sync") {
+    init(service: String = AppIdentity.current.bundleIdentifier + ".sync") {
         self.service = service
     }
 
