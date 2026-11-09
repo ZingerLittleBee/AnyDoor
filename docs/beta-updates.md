@@ -38,7 +38,8 @@ This preserves the required ordering across Stable hotfixes, Betas, and the
 final Stable release. `scripts/resolve-release-version.sh` is the canonical
 encoder. Sparkle compares this internal build version; AnyDoor displays the
 appcast display version and compares `SUSkippedVersion` against the internal
-version.
+version. Settings shows the installed version in the same display form by
+decoding the Beta slot from `CFBundleVersion` (`Bundle.displayVersionString`).
 
 ## Branch policy
 
