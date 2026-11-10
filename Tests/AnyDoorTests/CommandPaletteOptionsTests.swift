@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 import PluginInterface
 @testable import AnyDoor
@@ -89,7 +90,7 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
-    func testHostsPluginOptionsCheckmarkAndEditAlwaysPresent() {
+    func testHostsPluginOptionsCheckmarkAndManagerAlwaysPresent() {
         // The hosts option builder lives in the plugin module now; ids stay
         // "hosts.<uuid>" / "hosts.edit" exactly as before the extraction.
         let active = HostProfile(name: "Dev", content: """
@@ -104,7 +105,7 @@ final class CommandPaletteOptionsTests: XCTestCase {
             profiles: [active, inactive], systemHosts: "# System\n127.0.0.1 localhost\n::1 localhost\n"
         )
 
-        XCTAssertEqual(options.count, 3)
+        XCTAssertEqual(options.count, 4)
         XCTAssertEqual(options[0].title, "Dev")
         XCTAssertEqual(options[0].id, "hosts.\(active.id.uuidString)")
         XCTAssertTrue(options[0].isChecked)
@@ -112,14 +113,20 @@ final class CommandPaletteOptionsTests: XCTestCase {
         XCTAssertEqual(options[1].title, "Prod")
         XCTAssertFalse(options[1].isChecked)
         XCTAssertNil(options[1].subtitle)
-        XCTAssertEqual(options.map(\.commit), [.stayOpen, .stayOpen, .closeThenAct])
-        XCTAssertEqual(options.last?.id, "hosts.edit")
-        XCTAssertEqual(options.last?.subtitle, "127.0.0.1 localhost · ::1 localhost")
+        XCTAssertEqual(options.map(\.commit), [.stayOpen, .stayOpen, .closeThenAct, .closeThenAct])
+        XCTAssertEqual(options[2].id, "hosts.edit")
+        XCTAssertEqual(options[2].subtitle, "127.0.0.1 localhost · ::1 localhost")
+        XCTAssertEqual(options[3].id, "hosts.openManager")
+        XCTAssertEqual(options[3].title, "hosts.manager.openHelp")
+        XCTAssertEqual(options[3].actionLabel, "commandPalette.action.open")
+        XCTAssertFalse(options[3].isChecked)
+        XCTAssertEqual(options.map(\.footerShortcut), [nil, nil, nil, "o"])
 
         XCTAssertEqual(HostsPaletteOptions.options(profiles: []).map(\.id),
-                       ["hosts.edit"])
+                       ["hosts.edit", "hosts.openManager"])
         XCTAssertTrue(HostsPaletteOptions.profile(for: options[0].id, in: [active, inactive]) === active)
         XCTAssertNil(HostsPaletteOptions.profile(for: "hosts.edit", in: [active, inactive]))
+        XCTAssertNil(HostsPaletteOptions.profile(for: "hosts.openManager", in: [active, inactive]))
     }
 
     @MainActor
@@ -297,6 +304,47 @@ final class CommandPaletteOptionsTests: XCTestCase {
         state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
         state.query = "bet"
         XCTAssertEqual(state.flatEntries.map(\.id), ["option:b"])
+    }
+
+    @MainActor
+    func testFooterShortcutStaysOutsideSearchAndRespectsNavigationAndInput() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let options = sampleOptions() + [
+            CommandPaletteOption(id: "editor", title: "Open Editor", symbol: "macwindow",
+                                 footerShortcut: "o", perform: {}),
+        ]
+        state.enterOptions(parentTitle: "Profiles", options, parent: .hostsManager)
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:a", "option:b"])
+        state.query = "Open Editor"
+        XCTAssertTrue(state.flatEntries.isEmpty)
+        XCTAssertNil(state.commitSelection())
+        XCTAssertEqual(state.optionFooterEntries.map(\.id), ["option:editor"])
+        XCTAssertEqual(state.optionFooterShortcut(
+            characters: "o", modifiers: .command, isComposing: false
+        )?.id, "option:editor")
+        XCTAssertEqual(state.optionFooterShortcut(
+            characters: "O", modifiers: [.command, .capsLock], isComposing: false
+        )?.id, "option:editor")
+        for modifiers: NSEvent.ModifierFlags in [[], .option, [.command, .shift], [.command, .control]] {
+            XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: modifiers, isComposing: false))
+        }
+        XCTAssertNil(state.optionFooterShortcut(characters: "k", modifiers: .command, isComposing: false))
+        XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: .command, isComposing: true))
+        state.requestConfirmation(.init(title: "Confirm", message: "Message", confirmLabel: "OK"), perform: {})
+        XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: .command, isComposing: false))
+        state.cancelConfirmation()
+
+        _ = state.prepareForResume()
+        XCTAssertTrue(state.optionFooterEntries.isEmpty, "resuming must drop stale actions until refreshed")
+        XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: .command, isComposing: false))
+        state.updateOptions(options, selectedID: nil, generation: state.navigationRevision)
+        XCTAssertEqual(state.optionFooterEntries.map(\.id), ["option:editor"])
+        state.popToRoot()
+        XCTAssertTrue(state.optionFooterEntries.isEmpty)
+        XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: .command, isComposing: false))
+        state.enterOptions(parentTitle: "Another page", sampleOptions())
+        XCTAssertTrue(state.optionFooterEntries.isEmpty)
+        XCTAssertNil(state.optionFooterShortcut(characters: "o", modifiers: .command, isComposing: false))
     }
 
     @MainActor

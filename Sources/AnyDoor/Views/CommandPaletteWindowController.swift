@@ -595,8 +595,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
             let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            let characters = event.charactersIgnoringModifiers
             let consumed = MainThreadIsolation.run {
-                self?.handle(keyCode: keyCode, modifiers: modifiers) ?? false
+                self?.handle(keyCode: keyCode, modifiers: modifiers, characters: characters) ?? false
             }
             return consumed ? nil : event
         }
@@ -609,7 +610,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+    private func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, characters: String?) -> Bool {
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         guard let state else { return false }
 
@@ -621,6 +622,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case 53: state.cancelConfirmation()
             default: break
             }
+            return true
+        }
+
+        if let entry = state.optionFooterShortcut(
+            characters: characters, modifiers: modifiers, isComposing: window.hasIMEComposition
+        ) {
+            commit(entry)
             return true
         }
 

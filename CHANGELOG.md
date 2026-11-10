@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Hosts options in the command palette include a fixed Open Hosts Manager
+  footer action with a Command-O shortcut, available even with no profiles
+  or matching search results.
+
 ### Changed
 
 - The command palette reopens on the last options page, including Hosts and
