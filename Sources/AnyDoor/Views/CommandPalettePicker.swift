@@ -69,6 +69,9 @@ struct CommandPalettePicker: View {
                 if state.isCurrencyContext {
                     CommandPaletteDivider()
                     footerBar
+                } else if !state.optionFooterEntries.isEmpty {
+                    CommandPaletteDivider()
+                    optionFooterBar
                 }
             }
         }
@@ -286,6 +289,35 @@ struct CommandPalettePicker: View {
             }
             .buttonStyle(.plain)
             .help(L(.commandPaletteFooterRefreshRates))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+    }
+
+    private var optionFooterBar: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            ForEach(state.optionFooterEntries) { entry in
+                if case .paletteOption(let id) = entry.source,
+                   let shortcut = state.option(id: id)?.footerShortcut {
+                    Button { onSelect(entry) } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: entry.symbol)
+                            Text(entry.title)
+                            keyHint(text: "⌘", symbol: nil)
+                            keyHint(text: shortcut.uppercased(), symbol: nil)
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .help("\(entry.title) (⌘\(shortcut.uppercased()))")
+                    .accessibilityLabel(entry.title)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)

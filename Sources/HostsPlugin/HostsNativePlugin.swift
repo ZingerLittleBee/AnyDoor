@@ -89,7 +89,7 @@ public final class HostsNativePlugin: NativePlugin {
 
     public func performPaletteOption(parent: BuiltinItem, id: String) async {
         guard parent == .hostsManager else { return }
-        if id == HostsPaletteOptions.editOptionID {
+        if id == HostsPaletteOptions.editOptionID || id == HostsPaletteOptions.openManagerOptionID {
             editorWindowController.show(manager: manager)
             return
         }
