@@ -22,6 +22,9 @@ versioning.
 
 ### Fixed
 
+- Recording an app shortcut or other global hotkey now prompts when the
+  shortcut is already in use — including by Quicklinks or the Command Palette —
+  and properly clears the previous app shortcut when replacing it.
 - Scrolling into Applications in the command palette no longer stutters the
   first time after AnyDoor launches. App icons are now prepared in the
   background instead of while the list scrolls.
