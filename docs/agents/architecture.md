@@ -240,7 +240,9 @@ Search Template, summons the palette pre-entered into that entry's argument-inpu
 HotkeyService's callback uses an injected `dispatcher` closure, bound in
 `AppDelegate.applicationDidFinishLaunching` to `HotkeyCoordinator.shared.dispatch`. Do not reference
 PanelStore or HotkeyCoordinator directly inside HotkeyService — keep HotkeyService decoupled from
-business logic.
+business logic. Interactive hotkey recording checks `PanelStore.hotkeyConflict` across the same four
+active sources (app shortcuts, available built-ins including hidden brightness ±, Quicklinks, and the
+Command Palette hotkey) and clears a replaced owner through `PanelStore.clearConflictingHotkey`.
 
 ### Provider isolation
 

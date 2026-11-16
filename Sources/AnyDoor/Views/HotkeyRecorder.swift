@@ -210,9 +210,9 @@ struct HotkeyRecorder: View {
                 return nil
             }
             if code == 51 && mods == 0 { // Delete with no modifiers → clear
+                stopRecording()
                 hotkey = nil
                 onChange(nil)
-                stopRecording()
                 return nil
             }
 
@@ -227,9 +227,9 @@ struct HotkeyRecorder: View {
             }
 
             let new = HotkeyDescriptor(keyCode: code, modifierFlags: mods)
+            stopRecording()
             hotkey = new
             onChange(new)
-            stopRecording()
             return nil
         }
 
@@ -285,6 +285,44 @@ struct HotkeyRecorder: View {
         isRecording = false
         if notifyCoordinator {
             HotkeyRecordingCoordinator.shared.end(id: instanceID)
+        }
+    }
+}
+
+/// Shared presentation payload for hotkey-conflict confirmation alerts.
+struct HotkeyConflictAlert: Identifiable {
+    let id = UUID()
+    let hotkey: HotkeyDescriptor
+    let existingTitle: String
+    let onReplace: () -> Void
+}
+
+extension View {
+    /// Presents the standard hotkey-conflict prompt using SwiftUI's non-deprecated
+    /// alert modifier so views with sibling alerts (such as delete confirmations)
+    /// do not overwrite one another's presentation slot.
+    @MainActor
+    func hotkeyConflictAlert(_ alert: Binding<HotkeyConflictAlert?>) -> some View {
+        self.alert(
+            L(.settingsPanelHotkeyConflictTitle),
+            isPresented: Binding(
+                get: { alert.wrappedValue != nil },
+                set: { if !$0 { alert.wrappedValue = nil } }
+            ),
+            presenting: alert.wrappedValue
+        ) { item in
+            Button(L(.settingsPanelCancel), role: .cancel) {}
+            Button(L(.settingsPanelHotkeyConflictReplace)) {
+                item.onReplace()
+            }
+        } message: { item in
+            Text(
+                L(
+                    .settingsPanelHotkeyConflictMessage,
+                    item.hotkey.displayString(hyperFlags: HyperKeyService.shared.hyperModifierFlags),
+                    item.existingTitle
+                )
+            )
         }
     }
 }

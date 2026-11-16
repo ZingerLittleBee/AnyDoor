@@ -7,8 +7,9 @@ struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var grouping = PanelGroupingStore.shared
     @State private var opener = SettingsOpener.shared
-    @State private var conflictAlert: ConflictAlert?
+    @State private var conflictAlert: HotkeyConflictAlert?
     @State private var pendingDelete: PendingDelete?
+    @State private var showsDeleteConfirmation = false
 
     /// Live frame of every row in the `listSpace` coordinate space, fed by a
     /// preference. Measured in the *content* space so it stays put while
@@ -137,25 +138,18 @@ struct PanelSettingsView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .alert(item: $conflictAlert) { alert in
-            Alert(
-                title: Text(L(.settingsPanelHotkeyConflictTitle)),
-                message: Text(L(.settingsPanelHotkeyConflictMessage, alert.hotkey.displayString(hyperFlags: HyperKeyService.shared.hyperModifierFlags), alert.existingTitle)),
-                primaryButton: .default(Text(L(.settingsPanelHotkeyConflictReplace))) {
-                    alert.onReplace()
-                },
-                secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
-            )
-        }
-        .alert(item: $pendingDelete) { item in
-            Alert(
-                title: Text(L(.settingsPanelDeleteTitle, item.appName)),
-                message: Text(L(.settingsPanelDeleteMessage)),
-                primaryButton: .destructive(Text(L(.settingsPanelDeleteConfirm))) {
-                    PanelStore.shared.deleteAppShortcut(id: item.bindingID)
-                },
-                secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
-            )
+        .hotkeyConflictAlert($conflictAlert)
+        .alert(
+            pendingDelete.map { L(.settingsPanelDeleteTitle, $0.appName) } ?? "",
+            isPresented: $showsDeleteConfirmation,
+            presenting: pendingDelete
+        ) { item in
+            Button(L(.settingsPanelCancel), role: .cancel) {}
+            Button(L(.settingsPanelDeleteConfirm), role: .destructive) {
+                PanelStore.shared.deleteAppShortcut(id: item.bindingID)
+            }
+        } message: { _ in
+            LocalizedText(.settingsPanelDeleteMessage)
         }
     }
 
@@ -262,23 +256,11 @@ struct PanelSettingsView: View {
     }
 
     private func handleBrightnessHotkeyChange(item: BuiltinItem, newValue: HotkeyDescriptor?) {
-        if let new = newValue,
-           let existing = PanelStore.shared.entryUsingHotkey(new, excluding: .builtin(item)) {
-            conflictAlert = ConflictAlert(
-                hotkey: new,
-                existingTitle: existing.title,
-                onReplace: {
-                    if case let .builtin(other) = existing.source {
-                        PanelStore.shared.setBuiltinHotkey(other, hotkey: nil)
-                    } else if case let .appShortcut(id) = existing.source {
-                        PanelStore.shared.updateAppShortcut(id: id, hotkey: nil)
-                    }
-                    PanelStore.shared.setBuiltinHotkey(item, hotkey: new)
-                }
-            )
-        } else {
-            PanelStore.shared.setBuiltinHotkey(item, hotkey: newValue)
-        }
+        commitHotkeyChange(
+            newValue,
+            excluding: .builtin(item),
+            apply: { panel.setBuiltinHotkey(item, hotkey: $0) }
+        )
     }
 
     private func mainRow(_ entry: PanelEntry, row: PanelSettingsRow) -> some View {
@@ -368,6 +350,7 @@ struct PanelSettingsView: View {
         if case let .appShortcut(id) = entry.source {
             Button {
                 pendingDelete = PendingDelete(bindingID: id, appName: entry.localizedTitle())
+                showsDeleteConfirmation = true
             } label: {
                 Image(systemName: "xmark").foregroundStyle(.secondary)
             }
@@ -382,18 +365,42 @@ struct PanelSettingsView: View {
     }
 
     private func handleHotkeyChange(entry: PanelEntry, newValue: HotkeyDescriptor?) {
+        guard let target = conflictTarget(for: entry.source) else { return }
+        commitHotkeyChange(
+            newValue,
+            excluding: target,
+            apply: { apply(hotkey: $0, to: entry) }
+        )
+    }
+
+    private func commitHotkeyChange(
+        _ newValue: HotkeyDescriptor?,
+        excluding target: HotkeyConflictOwner.Target,
+        apply: @escaping (HotkeyDescriptor?) -> Void
+    ) {
         if let new = newValue,
-           let existing = panel.entryUsingHotkey(new, excluding: entry.source) {
-            conflictAlert = ConflictAlert(
+           let existing = panel.hotkeyConflict(for: new, excluding: target) {
+            conflictAlert = HotkeyConflictAlert(
                 hotkey: new,
-                existingTitle: existing.localizedTitle(),
+                existingTitle: existing.localizedTitle,
                 onReplace: {
-                    clearHotkey(for: existing.source)
-                    apply(hotkey: new, to: entry)
+                    panel.clearConflictingHotkey(existing.target)
+                    apply(new)
                 }
             )
         } else {
-            apply(hotkey: newValue, to: entry)
+            apply(newValue)
+        }
+    }
+
+    private func conflictTarget(for source: PanelEntry.Source) -> HotkeyConflictOwner.Target? {
+        switch source {
+        case let .builtin(item):
+            return .builtin(item)
+        case let .appShortcut(id):
+            return .appShortcut(id)
+        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+            return nil
         }
     }
 
@@ -403,18 +410,6 @@ struct PanelSettingsView: View {
             panel.setBuiltinHotkey(item, hotkey: hotkey)
         case let .appShortcut(id):
             panel.updateAppShortcut(id: id, hotkey: hotkey)
-        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
-            // Command-palette-only source; never surfaces in the settings UI.
-            break
-        }
-    }
-
-    private func clearHotkey(for source: PanelEntry.Source) {
-        switch source {
-        case let .builtin(item):
-            panel.setBuiltinHotkey(item, hotkey: nil)
-        case let .appShortcut(id):
-            panel.updateAppShortcut(id: id, hotkey: nil)
         case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             // Command-palette-only source; never surfaces in the settings UI.
             break
@@ -760,13 +755,6 @@ private struct RowFrameKey: PreferenceKey {
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue()) { _, new in new }
     }
-}
-
-private struct ConflictAlert: Identifiable {
-    let id = UUID()
-    let hotkey: HotkeyDescriptor
-    let existingTitle: String
-    let onReplace: () -> Void
 }
 
 private struct PendingDelete: Identifiable {
