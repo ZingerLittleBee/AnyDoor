@@ -22,6 +22,11 @@ versioning.
 
 ### Fixed
 
+- App shortcut toggles (including Hyper Key combos) now fall back to
+  Accessibility hiding when `NSRunningApplication.hide()` is ignored by apps
+  launched hidden as background services (such as ego lite), and check all
+  running instances of the bundle ID so an inactive helper cannot shadow the
+  active app.
 - Recording an app shortcut or other global hotkey now prompts when the
   shortcut is already in use — including by Quicklinks or the Command Palette —
   and properly clears the previous app shortcut when replacing it.

@@ -190,12 +190,16 @@ Binding add/remove flows through `PanelStore.addAppShortcut` / `deleteAppShortcu
 
 ### Toggle semantics
 
-`AppSwitcher.toggle` uses `app.isActive` (frontmost check) rather than `app.isHidden`. If the target
-is already frontmost it calls `app.hide()`; otherwise (not frontmost, or not running) it routes
-through `NSWorkspace.openApplication(at:)` (`activate(at:)`) — deliberately **not**
-`NSRunningApplication.activate()`, which macOS 14+ silently ignores when an `.accessory` app tries
-to activate while another regular app holds focus. Changing the condition changes the interaction
-semantics.
+`AppSwitcher.toggle` uses `app.isActive` (frontmost check) rather than `app.isHidden`, checking all
+running instances matching the bundle ID so an inactive helper sharing the bundle ID cannot shadow
+the active app. If a matching instance is already frontmost it calls `app.hide()`; if the app is
+still active and unhidden after `hideFallbackDelay` (e.g., apps launched hidden as background
+services whose LaunchServices entry drops `kLSNotifyApplicationHide`, observed with ego lite), it
+falls back to setting `kAXHiddenAttribute` on a background queue with a bounded messaging timeout.
+Otherwise (not frontmost, or not running) it routes through `NSWorkspace.openApplication(at:)`
+(`activate(at:)`) — deliberately **not** `NSRunningApplication.activate()`, which macOS 14+ silently
+ignores when an `.accessory` app tries to activate while another regular app holds focus. Changing
+the condition changes the interaction semantics.
 
 ### PanelStore is the single source of truth
 
