@@ -40,7 +40,8 @@ private final class FixturePlugin: NativePlugin {
                 id: "opt-active", title: "Active", subtitle: "sub", symbol: "circle",
                 isChecked: true, commit: .closeThenAct
             ),
-            PluginRowDescriptor(id: "opt-plain", title: "Plain", symbol: "pencil", commit: .closeThenAct),
+            PluginRowDescriptor(id: "opt-plain", title: "Open Editor", symbol: "pencil",
+                                footerShortcut: "o", commit: .closeThenAct),
         ]
     }
 
@@ -68,7 +69,7 @@ final class PluginPaletteContributionTests: XCTestCase {
     // MARK: - Palette contributions register/unregister as one unit
 
     @MainActor
-    func testRegisterContributionsExposesOptionParentAndRowSource() async {
+    func testRegisterContributionsExposesOptionParentAndRowSource() async throws {
         let registry = CommandPaletteExtensions()
         let plugin = FixturePlugin()
 
@@ -88,6 +89,21 @@ final class PluginPaletteContributionTests: XCTestCase {
         await options?.first?.perform()
         XCTAssertEqual(plugin.performedOptions.map(\.id), ["opt-active"])
         XCTAssertEqual(plugin.performedOptions.map(\.parent), [.hostsManager])
+
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Fixture", try XCTUnwrap(options), parent: .hostsManager)
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:opt-active"])
+        state.query = "no matches"
+        let footer = try XCTUnwrap(state.optionFooterShortcut(
+            characters: "o", modifiers: .command, isComposing: false
+        ))
+        XCTAssertEqual(footer.id, "option:opt-plain")
+        XCTAssertEqual(state.optionFooterEntries, [footer])
+        XCTAssertEqual(CommandPaletteCommitIntent.classify(footer.source), .runOrConfirmOption(id: "opt-plain"))
+        let footerAction = try XCTUnwrap(state.option(id: "opt-plain"))
+        XCTAssertFalse(footerAction.staysOpen)
+        await footerAction.perform()
+        XCTAssertEqual(plugin.performedOptions.map(\.id), ["opt-active", "opt-plain"])
     }
 
     @MainActor

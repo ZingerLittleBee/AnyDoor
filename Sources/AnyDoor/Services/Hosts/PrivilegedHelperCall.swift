@@ -23,7 +23,35 @@ enum PrivilegedHelperCall {
     /// the root helper over XPC. Core infrastructure (amended ADR-0005) — the
     /// Hosts plugin reaches it through `PluginHostServices.privilegedHelper`.
     /// Throws `PrivilegedHelperCallError`.
-    static func writeHosts(_ content: String, replacing expectedContent: String) async throws {
+    static func writeHosts(
+        _ content: String,
+        replacing expectedContent: String,
+        validateVersion: @Sendable () async throws -> Void = validateReadyVersion,
+        recover: @Sendable () async throws -> Void = { try await HelperManager.shared.recoverOutdatedHelper() },
+        write: @Sendable (String, String) async throws -> Void = writeHostsConditionally
+    ) async throws {
+        try Task.checkCancellation()
+        do {
+            try await validateVersion()
+        } catch let error as PrivilegedHelperCallError where error.message == "helper_outdated" {
+            try Task.checkCancellation()
+            try await recover()
+            try await validateVersion()
+        }
+        // Recovery may outlive a cancelled caller to restore the shared daemon,
+        // but that caller must never proceed to its write.
+        try Task.checkCancellation()
+        // Retry only the version probe. An ambiguous write failure must never
+        // replay a request, and recovery must preserve the original baseline.
+        try await write(content, expectedContent)
+    }
+
+    private static func validateReadyVersion() async throws {
+        try await HelperManager.shared.waitForRecovery()
+        try await validateVersion()
+    }
+
+    static func validateVersion() async throws {
         // Old daemons do not implement conditional writes. Refuse the operation
         // rather than ever falling back to their unconditional selector.
         try await run(
@@ -35,6 +63,9 @@ enum PrivilegedHelperCall {
                 }
             }
         )
+    }
+
+    private static func writeHostsConditionally(_ content: String, _ expectedContent: String) async throws {
         try await run(
             makeError: { PrivilegedHelperCallError(message: $0) },
             request: { proxy, finish in
@@ -46,6 +77,7 @@ enum PrivilegedHelperCall {
     /// Sends a forced-shutdown request to the root helper over XPC. Reused
     /// approval: requires the same enabled LaunchDaemon as `writeHosts`.
     static func shutDown() async throws {
+        try await HelperManager.shared.waitForRecovery()
         try await run(
             makeError: { ShutdownError.failed($0) },
             request: { proxy, finish in

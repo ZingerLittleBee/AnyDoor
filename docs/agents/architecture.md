@@ -729,12 +729,16 @@ Binding add/remove flows through `PanelStore.addAppShortcut` / `deleteAppShortcu
 
 ### Toggle semantics
 
-`AppSwitcher.toggle` uses `app.isActive` (frontmost check) rather than `app.isHidden`. If the target
-is already frontmost it calls `app.hide()`; otherwise (not frontmost, or not running) it routes
-through `NSWorkspace.openApplication(at:)` (`activate(at:)`) — deliberately **not**
-`NSRunningApplication.activate()`, which macOS 14+ silently ignores when an `.accessory` app tries
-to activate while another regular app holds focus. Changing the condition changes the interaction
-semantics.
+`AppSwitcher.toggle` uses `app.isActive` (frontmost check) rather than `app.isHidden`, checking all
+running instances matching the bundle ID so an inactive helper sharing the bundle ID cannot shadow
+the active app. If a matching instance is already frontmost it calls `app.hide()`; if the app is
+still active and unhidden after `hideFallbackDelay` (e.g., apps launched hidden as background
+services whose LaunchServices entry drops `kLSNotifyApplicationHide`, observed with ego lite), it
+falls back to setting `kAXHiddenAttribute` on a background queue with a bounded messaging timeout.
+Otherwise (not frontmost, or not running) it routes through `NSWorkspace.openApplication(at:)`
+(`activate(at:)`) — deliberately **not** `NSRunningApplication.activate()`, which macOS 14+ silently
+ignores when an `.accessory` app tries to activate while another regular app holds focus. Changing
+the condition changes the interaction semantics.
 
 ### PanelStore is the single source of truth
 
@@ -779,7 +783,9 @@ Search Template, summons the palette pre-entered into that entry's argument-inpu
 HotkeyService's callback uses an injected `dispatcher` closure, bound in
 `AppDelegate.applicationDidFinishLaunching` to `HotkeyCoordinator.shared.dispatch`. Do not reference
 PanelStore or HotkeyCoordinator directly inside HotkeyService — keep HotkeyService decoupled from
-business logic.
+business logic. Interactive hotkey recording checks `PanelStore.hotkeyConflict` across the same four
+active sources (app shortcuts, available built-ins including hidden brightness ±, Quicklinks, and the
+Command Palette hotkey) and clears a replaced owner through `PanelStore.clearConflictingHotkey`.
 
 ### Provider isolation
 
@@ -1310,8 +1316,17 @@ capability (`PluginHostServices.privilegedHelper`, implemented by `CorePluginHos
 `HelperManager` + the `PrivilegedHelperCall.writeHosts` XPC call). When the helper is **not**
 enabled (ad-hoc/dev builds, or before approval), the plugin falls back to `AppleScriptWriter`, which
 compares a baseline and copies a temp file over `/etc/hosts` via an administrator-authorized
-`do shell script`. Helper protocol v3 adds the expected content to the write request; a stale daemon
-is rejected, never retried through an unconditional-write path.
+`do shell script`. Helper protocol v3 adds the expected content to the write request. A stale daemon
+triggers one recovery attempt: await `SMAppService` unregistration completion, re-register the
+bundled helper, then validate its protocol again before sending the original conditional write.
+Concurrent recovery requests share one operation; registration and plugin release cannot race
+that operation. A failed recovery or a still-incompatible helper leaves hosts untouched, and an
+actual write failure is never retried. There is no unconditional-write fallback.
+After successful unregistration, transient Service Management registration failures receive up to
+three retries (500 ms, 1 s, 2 s). Approval, signature, and unrelated errors fail immediately.
+Failed registration remains pending: a later Hosts operation or forced Scheduled Shutdown repairs
+registration before opening XPC, without unregistering the already-removed daemon again. Explicit
+helper release clears that pending state so a later consumer cannot undo an intentional uninstall.
 `HostsManager.makeWriter` re-resolves the writer on every write from the capability's `readiness()`
 (`PrivilegedHostsWriter` when `.enabled`, else `AppleScriptWriter`), so helper approval takes effect
 without a relaunch (`MockHostsWriter`, defined in the `AnyDoorTests` target, is the sanctioned test

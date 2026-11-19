@@ -12,7 +12,7 @@
     "@anydoor-dev/api": "file:../../packages/api"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.25.12",
     "typescript": "^5.6.3"
   }
 }

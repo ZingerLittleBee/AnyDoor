@@ -77,6 +77,10 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// Short status text rendered as a chip at the row's trailing edge
     /// (e.g. "开启" / "关闭" on a toggle-style row). Nil or empty shows none.
     public let badge: String?
+    /// For native palette options only: a Command-key equivalent (e.g. "o")
+    /// places this action in the fixed footer instead of the searchable list.
+    /// The shortcut is active only on that options page.
+    public let footerShortcut: String?
     public let commit: CommitSemantics
 
     public init(
@@ -87,6 +91,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         actionLabel: String? = nil,
         isChecked: Bool = false,
         badge: String? = nil,
+        footerShortcut: String? = nil,
         commit: CommitSemantics
     ) {
         self.id = id
@@ -96,6 +101,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         self.actionLabel = actionLabel
         self.isChecked = isChecked
         self.badge = badge
+        self.footerShortcut = footerShortcut
         self.commit = commit
     }
 }

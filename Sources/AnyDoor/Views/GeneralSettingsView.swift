@@ -24,6 +24,7 @@ struct GeneralSettingsView: View {
     @State private var updateService = UpdateService.shared
     @State private var hyperKey = HyperKeyService.shared
     @State private var commandPalette = CommandPaletteService.shared
+    @State private var conflictAlert: HotkeyConflictAlert?
     @AppStorage(ScheduledShutdownService.forcedKey) private var shutdownForced = false
     @AppStorage(ScheduledShutdownService.warningLeadKey) private var shutdownWarningLead = 60
     @AppStorage(ScheduledShutdownService.defaultMinutesKey) private var shutdownDefaultMinutes = 30
@@ -146,11 +147,8 @@ struct GeneralSettingsView: View {
                 HStack {
                     LocalizedText(.settingsGeneralCommandPaletteHotkey)
                     Spacer()
-                    HotkeyRecorder(hotkey: Binding(
-                        get: { commandPalette.hotkey },
-                        set: { commandPalette.setHotkey($0) }
-                    )) { newValue in
-                        commandPalette.setHotkey(newValue)
+                    HotkeyRecorder(hotkey: .constant(commandPalette.hotkey)) { newValue in
+                        handleCommandPaletteHotkeyChange(newValue)
                     }
                     .frame(width: 150, alignment: .trailing)
                 }
@@ -240,6 +238,7 @@ struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .overlayScrollers()
+        .hotkeyConflictAlert($conflictAlert)
         // Poll while the tab is visible so the badges update live after the
         // user grants a permission in System Settings.
         .task {
@@ -277,6 +276,22 @@ struct GeneralSettingsView: View {
             get: { hyperKey.trigger },
             set: { new in Task { await hyperKey.setTrigger(new) } }
         )
+    }
+
+    private func handleCommandPaletteHotkeyChange(_ newValue: HotkeyDescriptor?) {
+        if let new = newValue,
+           let existing = PanelStore.shared.hotkeyConflict(for: new, excluding: .commandPalette) {
+            conflictAlert = HotkeyConflictAlert(
+                hotkey: new,
+                existingTitle: existing.localizedTitle,
+                onReplace: {
+                    PanelStore.shared.clearConflictingHotkey(existing.target)
+                    commandPalette.setHotkey(new)
+                }
+            )
+        } else {
+            commandPalette.setHotkey(newValue)
+        }
     }
 
     private var quickPressBinding: Binding<HyperKeyQuickPress> {

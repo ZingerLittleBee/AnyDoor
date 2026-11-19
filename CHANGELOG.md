@@ -8,6 +8,9 @@ versioning.
 
 ### Added
 
+- Hosts options in the command palette include a fixed Open Hosts Manager
+  footer action with a Command-O shortcut, available even with no profiles
+  or matching search results.
 - Add temporary, content-free Keychain status diagnostics to investigate
   Clipboard Sync remaining on "waiting for key" after iCloud Keychain is enabled.
 - Optional, end-to-end encrypted iCloud Clipboard Sync for selected tags, with
@@ -31,6 +34,21 @@ versioning.
 
 ### Fixed
 
+- App shortcut toggles (including Hyper Key combos) now fall back to
+  Accessibility hiding when `NSRunningApplication.hide()` is ignored by apps
+  launched hidden as background services (such as ego lite), and check all
+  running instances of the bundle ID so an inactive helper cannot shadow the
+  active app.
+- Recording an app shortcut or other global hotkey now prompts when the
+  shortcut is already in use — including by Quicklinks or the Command Palette —
+  and properly clears the previous app shortcut when replacing it.
+- Scrolling into Applications in the command palette no longer stutters the
+  first time after AnyDoor launches. App icons are now prepared in the
+  background instead of while the list scrolls.
+- Hosts writes recover an outdated background helper after an app update by
+  re-registering the bundled helper and checking its protocol before writing.
+  Transient registration failures are retried, and pending registration is
+  restored before later Hosts writes or forced Scheduled Shutdown requests.
 - Hosts management recovers existing profiles from the local managed block,
   shows system mappings, and preserves saved profiles with different content.
   Ambiguous blocks and external file changes now block stale writes, including
@@ -39,9 +57,6 @@ versioning.
   submenu. Submenu rows have space below the search divider.
 - Fix a startup crash when opening local app data in builds with Clipboard Sync
   support.
-- Scrolling into Applications in the command palette no longer stutters the
-  first time after AnyDoor launches. App icons are now prepared in the
-  background instead of while the list scrolls.
 
 ## [4.2.11] - 2026-10-29
 

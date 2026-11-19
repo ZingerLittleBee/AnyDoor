@@ -8,6 +8,7 @@ struct QuicklinksSettingsView: View {
     @State private var store = QuicklinkStore.shared
     @State private var editorDraft: QuicklinkEditorDraft?
     @State private var pendingDelete: QuicklinkPendingDelete?
+    @State private var showsDeleteConfirmation = false
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var drag: QuicklinkDragSession?
 
@@ -49,19 +50,21 @@ struct QuicklinksSettingsView: View {
             .scrollClipDisabled()
         }
         .sheet(item: $editorDraft) { draft in
-            QuicklinkEditorSheet(draft: draft) { saved in
-                try save(saved)
+            QuicklinkEditorSheet(draft: draft) { saved, replacedConflict in
+                try save(saved, clearingConflict: replacedConflict)
             }
         }
-        .alert(item: $pendingDelete) { item in
-            Alert(
-                title: Text(L(.settingsQuicklinksDeleteTitle, item.title)),
-                message: Text(L(.settingsQuicklinksDeleteMessage)),
-                primaryButton: .destructive(Text(L(.settingsQuicklinksDelete))) {
-                    store.delete(id: item.quicklinkID)
-                },
-                secondaryButton: .cancel(Text(L(.settingsQuicklinksCancel)))
-            )
+        .alert(
+            pendingDelete.map { L(.settingsQuicklinksDeleteTitle, $0.title) } ?? "",
+            isPresented: $showsDeleteConfirmation,
+            presenting: pendingDelete
+        ) { item in
+            Button(L(.settingsQuicklinksCancel), role: .cancel) {}
+            Button(L(.settingsQuicklinksDelete), role: .destructive) {
+                store.delete(id: item.quicklinkID)
+            }
+        } message: { _ in
+            LocalizedText(.settingsQuicklinksDeleteMessage)
         }
     }
 
@@ -160,6 +163,7 @@ struct QuicklinksSettingsView: View {
 
             Button {
                 pendingDelete = QuicklinkPendingDelete(quicklink: quicklink)
+                showsDeleteConfirmation = true
             } label: {
                 Image(systemName: "trash")
                     .foregroundStyle(.secondary)
@@ -275,7 +279,11 @@ struct QuicklinksSettingsView: View {
             .sorted { $0.minY < $1.minY }
     }
 
-    private func save(_ draft: QuicklinkEditorDraft) throws {
+    private func save(
+        _ draft: QuicklinkEditorDraft,
+        clearingConflict conflict: HotkeyConflictOwner.Target?
+    ) throws {
+        let savedID: UUID
         if let id = draft.quicklinkID {
             try store.update(
                 id: id,
@@ -286,8 +294,9 @@ struct QuicklinksSettingsView: View {
                 hotkey: draft.hotkey,
                 isVisible: draft.isVisible
             )
+            savedID = id
         } else {
-            try store.add(
+            let row = try store.add(
                 name: draft.name,
                 link: draft.link,
                 keyword: draft.keyword,
@@ -295,6 +304,12 @@ struct QuicklinksSettingsView: View {
                 hotkey: draft.hotkey,
                 isVisible: draft.isVisible
             )
+            savedID = row.id
+        }
+        if let conflict,
+           let savedHotkey = draft.hotkey,
+           PanelStore.shared.hotkeyConflict(for: savedHotkey, excluding: .quicklink(savedID))?.target == conflict {
+            PanelStore.shared.clearConflictingHotkey(conflict)
         }
     }
 }
@@ -332,7 +347,7 @@ private struct QuicklinkEditorDraft: Identifiable {
 
 private struct QuicklinkEditorSheet: View {
     let draft: QuicklinkEditorDraft
-    let onSave: (QuicklinkEditorDraft) throws -> Void
+    let onSave: (QuicklinkEditorDraft, HotkeyConflictOwner.Target?) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
@@ -344,8 +359,13 @@ private struct QuicklinkEditorSheet: View {
     @State private var isVisible: Bool
     @State private var installedApps: [InstalledApp] = []
     @State private var errorMessage: String?
+    @State private var conflictAlert: HotkeyConflictAlert?
+    @State private var replacedConflict: (hotkey: HotkeyDescriptor, target: HotkeyConflictOwner.Target)?
 
-    init(draft: QuicklinkEditorDraft, onSave: @escaping (QuicklinkEditorDraft) throws -> Void) {
+    init(
+        draft: QuicklinkEditorDraft,
+        onSave: @escaping (QuicklinkEditorDraft, HotkeyConflictOwner.Target?) throws -> Void
+    ) {
         self.draft = draft
         self.onSave = onSave
         _name = State(initialValue: draft.name)
@@ -415,8 +435,10 @@ private struct QuicklinkEditorSheet: View {
                         LocalizedText(.settingsQuicklinksOpenWith)
                     }
                     LabeledContent {
-                        HotkeyRecorder(hotkey: $hotkey) { _ in }
-                            .frame(maxWidth: 180, alignment: .trailing)
+                        HotkeyRecorder(hotkey: .constant(hotkey)) { newValue in
+                            handleHotkeyChange(newValue)
+                        }
+                        .frame(maxWidth: 180, alignment: .trailing)
                     } label: {
                         LocalizedText(.settingsQuicklinksHotkey)
                     }
@@ -458,6 +480,7 @@ private struct QuicklinkEditorSheet: View {
             .padding(.vertical, 14)
         }
         .frame(width: 480, height: 600)
+        .hotkeyConflictAlert($conflictAlert)
         .task { await loadInstalledApps() }
     }
 
@@ -489,17 +512,39 @@ private struct QuicklinkEditorSheet: View {
         link = (url.path as NSString).abbreviatingWithTildeInPath
     }
 
+    private func handleHotkeyChange(_ newValue: HotkeyDescriptor?) {
+        let excludedTarget = draft.quicklinkID.map(HotkeyConflictOwner.Target.quicklink)
+        if let new = newValue,
+           let existing = PanelStore.shared.hotkeyConflict(for: new, excluding: excludedTarget) {
+            conflictAlert = HotkeyConflictAlert(
+                hotkey: new,
+                existingTitle: existing.localizedTitle,
+                onReplace: {
+                    hotkey = new
+                    replacedConflict = (hotkey: new, target: existing.target)
+                }
+            )
+        } else {
+            hotkey = newValue
+            replacedConflict = nil
+        }
+    }
+
     private func save() {
         do {
-            try onSave(QuicklinkEditorDraft(
-                quicklinkID: draft.quicklinkID,
-                name: name,
-                link: link,
-                keyword: keyword,
-                openWithBundleID: openWithBundleID,
-                hotkey: hotkey,
-                isVisible: isVisible
-            ))
+            let pendingTarget = (replacedConflict?.hotkey == hotkey) ? replacedConflict?.target : nil
+            try onSave(
+                QuicklinkEditorDraft(
+                    quicklinkID: draft.quicklinkID,
+                    name: name,
+                    link: link,
+                    keyword: keyword,
+                    openWithBundleID: openWithBundleID,
+                    hotkey: hotkey,
+                    isVisible: isVisible
+                ),
+                pendingTarget
+            )
             dismiss()
         } catch QuicklinkStoreError.linkRequired {
             errorMessage = L(.settingsQuicklinksLinkRequired)

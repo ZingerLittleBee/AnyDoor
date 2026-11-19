@@ -298,7 +298,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     // MARK: - Palette options
 
-    func testPaletteOptionsListProfilesWithCheckmarkPlusEditRow() async throws {
+    func testPaletteOptionsListProfilesWithCheckmarkPlusManagerRow() async throws {
         let f = try makeFixture()
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
@@ -308,15 +308,21 @@ final class HostsPluginLifecycleTests: XCTestCase {
         let builtOptions = await f.palette.options(for: .hostsManager)
         let options = try XCTUnwrap(builtOptions)
 
-        XCTAssertEqual(Array(options.map(\.title).dropLast()), ["Dev", "Prod"])
-        XCTAssertEqual(options.map(\.isChecked), [true, false, false])
-        XCTAssertEqual(options.map(\.subtitle), ["1.2.3.4 dev", "5.6.7.8 prod", "127.0.0.1 localhost"])
-        XCTAssertEqual(options.map(\.staysOpen), [true, true, false])
+        XCTAssertEqual(Array(options.map(\.title).dropLast(2)), ["Dev", "Prod"])
+        XCTAssertEqual(options.map(\.isChecked), [true, false, false, false])
+        XCTAssertEqual(options.map(\.subtitle), ["1.2.3.4 dev", "5.6.7.8 prod", "127.0.0.1 localhost", nil])
+        XCTAssertEqual(options.map(\.staysOpen), [true, true, false, false])
         XCTAssertNotNil(options[1].actionLabel)
-        XCTAssertEqual(options.last?.id, HostsPaletteOptions.editOptionID)
+        XCTAssertEqual(options[2].id, HostsPaletteOptions.editOptionID)
+        XCTAssertEqual(options.last?.id, HostsPaletteOptions.openManagerOptionID)
 
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.enterOptions(parentTitle: "Hosts", options, parent: .hostsManager)
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Dev", "Prod", "hosts.system.title"])
+        XCTAssertEqual(state.optionFooterEntries.map(\.title), ["hosts.manager.openHelp"])
+        XCTAssertEqual(state.optionFooterShortcut(
+            characters: "o", modifiers: .command, isComposing: false
+        )?.id, "option:hosts.openManager")
         // Match both rows by their mapping contents, not their names. Toggling
         // the second row must preserve both the filter and the selection.
         state.query = "."
@@ -332,6 +338,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
             XCTAssertEqual(state.selectedIndex, 1)
             XCTAssertEqual(state.navigationRevision, generation)
             XCTAssertFalse(state.isAtRoot)
+            XCTAssertEqual(state.optionFooterEntries.map(\.id), ["option:hosts.openManager"])
             XCTAssertEqual(f.writer.lastWritten?.contains("5.6.7.8 prod"), active)
         }
         XCTAssertNotEqual(state.level, originalLevel, "state changes must invalidate the rendered options")

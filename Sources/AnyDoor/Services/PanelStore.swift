@@ -568,18 +568,22 @@ final class PanelStore {
         }
     }
 
-    /// Update KeyBinding fields (visibility / hotkey).
+    /// Update KeyBinding hotkey, or clear it when `hotkey` is nil.
     ///
-    /// Setting a non-nil hotkey also flips `isEnabled = true` so newly-added rows
+    /// Setting a non-nil hotkey flips `isEnabled = true` so newly-added rows
     /// (created via the settings UI with the sentinel `isEnabled: false`) become
-    /// active as soon as the user records a hotkey.
-    func updateAppShortcut(id: UUID, isVisible: Bool? = nil, hotkey: HotkeyDescriptor? = nil) {
+    /// active as soon as the user records a hotkey; clearing resets the row back
+    /// to the unbound sentinel (`keyCode = -1`, `isEnabled = false`).
+    func updateAppShortcut(id: UUID, hotkey: HotkeyDescriptor?) {
         guard let binding = binding(id: id) else { return }
-        if let v = isVisible { binding.isVisible = v }
         if let hk = hotkey {
             binding.keyCode = hk.keyCode
             binding.modifierFlags = hk.modifierFlags
             binding.isEnabled = true
+        } else {
+            binding.keyCode = -1
+            binding.modifierFlags = 0
+            binding.isEnabled = false
         }
         persistMutation()
     }
@@ -677,13 +681,29 @@ final class PanelStore {
         persistMutation()
     }
 
-    /// Find which entry currently owns a given hotkey (used for conflict detection).
-    ///
-    /// Scans visible top-level rows + visible app shortcut children + hidden-hotkey
-    /// built-ins (e.g., brightness ±) so all hotkey bindings participate in conflict
-    /// detection regardless of whether they render as a panel row.
-    func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
-        var pool = topLevelEntries + appShortcutChildren + windowLayoutChildren
+    /// Find which active hotkey source currently owns `hotkey`, across app
+    /// shortcuts, available built-in commands (including hidden brightness ±),
+    /// Quicklinks, and the Command Palette hotkey.
+    func hotkeyConflict(
+        for hotkey: HotkeyDescriptor,
+        excluding: HotkeyConflictOwner.Target? = nil,
+        paletteHotkey: HotkeyDescriptor? = CommandPaletteService.shared.hotkey
+    ) -> HotkeyConflictOwner? {
+        for entry in topLevelEntries + appShortcutChildren + windowLayoutChildren {
+            guard entry.hotkey == hotkey else { continue }
+            let owner: HotkeyConflictOwner
+            switch entry.source {
+            case .builtin(let item):
+                owner = .builtin(item)
+            case .appShortcut(let id):
+                owner = .appShortcut(id: id, appName: entry.title)
+            default:
+                continue
+            }
+            if owner.target != excluding {
+                return owner
+            }
+        }
 
         if let container = modelContainer {
             let context = container.mainContext
@@ -691,43 +711,79 @@ final class PanelStore {
                 for pref in prefs {
                     guard let item = BuiltinItem(rawValue: pref.itemKey),
                           item.kind == .hiddenHotkey,
+                          commandAvailability(item),
                           let code = pref.keyCode,
-                          let mods = pref.modifierFlags else { continue }
-                    let entry = PanelEntry(
-                        id: PanelEntry.id(for: .builtin(item)),
-                        source: .builtin(item),
-                        displayOrder: pref.displayOrder,
-                        isVisible: false,
-                        hotkey: HotkeyDescriptor(keyCode: code, modifierFlags: mods),
-                        title: L(item.titleKey),
-                        subtitle: nil,
-                        symbol: item.symbol,
-                        kind: .hiddenHotkey,
-                        toggleState: nil,
-                        permission: .notRequired
+                          let mods = pref.modifierFlags,
+                          HotkeyDescriptor(keyCode: code, modifierFlags: mods) == hotkey else { continue }
+                    let owner = HotkeyConflictOwner.builtin(item)
+                    if owner.target != excluding {
+                        return owner
+                    }
+                }
+            }
+
+            if container.schema.entities.contains(where: { $0.name == String(describing: Quicklink.self) }),
+               let quicklinks = try? context.fetch(
+                   FetchDescriptor<Quicklink>(
+                       sortBy: [SortDescriptor(\.displayOrder), SortDescriptor(\.createdAt)]
+                   )
+               ) {
+                for quicklink in quicklinks {
+                    guard quicklink.hotkeyDescriptor == hotkey else { continue }
+                    let owner = HotkeyConflictOwner.quicklink(
+                        id: quicklink.id,
+                        title: quicklink.displayName
                     )
-                    pool.append(entry)
+                    if owner.target != excluding {
+                        return owner
+                    }
                 }
             }
         }
 
-        for entry in pool {
-            if entry.source == excluding { continue }
-            if entry.hotkey == hotkey { return entry }
+        if paletteHotkey == hotkey, excluding != .commandPalette {
+            return .commandPalette
         }
+
         return nil
     }
 
-    /// Create a new app shortcut row from an NSOpenPanel selection.
+    /// Clear the hotkey owned by `target` through its authoritative store so
+    /// replacement keeps UI state, persistence, and hotkey snapshots aligned.
+    func clearConflictingHotkey(
+        _ target: HotkeyConflictOwner.Target,
+        clearQuicklink: @MainActor (UUID) -> Void = { QuicklinkStore.shared.clearHotkey(id: $0) },
+        clearPaletteHotkey: @MainActor () -> Void = { CommandPaletteService.shared.setHotkey(nil) }
+    ) {
+        switch target {
+        case .builtin(let item):
+            setBuiltinHotkey(item, hotkey: nil)
+        case .appShortcut(let id):
+            updateAppShortcut(id: id, hotkey: nil)
+        case .quicklink(let id):
+            clearQuicklink(id)
+        case .commandPalette:
+            clearPaletteHotkey()
+        }
+    }
+
+    /// Create a new app shortcut row from an app picker selection.
     ///
     /// The new row is inserted with `isEnabled: false` and `keyCode: -1` as a sentinel,
     /// meaning it appears in the submenu but doesn't fire until the user records a hotkey
-    /// via `updateAppShortcut(id:hotkey:)` (which flips `isEnabled = true`).
-    /// Returns the new row's id, or nil before the store is bootstrapped.
+    /// via `updateAppShortcut(id:hotkey:)` (which flips `isEnabled = true`). If a row
+    /// already claims `appBundleID`, its id is returned instead of inserting a duplicate.
+    /// Returns the row's id, or nil before the store is bootstrapped.
     @discardableResult
     func addAppShortcut(appBundleID: String, appName: String, appPath: String) -> UUID? {
         guard let container = modelContainer else { return nil }
         let context = container.mainContext
+        if !appBundleID.isEmpty,
+           let existing = (try? context.fetch(FetchDescriptor<KeyBinding>()))?.first(where: {
+               $0.appBundleID == appBundleID
+           }) {
+            return existing.id
+        }
         let nextOrder = (appShortcutChildren.map(\.displayOrder).max() ?? 0) + 100
         let new = KeyBinding(
             keyCode: -1,

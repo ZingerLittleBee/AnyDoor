@@ -26,6 +26,8 @@ struct CommandPaletteOption: Identifiable {
     let actionLabel: String?
     /// Run in place and rebuild the current options instead of dismissing.
     let staysOpen: Bool
+    /// A Command-key equivalent moves this action into the fixed options footer.
+    let footerShortcut: String?
     /// When non-nil, committing this option asks for confirmation (showing this
     /// descriptor) before running `perform`.
     let confirmation: CommandPaletteConfirmation?
@@ -40,6 +42,7 @@ struct CommandPaletteOption: Identifiable {
         isChecked: Bool = false,
         actionLabel: String? = nil,
         staysOpen: Bool = false,
+        footerShortcut: String? = nil,
         confirmation: CommandPaletteConfirmation? = nil,
         perform: @escaping @MainActor () async -> Void
     ) {
@@ -51,6 +54,7 @@ struct CommandPaletteOption: Identifiable {
         self.isChecked = isChecked
         self.actionLabel = actionLabel
         self.staysOpen = staysOpen
+        self.footerShortcut = footerShortcut
         self.confirmation = confirmation
         self.perform = perform
     }

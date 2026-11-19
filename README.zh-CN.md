@@ -17,10 +17,6 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 窗口布局、`/etc/hosts` 配置、外接显示器亮度、Hyper Key，以及 Spotlight 风格的
 命令面板。
 
-## 演示
-
-<video src="https://github.com/user-attachments/assets/aba5cea1-c617-460f-90b1-5949578d1281" poster="https://github.com/ZingerLittleBee/AnyDoor/raw/main/landing/public/promo-zh.jpg" controls></video>
-
 ## 功能
 
 ### 应用快捷键

@@ -48,7 +48,7 @@ class NavigationToolsTests(unittest.TestCase):
         self.write("Sources/tracked.swift", "tracked needle\n")
         self.write("landing/src/page.ts", "landing needle\n")
         self.write("feed/src/index.ts", "feed needle\n")
-        self.write("video/src/intro.ts", "video needle\n")
+        self.write("tooling/packages/api/src/index.ts", "tooling needle\n")
         subprocess.run(["git", "add", "Sources/tracked.swift"], cwd=self.root, check=True, capture_output=True)
 
         current = self.run_script("search.py", "needle")
@@ -58,7 +58,7 @@ class NavigationToolsTests(unittest.TestCase):
         self.assertIn("docs/guide.md:1:", current.stdout)
         self.assertIn("landing/src/page.ts:1:", current.stdout)
         self.assertIn("feed/src/index.ts:1:", current.stdout)
-        self.assertIn("video/src/intro.ts:1:", current.stdout)
+        self.assertIn("tooling/packages/api/src/index.ts:1:", current.stdout)
         for excluded in ("old.md:", "data.bin:", "dist/", "node_modules/", "ignored.swift:"):
             self.assertNotIn(excluded, current.stdout)
         historical = self.run_script("search.py", "needle", "--history")

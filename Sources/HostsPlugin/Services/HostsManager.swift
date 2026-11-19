@@ -502,6 +502,9 @@ final class HostsManager {
         if error as? HostsWriterError == .helperOutdated {
             return L(host, .hostsErrorHelperOutdated)
         }
+        if error as? HostsWriterError == .helperApprovalRequired {
+            return L(host, .hostsErrorHelperApprovalRequired)
+        }
         return String(describing: error)
     }
 }

@@ -7,6 +7,7 @@ import SwiftUI
 /// the plugin instance's host context so language switches apply without a relaunch.
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
+        case commandPaletteActionOpen = "commandPalette.action.open"
         case commandPaletteActionToggle = "commandPalette.action.toggle"
         case commandPaletteHostsActive = "commandPalette.hosts.active"
         case commandPaletteSectionHosts = "commandPalette.section.hosts"
@@ -26,6 +27,7 @@ enum L10n {
         case hostsErrorLiveReadFailed = "hosts.error.liveReadFailed"
         case hostsErrorLiveChanged = "hosts.error.liveChanged"
         case hostsErrorHelperOutdated = "hosts.error.helperOutdated"
+        case hostsErrorHelperApprovalRequired = "hosts.error.helperApprovalRequired"
         case hostsErrorUnsafeManagedBlock = "hosts.error.unsafeManagedBlock"
         case hostsErrorNoBackup = "hosts.error.noBackup"
         case hostsFieldName = "hosts.field.name"

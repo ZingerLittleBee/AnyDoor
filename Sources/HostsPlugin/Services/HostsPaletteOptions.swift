@@ -3,11 +3,12 @@ import PluginInterface
 
 /// Pure builder for the Hosts drill-in options in the command palette: one
 /// checkable row per profile (checkmark = active, committing toggles), plus
-/// an always-present System Hosts row that opens the editor window. Takes
+/// a System Hosts row and a fixed Open Hosts Manager footer action. Takes
 /// already-fetched profiles so it unit tests without singletons.
 @MainActor
 enum HostsPaletteOptions {
     static let editOptionID = "hosts.edit"
+    static let openManagerOptionID = "hosts.openManager"
 
     static func optionID(for profile: HostProfile) -> String {
         "hosts.\(profile.id.uuidString)"
@@ -35,6 +36,14 @@ enum HostsPaletteOptions {
             subtitle: contentSummary(for: systemHosts),
             symbol: "cpu",
             actionLabel: L(host, .hostsActionEdit),
+            commit: .closeThenAct
+        ))
+        options.append(PluginRowDescriptor(
+            id: openManagerOptionID,
+            title: L(host, .hostsManagerOpenHelp),
+            symbol: "macwindow",
+            actionLabel: L(host, .commandPaletteActionOpen),
+            footerShortcut: "o",
             commit: .closeThenAct
         ))
         return options

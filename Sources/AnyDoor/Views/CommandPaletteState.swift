@@ -102,12 +102,13 @@ final class CommandPaletteState {
         let parent: BuiltinItem?
         let optionsByID: [String: CommandPaletteOption]
         let entries: [PanelEntry]
+        let footerEntries: [PanelEntry]
 
         init(parentTitle: String, parent: BuiltinItem?, options: [CommandPaletteOption]) {
             self.parentTitle = parentTitle
             self.parent = parent
             self.optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
-            self.entries = options.enumerated().map { index, option in
+            let allEntries = options.enumerated().map { index, option in
                 PanelEntry.paletteRow(
                     source: .paletteOption(id: option.id),
                     displayOrder: Double(index),
@@ -116,16 +117,24 @@ final class CommandPaletteState {
                     symbol: option.symbol
                 )
             }
+            self.entries = zip(options, allEntries).compactMap { option, entry in
+                option.footerShortcut == nil ? entry : nil
+            }
+            self.footerEntries = zip(options, allEntries).compactMap { option, entry in
+                option.footerShortcut != nil ? entry : nil
+            }
         }
 
         /// Options carry `@MainActor` perform closures, so equality compares
         /// their presentation, including state changes on otherwise identical rows.
         static func == (lhs: OptionsLevel, rhs: OptionsLevel) -> Bool {
             lhs.parentTitle == rhs.parentTitle && lhs.parent == rhs.parent && lhs.entries == rhs.entries
+                && lhs.footerEntries == rhs.footerEntries
                 && lhs.optionsByID.allSatisfy { id, option in
                     guard let other = rhs.optionsByID[id] else { return false }
                     return option.isChecked == other.isChecked && option.role == other.role
                         && option.actionLabel == other.actionLabel && option.staysOpen == other.staysOpen
+                        && option.footerShortcut == other.footerShortcut
                         && option.confirmation == other.confirmation
                 }
         }
@@ -217,6 +226,26 @@ final class CommandPaletteState {
             parent: parent,
             options: options
         )))
+    }
+
+    /// Page actions remain available even when the query matches no list rows.
+    var optionFooterEntries: [PanelEntry] {
+        guard case .options(let options) = level else { return [] }
+        return options.footerEntries
+    }
+
+    func optionFooterShortcut(
+        characters: String?,
+        modifiers: NSEvent.ModifierFlags,
+        isComposing: Bool
+    ) -> PanelEntry? {
+        guard !isConfirming, !isComposing,
+              modifiers.intersection([.command, .option, .control, .shift]) == .command,
+              let characters else { return nil }
+        return optionFooterEntries.first { entry in
+            guard case .paletteOption(let id) = entry.source else { return false }
+            return option(id: id)?.footerShortcut?.lowercased() == characters.lowercased()
+        }
     }
 
     /// Refresh from the action's resulting state, including a failed toggle's

@@ -130,6 +130,12 @@ final class QuicklinkStore {
         try? saveRebuildRefresh()
     }
 
+    func clearHotkey(id: UUID) {
+        guard let row = quicklink(id: id) else { return }
+        row.hotkeyDescriptor = nil
+        try? saveRebuildRefresh()
+    }
+
     func reorder(by newOrder: [UUID]) {
         var order: Double = 100
         for id in newOrder {
